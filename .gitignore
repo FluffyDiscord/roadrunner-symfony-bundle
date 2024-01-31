@@ -1,0 +1,4 @@
+/.phpunit.result.cache
+/vendor/
+/.idea/modules.xml
+/.idea/php-test-framework.xml
