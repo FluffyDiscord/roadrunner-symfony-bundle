@@ -7,6 +7,7 @@ use FluffyDiscord\RoadRunnerBundle\Worker\CentrifugoWorker;
 use FluffyDiscord\RoadRunnerBundle\Worker\HttpWorker as BundleHttpWorker;
 use FluffyDiscord\RoadRunnerBundle\Worker\WorkerRegistry;
 use RoadRunner\Centrifugo\CentrifugoWorker as RoadRunnerCentrifugoWorker;
+use RoadRunner\Centrifugo\CentrifugoWorkerInterface;
 use RoadRunner\Centrifugo\Request\RequestFactory;
 use RoadRunner\Centrifugo\RPCCentrifugoApi;
 use Sentry\State\HubInterface as SentryHubInterface;
@@ -31,7 +32,8 @@ return static function (ContainerConfigurator $container) {
     ;
 
     $services
-        ->set(RoadRunnerWorkerInterface::class, RoadRunnerWorker::class)
+        ->set(RoadRunnerWorkerInterface::class)
+        ->share(false)
         ->factory([RoadRunnerWorker::class, "createFromEnvironment"])
         ->args([
             service(EnvironmentInterface::class),
@@ -79,8 +81,20 @@ return static function (ContainerConfigurator $container) {
 
     // Centrifugo
     if (class_exists(RoadRunnerCentrifugoWorker::class)) {
-        $services->set(RequestFactory::class);
-        $services->set(RoadRunnerCentrifugoWorker::class);
+        $services
+            ->set(RequestFactory::class)
+            ->args([
+                service(RoadRunnerWorkerInterface::class),
+            ])
+        ;
+
+        $services
+            ->set(CentrifugoWorkerInterface::class, RoadRunnerCentrifugoWorker::class)
+            ->args([
+                service(RoadRunnerWorkerInterface::class),
+                service(RequestFactory::class),
+            ])
+        ;
 
         $services
             ->set(RPCCentrifugoApi::class)
@@ -92,7 +106,7 @@ return static function (ContainerConfigurator $container) {
             ->public()
             ->args([
                 service(HttpKernelInterface::class),
-                service(RoadRunnerCentrifugoWorker::class),
+                service(CentrifugoWorkerInterface::class),
                 service(EventDispatcherInterface::class),
                 service(SentryHubInterface::class)->nullOnInvalid(),
             ])
