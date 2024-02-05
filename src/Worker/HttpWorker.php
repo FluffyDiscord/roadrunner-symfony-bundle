@@ -41,12 +41,6 @@ readonly class HttpWorker implements WorkerInterface
             $this->psrFactory,
         );
 
-        // temporary until merged
-        // https://github.com/roadrunner-php/http/pull/21
-        $reflectionClass = new \ReflectionClass($worker);
-        $httpWorker = $reflectionClass->getProperty("httpWorker")->getValue($worker);
-        assert($httpWorker instanceof RoadRunner\Http\HttpWorker);
-
         try {
             while ($request = $worker->waitRequest()) {
                 $this->sentryHubInterface?->pushScope();
@@ -62,7 +56,7 @@ readonly class HttpWorker implements WorkerInterface
                         default => DefaultResponseWrapper::wrap($symfonyResponse),
                     };
 
-                    $httpWorker->respond(
+                    $worker->getHttpWorker()->respond(
                         $symfonyResponse->getStatusCode(),
                         $content,
                         $symfonyResponse->headers->all(),
