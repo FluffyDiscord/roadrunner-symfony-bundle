@@ -10,6 +10,7 @@ use FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\RefreshEvent;
 use FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\RPCEvent;
 use FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\SubRefreshEvent;
 use FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\SubscribeEvent;
+use FluffyDiscord\RoadRunnerBundle\Event\Worker\Centrifugo\AfterRespondEvent;
 use FluffyDiscord\RoadRunnerBundle\Exception\UnsupportedCentrifugoRequestTypeException;
 use RoadRunner\Centrifugal\API\DTO\V1\DisconnectResponse;
 use RoadRunner\Centrifugo\CentrifugoWorker as RoadRunnerCentrifugoWorker;
@@ -23,6 +24,7 @@ use RoadRunner\Centrifugo\Request;
 use Sentry\State\HubInterface as SentryHubInterface;
 use Symfony\Component\EventDispatcher\EventDispatcherInterface;
 use Symfony\Component\HttpKernel\HttpKernelInterface;
+use Symfony\Component\HttpKernel\TerminableInterface;
 
 readonly class CentrifugoWorker implements WorkerInterface
 {
@@ -69,6 +71,8 @@ readonly class CentrifugoWorker implements WorkerInterface
                 };
 
                 $request->respond($response);
+
+                $this->eventDispatcher->dispatch(new AfterRespondEvent());
 
             } catch (\Throwable $throwable) {
                 $this->sentryHubInterface?->captureException($throwable);
