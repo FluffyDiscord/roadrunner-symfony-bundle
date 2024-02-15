@@ -5,7 +5,7 @@ Yet another runtime for Symfony and [RoadRunner](https://roadrunner.dev/).
 ## Installation
 
 ```shell
-composer require fluffydiscord/roadrunner-symfony
+composer require fluffydiscord/roadrunner-symfony-bundle
 ```
 
 ## Usage
