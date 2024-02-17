@@ -23,13 +23,12 @@ use RoadRunner\Centrifugo\Payload\SubscribeResponse;
 use RoadRunner\Centrifugo\Request;
 use Sentry\State\HubInterface as SentryHubInterface;
 use Symfony\Component\EventDispatcher\EventDispatcherInterface;
-use Symfony\Component\HttpKernel\HttpKernelInterface;
-use Symfony\Component\HttpKernel\TerminableInterface;
+use Symfony\Component\HttpKernel\KernelInterface;
 
 readonly class CentrifugoWorker implements WorkerInterface
 {
     public function __construct(
-        private HttpKernelInterface        $kernel,
+        private KernelInterface            $kernel,
         private RoadRunnerCentrifugoWorker $worker,
         private EventDispatcherInterface   $eventDispatcher,
         private ?SentryHubInterface        $sentryHubInterface = null,

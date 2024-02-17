@@ -21,6 +21,7 @@ use Spiral\RoadRunner\WorkerInterface as RoadRunnerWorkerInterface;
 use Symfony\Bridge\PsrHttpMessage\HttpFoundationFactoryInterface;
 use Symfony\Component\EventDispatcher\EventDispatcherInterface;
 use Symfony\Component\HttpKernel\HttpKernelInterface;
+use Symfony\Component\HttpKernel\KernelInterface;
 
 return static function (ContainerConfigurator $container) {
     $services = $container->services();
@@ -99,13 +100,16 @@ return static function (ContainerConfigurator $container) {
         $services
             ->set(RPCCentrifugoApi::class)
             ->public()
+            ->args([
+                service(RPCInterface::class),
+            ])
         ;
 
         $services
             ->set(CentrifugoWorker::class)
             ->public()
             ->args([
-                service(HttpKernelInterface::class),
+                service(KernelInterface::class),
                 service(CentrifugoWorkerInterface::class),
                 service(EventDispatcherInterface::class),
                 service(SentryHubInterface::class)->nullOnInvalid(),
