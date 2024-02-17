@@ -20,7 +20,6 @@ use Spiral\RoadRunner\Worker as RoadRunnerWorker;
 use Spiral\RoadRunner\WorkerInterface as RoadRunnerWorkerInterface;
 use Symfony\Bridge\PsrHttpMessage\HttpFoundationFactoryInterface;
 use Symfony\Component\EventDispatcher\EventDispatcherInterface;
-use Symfony\Component\HttpKernel\HttpKernelInterface;
 use Symfony\Component\HttpKernel\KernelInterface;
 
 return static function (ContainerConfigurator $container) {
@@ -66,7 +65,7 @@ return static function (ContainerConfigurator $container) {
         ->set(BundleHttpWorker::class)
         ->public()
         ->args([
-            service(HttpKernelInterface::class),
+            service(KernelInterface::class),
             service(SentryHubInterface::class)->nullOnInvalid(),
             service(HttpFoundationFactoryInterface::class)->nullOnInvalid(),
         ])

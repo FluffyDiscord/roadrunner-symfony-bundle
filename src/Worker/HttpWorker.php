@@ -14,7 +14,7 @@ use Symfony\Bridge\PsrHttpMessage\HttpFoundationFactoryInterface;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\StreamedJsonResponse;
 use Symfony\Component\HttpFoundation\StreamedResponse;
-use Symfony\Component\HttpKernel\HttpKernelInterface;
+use Symfony\Component\HttpKernel\KernelInterface;
 use Symfony\Component\HttpKernel\TerminableInterface;
 
 readonly class HttpWorker implements WorkerInterface
@@ -23,7 +23,7 @@ readonly class HttpWorker implements WorkerInterface
     private Psr7\Factory\Psr17Factory $psrFactory;
 
     public function __construct(
-        private HttpKernelInterface     $kernel,
+        private KernelInterface         $kernel,
         private ?SentryHubInterface     $sentryHubInterface = null,
         ?HttpFoundationFactoryInterface $httpFoundationFactory = null,
     )
