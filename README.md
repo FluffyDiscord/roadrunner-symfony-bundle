@@ -20,6 +20,14 @@ server:
         APP_RUNTIME: FluffyDiscord\RoadRunnerBundle\Runtime\Runtime
 ```
 
+## Running behind a load balancer or a proxy
+If you want to use `REMOTE_ADDR` as trusted proxy, replace it with `0.0.0.0/0` instead 
+or else your trusted headers will not work.
+
+Symfony is using the `$_SERVER['REMOTE_ADDR']` to find out the proxy address,
+but in the context of RoadRunner, `$_SERVER` contains only environment 
+variables and the `REMOTE_ADDS` is missing.
+
 ## Response/file streaming
 
 Build-in full support for Symfony's `BinaryFileResponse` and `StreamedJsonResponse`. The `StreamedResponse` needs one little 
