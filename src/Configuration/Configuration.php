@@ -9,7 +9,7 @@ class Configuration implements ConfigurationInterface
 {
     public function getConfigTreeBuilder(): TreeBuilder
     {
-        $builder = new TreeBuilder("fluffydiscord_roadrunner");
+        $builder = new TreeBuilder("fluffy_discord_road_runner");
 
         $builder->getRootNode()
             ->children()

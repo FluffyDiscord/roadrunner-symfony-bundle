@@ -21,9 +21,9 @@ server:
 ```
 
 ## Configuration
-fluffydiscord_roadrunner.yaml
+fluffy_discord_road_runner.yaml
 ```yaml
-fluffydiscord_roadrunner:
+fluffy_discord_road_runner:
   http:
     # This decides when to boot the Symfony kernel.
     #
