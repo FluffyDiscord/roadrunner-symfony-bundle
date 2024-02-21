@@ -65,6 +65,7 @@ return static function (ContainerConfigurator $container) {
         ->set(BundleHttpWorker::class)
         ->public()
         ->args([
+            false,
             service(KernelInterface::class),
             service(SentryHubInterface::class)->nullOnInvalid(),
             service(HttpFoundationFactoryInterface::class)->nullOnInvalid(),
@@ -108,6 +109,7 @@ return static function (ContainerConfigurator $container) {
             ->set(CentrifugoWorker::class)
             ->public()
             ->args([
+                false,
                 service(KernelInterface::class),
                 service(CentrifugoWorkerInterface::class),
                 service(EventDispatcherInterface::class),

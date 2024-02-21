@@ -23,6 +23,7 @@ readonly class HttpWorker implements WorkerInterface
     private Psr7\Factory\Psr17Factory $psrFactory;
 
     public function __construct(
+        private bool                    $lazyBoot,
         private KernelInterface         $kernel,
         private ?SentryHubInterface     $sentryHubInterface = null,
         ?HttpFoundationFactoryInterface $httpFoundationFactory = null,
@@ -40,6 +41,10 @@ readonly class HttpWorker implements WorkerInterface
             $this->psrFactory,
             $this->psrFactory,
         );
+
+        if (!$this->lazyBoot) {
+            $this->kernel->boot();
+        }
 
         try {
             while ($request = $worker->waitRequest()) {

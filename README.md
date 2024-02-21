@@ -20,6 +20,27 @@ server:
         APP_RUNTIME: FluffyDiscord\RoadRunnerBundle\Runtime\Runtime
 ```
 
+## Configuration
+fluffy_discord_road_runner.yaml
+```yaml
+fluffy_discord_road_runner:
+  http:
+    # This decides when to boot the Symfony kernel.
+    #
+    # false (default) - before first request (worker takes some time to be ready, but app has consistent response times)
+    # true - once first request arrives (worker is ready immediately, but inconsistent response times due to kernel boot time spikes)
+    #
+    # If you use large amount of workers, you might want to set this to true or else the RR boot up might
+    # take a lot of time or just boot up using only a few "emergency" workers 
+    # and then use dynamic worker scaling as described here https://docs.roadrunner.dev/php-worker/scaling
+    lazy_boot: false
+    
+  centrifugo:
+    # See http section
+    lazy_boot: false
+```
+
+
 ## Running behind a load balancer or a proxy
 If you want to use `REMOTE_ADDR` as trusted proxy, replace it with `0.0.0.0/0` instead 
 or else your trusted headers will not work.
