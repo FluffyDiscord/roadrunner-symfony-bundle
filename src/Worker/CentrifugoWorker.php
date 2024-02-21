@@ -28,6 +28,7 @@ use Symfony\Component\HttpKernel\KernelInterface;
 readonly class CentrifugoWorker implements WorkerInterface
 {
     public function __construct(
+        private bool                       $lazyBoot,
         private KernelInterface            $kernel,
         private RoadRunnerCentrifugoWorker $worker,
         private EventDispatcherInterface   $eventDispatcher,
@@ -38,6 +39,10 @@ readonly class CentrifugoWorker implements WorkerInterface
 
     public function start(): void
     {
+        if (!$this->lazyBoot) {
+            $this->kernel->boot();
+        }
+
         while ($request = $this->worker->waitRequest()) {
             $this->sentryHubInterface?->pushScope();
 
