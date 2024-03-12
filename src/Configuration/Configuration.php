@@ -13,6 +13,13 @@ class Configuration implements ConfigurationInterface
 
         $builder->getRootNode()
             ->children()
+                ->arrayNode("kv")
+                    ->children()
+                        ->booleanNode("auto_register")->defaultTrue()->end()
+                        ->scalarNode("serializer")->defaultNull()->end()
+                        ->scalarNode("keypair_path")->defaultNull()->end()
+                    ->end()
+                ->end()
                 ->arrayNode("http")
                     ->children()
                         ->booleanNode("lazy_boot")->defaultFalse()->end()

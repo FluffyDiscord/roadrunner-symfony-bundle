@@ -24,7 +24,10 @@ server:
 fluffy_discord_road_runner.yaml
 ```yaml
 fluffy_discord_road_runner:
+  # https://docs.roadrunner.dev/http/http
   http:
+    # Optional
+    # -----------
     # This decides when to boot the Symfony kernel.
     #
     # false (default) - before first request (worker takes some time to be ready, but app has consistent response times)
@@ -35,9 +38,36 @@ fluffy_discord_road_runner:
     # and then use dynamic worker scaling as described here https://docs.roadrunner.dev/php-worker/scaling
     lazy_boot: false
     
+  # https://docs.roadrunner.dev/plugins/centrifuge
   centrifugo:
+    # Optional
+    # -----------
     # See http section
     lazy_boot: false
+    
+  # https://docs.roadrunner.dev/key-value/overview-kv
+  kv:
+    # Optional
+    # -----------
+    # If true (default), bundle will automatically register all "kv" adapters in your .rr.yaml.
+    # Registered services will have alias "cache.adapter.roadrunner.kv_NAME"
+    auto_register: true
+
+    # Optional
+    # -----------
+    # Which serializer should be used.
+    # By default, "IgbinarySerializer" will be used if "igbinary" php extension 
+    # is installed (recommended), otherwise "DefaultSerializer".
+    # You are free to create your own serialized if needed
+    serializer: Spiral\RoadRunner\KeyValue\Serializer\SerializerInterface
+
+    # Optional
+    # -----------
+    # Specify path to a keypair file for end-to-end encryption.
+    # "sodium" php extension is required
+    # https://docs.roadrunner.dev/key-value/overview-kv#end-to-end-value-encryption
+    keypair_path: null
+
 ```
 
 
@@ -75,7 +105,11 @@ class MyController
 
 ## Sentry
 
-Built in support for [Sentry](https://packagist.org/packages/sentry/sentry-symfony). Just install it as you normally do.
+Built in support for [Sentry](https://packagist.org/packages/sentry/sentry-symfony). Just install & configure it as you normally do.
+
+```shell
+composer require sentry/sentry-symfony
+```
 
 ## Centrifugo (websockets)
 

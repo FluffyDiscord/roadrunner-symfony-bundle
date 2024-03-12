@@ -44,6 +44,7 @@
     "sentry/sentry-symfony": "^4.13",
     "phpunit/phpunit": "^10.5",
     "symfony/mime": "^7.0",
-    "roadrunner-php/centrifugo": "^2.0"
+    "roadrunner-php/centrifugo": "^2.0",
+    "spiral/roadrunner-kv": "^4.0"
   }
 }
