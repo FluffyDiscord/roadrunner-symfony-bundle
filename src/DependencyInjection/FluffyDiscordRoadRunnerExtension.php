@@ -2,13 +2,13 @@
 
 namespace FluffyDiscord\RoadRunnerBundle\DependencyInjection;
 
+use FluffyDiscord\RoadRunnerBundle\Cache\KVCacheAdapter;
 use FluffyDiscord\RoadRunnerBundle\Configuration\Configuration;
 use FluffyDiscord\RoadRunnerBundle\Exception\CacheAutoRegisterException;
 use FluffyDiscord\RoadRunnerBundle\Exception\InvalidRPCConfigurationException;
-use FluffyDiscord\RoadRunnerBundle\Factory\RPCFactory;
 use FluffyDiscord\RoadRunnerBundle\Worker\CentrifugoWorker;
 use FluffyDiscord\RoadRunnerBundle\Worker\HttpWorker;
-use Spiral\RoadRunner\Environment;
+use Spiral\Goridge\RPC\RPCInterface;
 use Symfony\Component\Config\FileLocator;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\Extension\Extension;
@@ -33,16 +33,33 @@ class FluffyDiscordRoadRunnerExtension extends Extension
             $definition->replaceArgument(0, $config["centrifugo"]["lazy_boot"]);
         }
 
-        if (isset($config["kv"]["auto_register"]) && $config["kv"]["auto_register"]) {
+        if (!isset($config["kv"]["auto_register"]) || $config["kv"]["auto_register"]) {
             try {
-                // TODO: check if it's possible to pull up factory definition for RPCInterface::class from container and use that instead of hardcoded stuff
-                $rpc = RPCFactory::fromEnvironment(Environment::fromGlobals());
+                $rpc = $container->get(RPCInterface::class);
             } catch (InvalidRPCConfigurationException $invalidRPCConfigurationException) {
                 throw new CacheAutoRegisterException($invalidRPCConfigurationException->getMessage(), previous: $invalidRPCConfigurationException);
             }
 
-            $rrConfig = $rpc->call("rpc.Config", null);
-            // TODO: check config structure and register services
+            try {
+                $rrConfig = json_decode(base64_decode($rpc->call("rpc.Config", null)), true, 512, JSON_THROW_ON_ERROR);
+            } catch (\JsonException $jsonException) {
+                throw new CacheAutoRegisterException($jsonException->getMessage(), previous: $jsonException);
+            }
+
+            foreach (array_keys($rrConfig["kv"] ?? []) as $name) {
+                $container
+                    ->register("cache.adapter.rr_kv.{$name}", KVCacheAdapter::class)
+                    ->setFactory([KVCacheAdapter::class, "create"])
+                    ->setArguments([
+                        "", // namespace, dummy
+                        $container->getDefinition(RPCInterface::class),
+                        $name,
+                        $container->getParameter("kernel.project_dir"),
+                        $config["kv"]["serializer"] ?? null,
+                        $config["kv"]["keypair_path"] ?? null,
+                    ])
+                ;
+            }
         }
     }
 }

@@ -37,20 +37,20 @@ fluffy_discord_road_runner:
     # take a lot of time or just boot up using only a few "emergency" workers 
     # and then use dynamic worker scaling as described here https://docs.roadrunner.dev/php-worker/scaling
     lazy_boot: false
-    
+
   # https://docs.roadrunner.dev/plugins/centrifuge
   centrifugo:
     # Optional
     # -----------
     # See http section
     lazy_boot: false
-    
+
   # https://docs.roadrunner.dev/key-value/overview-kv
   kv:
     # Optional
     # -----------
     # If true (default), bundle will automatically register all "kv" adapters in your .rr.yaml.
-    # Registered services will have alias "cache.adapter.roadrunner.kv_NAME"
+    # Registered services will have alias "cache.adapter.rr_kv.NAME"
     auto_register: true
 
     # Optional
@@ -58,15 +58,16 @@ fluffy_discord_road_runner:
     # Which serializer should be used.
     # By default, "IgbinarySerializer" will be used if "igbinary" php extension 
     # is installed (recommended), otherwise "DefaultSerializer".
-    # You are free to create your own serialized if needed
-    serializer: Spiral\RoadRunner\KeyValue\Serializer\SerializerInterface
+    # You are free to create your own serializer, it needs to implement
+    # Spiral\RoadRunner\KeyValue\Serializer\SerializerInterface
+    serializer: null
 
     # Optional
     # -----------
-    # Specify path to a keypair file for end-to-end encryption.
-    # "sodium" php extension is required
+    # Specify relative path from "kernel.project_dir" to a keypair file 
+    # for end-to-end encryption. "sodium" php extension is required. 
     # https://docs.roadrunner.dev/key-value/overview-kv#end-to-end-value-encryption
-    keypair_path: null
+    keypair_path: bin/keypair.key
 
 ```
 
