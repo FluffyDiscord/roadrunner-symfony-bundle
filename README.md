@@ -10,18 +10,27 @@ composer require fluffydiscord/roadrunner-symfony-bundle
 
 ## Usage
 
-Define the environment variable `APP_RUNTIME` in `.rr.yaml`
+Define the environment variable `APP_RUNTIME` in `.rr.yaml` and set up `rpc` plugin:
 
-```
-// .rr.yaml
+`.rr.yaml`
+```yaml
 server:
-    ...
     env:
         APP_RUNTIME: FluffyDiscord\RoadRunnerBundle\Runtime\Runtime
+
+rpc:
+    listen: tcp://127.0.0.1:6001
+```
+
+Don't forget to add the `RR_RPC` to your `.env`:
+
+```dotenv
+RR_RPC=tcp://127.0.0.1:6001
 ```
 
 ## Configuration
-fluffy_discord_road_runner.yaml
+
+`fluffy_discord_road_runner.yaml`
 ```yaml
 fluffy_discord_road_runner:
   # https://docs.roadrunner.dev/http/http
@@ -50,7 +59,7 @@ fluffy_discord_road_runner:
     # Optional
     # -----------
     # If true (default), bundle will automatically register all "kv" adapters in your .rr.yaml.
-    # Registered services will have alias "cache.adapter.rr_kv.NAME"
+    # Registered services have alias "cache.adapter.rr_kv.NAME"
     auto_register: true
 
     # Optional
