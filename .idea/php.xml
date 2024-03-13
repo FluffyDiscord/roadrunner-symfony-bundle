@@ -110,6 +110,8 @@
       <path value="$PROJECT_DIR$/vendor/roadrunner-php/roadrunner-api-dto" />
       <path value="$PROJECT_DIR$/vendor/roadrunner-php/centrifugo" />
       <path value="$PROJECT_DIR$/vendor/google/protobuf" />
+      <path value="$PROJECT_DIR$/vendor/psr/simple-cache" />
+      <path value="$PROJECT_DIR$/vendor/spiral/roadrunner-kv" />
     </include_path>
   </component>
   <component name="PhpProjectSharedConfiguration" php_language_level="8.2" />
