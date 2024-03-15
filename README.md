@@ -33,6 +33,12 @@ RR_RPC=tcp://127.0.0.1:6001
 `fluffy_discord_road_runner.yaml`
 ```yaml
 fluffy_discord_road_runner:
+  # Optional
+  # Specify relative path from "kernel.project_dir" to your RoadRunner config file
+  # if you want to run cache:warmup without having your RoadRunner running in background,
+  # e.g. when building Docker images. Default is ".rr.yaml"
+  rr_config_path: ".rr.yaml"
+    
   # https://docs.roadrunner.dev/http/http
   http:
     # Optional
