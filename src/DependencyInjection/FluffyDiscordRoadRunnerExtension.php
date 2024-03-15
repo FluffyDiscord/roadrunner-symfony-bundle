@@ -61,6 +61,12 @@ class FluffyDiscordRoadRunnerExtension extends Extension
             $rpc = $container->get(RPCInterface::class);
         } catch (InvalidRPCConfigurationException $invalidRPCConfigurationException) {
             throw new CacheAutoRegisterException($invalidRPCConfigurationException->getMessage(), previous: $invalidRPCConfigurationException);
+        }
+
+        try {
+            return json_decode(base64_decode($rpc->call("rpc.Config", null)), true, 512, JSON_THROW_ON_ERROR);
+        } catch (\JsonException $jsonException) {
+            throw new CacheAutoRegisterException($jsonException->getMessage(), previous: $jsonException);
         } catch (RelayException $relayException) {
             if ($config["rr_config_path"] !== null) {
                 $rrConfigPathname = $container->getParameter("kernel.project_dir") . "/" . $config["rr_config_path"];
@@ -77,12 +83,6 @@ class FluffyDiscordRoadRunnerExtension extends Extension
             }
 
             throw new CacheAutoRegisterException('Error connecting to RPC service. Is RoadRunner running? Optionally set "rr_config_path" in bundle\'s config.', previous: $relayException);
-        }
-
-        try {
-            return json_decode(base64_decode($rpc->call("rpc.Config", null)), true, 512, JSON_THROW_ON_ERROR);
-        } catch (\JsonException $jsonException) {
-            throw new CacheAutoRegisterException($jsonException->getMessage(), previous: $jsonException);
         }
     }
 }
