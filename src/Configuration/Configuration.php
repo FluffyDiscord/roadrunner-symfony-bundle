@@ -13,6 +13,7 @@ class Configuration implements ConfigurationInterface
 
         $builder->getRootNode()
             ->children()
+                ->scalarNode("rr_config_path")->defaultValue(".rr.yaml")->end()
                 ->arrayNode("kv")
                     ->children()
                         ->booleanNode("auto_register")->defaultTrue()->end()
