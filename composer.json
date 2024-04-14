@@ -12,15 +12,15 @@
   "require": {
     "php": ">=8.2",
     "nyholm/psr7": "^1.8",
-    "spiral/roadrunner": "^2023.3",
+    "spiral/roadrunner": "^v2024.1",
     "symfony/dependency-injection": "^7.0",
     "symfony/http-kernel": "^7.0",
     "symfony/psr-http-message-bridge": "^7.0",
     "symfony/runtime": "^7.0",
     "symfony/framework-bundle": "^7.0",
-    "spiral/roadrunner-worker": "^3.4",
-    "spiral/roadrunner-http": "^3.4",
-    "spiral/roadrunner-cli": "^2.6"
+    "spiral/roadrunner-worker": "^v3.5",
+    "spiral/roadrunner-http": "^v3.5",
+    "spiral/roadrunner-cli": "^v2.6"
   },
   "minimum-stability": "dev",
   "prefer-stable": true,
@@ -44,7 +44,7 @@
     "sentry/sentry-symfony": "^4.13",
     "phpunit/phpunit": "^10.5",
     "symfony/mime": "^7.0",
-    "roadrunner-php/centrifugo": "^2.0",
-    "spiral/roadrunner-kv": "^4.0"
+    "roadrunner-php/centrifugo": "^v2.1",
+    "spiral/roadrunner-kv": "^v4.1"
   }
 }
