@@ -4,6 +4,7 @@ namespace FluffyDiscord\RoadRunnerBundle\Factory;
 
 use Spiral\RoadRunner\Http\Exception\StreamStoppedException;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
+use Symfony\Component\HttpFoundation\Request;
 
 /**
  * Basically a copy of BinaryFileResponse->sendContent()
@@ -11,8 +12,10 @@ use Symfony\Component\HttpFoundation\BinaryFileResponse;
  */
 class BinaryFileResponseWrapper
 {
-    public static function wrap(BinaryFileResponse $response): \Generator
+    public static function wrap(BinaryFileResponse $response, Request $request): \Generator
     {
+        $response->prepare($request);
+
         $reflectionClass = new \ReflectionClass($response);
         $maxlen = $reflectionClass->getProperty("maxlen")->getValue($response);
         $offset = $reflectionClass->getProperty("offset")->getValue($response);
