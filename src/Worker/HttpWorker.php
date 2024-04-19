@@ -57,7 +57,7 @@ readonly class HttpWorker implements WorkerInterface
                     $content = match (true) {
                         $symfonyResponse instanceof StreamedJsonResponse => StreamedJsonResponseWrapper::wrap($symfonyResponse),
                         $symfonyResponse instanceof StreamedResponse => StreamedResponseWrapper::wrap($symfonyResponse),
-                        $symfonyResponse instanceof BinaryFileResponse => BinaryFileResponseWrapper::wrap($symfonyResponse),
+                        $symfonyResponse instanceof BinaryFileResponse => BinaryFileResponseWrapper::wrap($symfonyResponse, $symfonyRequest),
                         default => DefaultResponseWrapper::wrap($symfonyResponse),
                     };
 
