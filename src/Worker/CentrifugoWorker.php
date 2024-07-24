@@ -66,17 +66,21 @@ readonly class CentrifugoWorker implements WorkerInterface
                 $processedEvent = $this->eventDispatcher->dispatch($event);
                 assert($processedEvent instanceof CentrifugoEventInterface);
 
-                $response = $processedEvent->getResponse() ?? match (true) {
-                    $event instanceof ConnectEvent => new ConnectResponse(),
-                    $event instanceof PublishEvent => new PublishResponse(),
-                    $event instanceof RefreshEvent => new RefreshResponse(),
-                    $event instanceof SubRefreshEvent => new SubRefreshResponse(),
-                    $event instanceof SubscribeEvent => new SubscribeResponse(),
-                    $event instanceof RPCEvent => new RPCResponse(),
-                    default => throw new NoCentrifugoResponseProvidedException(sprintf('No supported default response found for request type: %s', $request::class)),
-                };
+                if($event instanceof InvalidEvent) {
+                    $request->disconnect(1000, "Invalid request");
+                } else {
+                    $response = $processedEvent->getResponse() ?? match (true) {
+                        $event instanceof ConnectEvent => new ConnectResponse(),
+                        $event instanceof PublishEvent => new PublishResponse(),
+                        $event instanceof RefreshEvent => new RefreshResponse(),
+                        $event instanceof SubRefreshEvent => new SubRefreshResponse(),
+                        $event instanceof SubscribeEvent => new SubscribeResponse(),
+                        $event instanceof RPCEvent => new RPCResponse(),
+                        default => throw new NoCentrifugoResponseProvidedException(sprintf('No supported default response found for request type: %s', $request::class)),
+                    };
 
-                $request->respond($response);
+                    $request->respond($response);
+                }
 
                 $this->eventDispatcher->dispatch(new AfterRespondEvent());
 
