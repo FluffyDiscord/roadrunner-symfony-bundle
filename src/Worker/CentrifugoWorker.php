@@ -15,6 +15,7 @@ use FluffyDiscord\RoadRunnerBundle\Exception\UnsupportedCentrifugoRequestTypeExc
 use RoadRunner\Centrifugal\API\DTO\V1\DisconnectResponse;
 use RoadRunner\Centrifugo\CentrifugoWorker as RoadRunnerCentrifugoWorker;
 use RoadRunner\Centrifugo\Payload\ConnectResponse;
+use RoadRunner\Centrifugo\Payload\Disconnect;
 use RoadRunner\Centrifugo\Payload\PublishResponse;
 use RoadRunner\Centrifugo\Payload\RefreshResponse;
 use RoadRunner\Centrifugo\Payload\RPCResponse;
@@ -71,7 +72,7 @@ readonly class CentrifugoWorker implements WorkerInterface
                     $event instanceof SubRefreshEvent => new SubRefreshResponse(),
                     $event instanceof SubscribeEvent => new SubscribeResponse(),
                     $event instanceof RPCEvent => new RPCResponse(),
-                    default => new DisconnectResponse(),
+                    default => new Disconnect(1000, "No response"),
                 };
 
                 $request->respond($response);
