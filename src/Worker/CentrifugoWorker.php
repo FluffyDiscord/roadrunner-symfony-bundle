@@ -11,6 +11,7 @@ use FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\RPCEvent;
 use FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\SubRefreshEvent;
 use FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\SubscribeEvent;
 use FluffyDiscord\RoadRunnerBundle\Event\Worker\Centrifugo\AfterRespondEvent;
+use FluffyDiscord\RoadRunnerBundle\Exception\NoCentrifugoResponseProvidedException;
 use FluffyDiscord\RoadRunnerBundle\Exception\UnsupportedCentrifugoRequestTypeException;
 use RoadRunner\Centrifugal\API\DTO\V1\DisconnectResponse;
 use RoadRunner\Centrifugo\CentrifugoWorker as RoadRunnerCentrifugoWorker;
@@ -72,7 +73,7 @@ readonly class CentrifugoWorker implements WorkerInterface
                     $event instanceof SubRefreshEvent => new SubRefreshResponse(),
                     $event instanceof SubscribeEvent => new SubscribeResponse(),
                     $event instanceof RPCEvent => new RPCResponse(),
-                    default => new Disconnect(1000, "No response"),
+                    default => throw new NoCentrifugoResponseProvidedException(sprintf('No supported default response found for request type: %s', $request::class)),
                 };
 
                 $request->respond($response);
