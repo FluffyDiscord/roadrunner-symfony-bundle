@@ -66,9 +66,7 @@ readonly class CentrifugoWorker implements WorkerInterface
                 $processedEvent = $this->eventDispatcher->dispatch($event);
                 assert($processedEvent instanceof CentrifugoEventInterface);
 
-                if($event instanceof InvalidEvent) {
-                    $request->disconnect(1000, "Invalid request");
-                } else {
+                if(!$event instanceof InvalidEvent) {
                     $response = $processedEvent->getResponse() ?? match (true) {
                         $event instanceof ConnectEvent => new ConnectResponse(),
                         $event instanceof PublishEvent => new PublishResponse(),
