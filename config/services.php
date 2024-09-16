@@ -20,6 +20,7 @@ use Spiral\RoadRunner\Worker as RoadRunnerWorker;
 use Spiral\RoadRunner\WorkerInterface as RoadRunnerWorkerInterface;
 use Symfony\Bridge\PsrHttpMessage\HttpFoundationFactoryInterface;
 use Symfony\Component\EventDispatcher\EventDispatcherInterface;
+use Symfony\Component\HttpFoundation\Session\Storage\MetadataBag;
 use Symfony\Component\HttpKernel\KernelInterface;
 
 return static function (ContainerConfigurator $container) {
@@ -77,6 +78,15 @@ return static function (ContainerConfigurator $container) {
         ->call("registerWorker", [
             Environment\Mode::MODE_HTTP,
             service(BundleHttpWorker::class),
+        ])
+    ;
+
+    // Worker sessions
+    $services
+        ->set("worker_session_factory_metadata_bag", MetadataBag::class)
+        ->args([
+            param("session.metadata.storage_key"),
+            param("session.metadata.update_threshold"),
         ])
     ;
 

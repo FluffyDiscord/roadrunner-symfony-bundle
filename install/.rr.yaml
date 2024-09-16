@@ -1,0 +1,36 @@
+######################################################################################
+#                       THIS IS SAMPLE OF THE CONFIGURATION                          #
+# IT'S NOT A DEFAULT CONFIGURATION, IT'S JUST A REFERENCE TO ALL OPTIONS AND PLUGINS #
+# MORE DOCS CAN BE FOUND HERE: <https://docs.roadrunner.dev/docs/general/config>     #
+######################################################################################
+
+# More info: https://docs.roadrunner.dev/docs/general/config
+
+version: "3"
+
+server:
+    command: "php public/index.php"
+    env:
+        -   APP_RUNTIME: FluffyDiscord\RoadRunnerBundle\Runtime\Runtime
+http:
+    address: 0.0.0.0:8080
+    pool:
+        debug: true # development only! https://docs.roadrunner.dev/docs/php-worker/pool#workers-pool-configuration
+    middleware: [ "gzip", "static" ]
+    static:
+        dir: "public"
+        forbid: [ ".php", ".htaccess" ]
+
+logs:
+    mode: development
+    channels:
+        http:
+            level: debug
+        server:
+            level: info
+            mode: raw
+        metrics:
+            level: debug
+
+rpc:
+    listen: tcp://127.0.0.1:6001
