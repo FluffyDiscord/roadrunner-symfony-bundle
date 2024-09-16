@@ -3,6 +3,7 @@
 namespace Symfony\Component\DependencyInjection\Loader\Configurator;
 
 use FluffyDiscord\RoadRunnerBundle\Factory\RPCFactory;
+use FluffyDiscord\RoadRunnerBundle\Session\WorkerSessionStorageFactory;
 use FluffyDiscord\RoadRunnerBundle\Worker\CentrifugoWorker;
 use FluffyDiscord\RoadRunnerBundle\Worker\HttpWorker as BundleHttpWorker;
 use FluffyDiscord\RoadRunnerBundle\Worker\WorkerRegistry;
@@ -20,6 +21,7 @@ use Spiral\RoadRunner\Worker as RoadRunnerWorker;
 use Spiral\RoadRunner\WorkerInterface as RoadRunnerWorkerInterface;
 use Symfony\Bridge\PsrHttpMessage\HttpFoundationFactoryInterface;
 use Symfony\Component\EventDispatcher\EventDispatcherInterface;
+use Symfony\Component\HttpFoundation\RequestStack;
 use Symfony\Component\HttpFoundation\Session\Storage\MetadataBag;
 use Symfony\Component\HttpKernel\KernelInterface;
 
@@ -81,12 +83,19 @@ return static function (ContainerConfigurator $container) {
         ])
     ;
 
-    // Worker sessions
+    // Worker sessions fix
     $services
-        ->set("worker_session_factory_metadata_bag", MetadataBag::class)
+        ->set(WorkerSessionStorageFactory::class)
         ->args([
-            param("session.metadata.storage_key"),
-            param("session.metadata.update_threshold"),
+            param('session.storage.options'),
+            service('session.handler'),
+            inline_service(MetadataBag::class)
+                ->args([
+                    param('session.metadata.storage_key'),
+                    param('session.metadata.update_threshold'),
+                ]),
+            service(RequestStack::class),
+            false,
         ])
     ;
 
