@@ -2,6 +2,7 @@
 
 namespace FluffyDiscord\RoadRunnerBundle\Worker;
 
+use FluffyDiscord\RoadRunnerBundle\Event\Worker\WorkerBootingEvent;
 use FluffyDiscord\RoadRunnerBundle\Factory\BinaryFileResponseWrapper;
 use FluffyDiscord\RoadRunnerBundle\Factory\DefaultResponseWrapper;
 use FluffyDiscord\RoadRunnerBundle\Factory\StreamedJsonResponseWrapper;
@@ -11,7 +12,9 @@ use Sentry\State\HubInterface as SentryHubInterface;
 use Spiral\RoadRunner;
 use Symfony\Bridge\PsrHttpMessage\Factory\HttpFoundationFactory;
 use Symfony\Bridge\PsrHttpMessage\HttpFoundationFactoryInterface;
+use Symfony\Component\EventDispatcher\EventDispatcherInterface;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
+use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\StreamedJsonResponse;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 use Symfony\Component\HttpKernel\KernelInterface;
@@ -23,10 +26,11 @@ readonly class HttpWorker implements WorkerInterface
     private Psr7\Factory\Psr17Factory $psrFactory;
 
     public function __construct(
-        private bool                    $lazyBoot,
-        private KernelInterface         $kernel,
-        private ?SentryHubInterface     $sentryHubInterface = null,
-        ?HttpFoundationFactoryInterface $httpFoundationFactory = null,
+        private bool                     $lazyBoot,
+        private KernelInterface          $kernel,
+        private EventDispatcherInterface $eventDispatcher,
+        private ?SentryHubInterface      $sentryHubInterface = null,
+        ?HttpFoundationFactoryInterface  $httpFoundationFactory = null,
     )
     {
         $this->psrFactory = new Psr7\Factory\Psr17Factory();
@@ -44,7 +48,18 @@ readonly class HttpWorker implements WorkerInterface
 
         if (!$this->lazyBoot) {
             $this->kernel->boot();
+
+            // Initialize routing and other lazy services that Symfony has.
+            // Reduces first real request response time more than 50%.
+            $this->kernel->handle(new Request());
+
+            // Preload reflections, up to 2ms savings for each, YMMW
+            new \ReflectionClass(StreamedJsonResponse::class);
+            new \ReflectionClass(StreamedResponse::class);
+            new \ReflectionClass(BinaryFileResponse::class);
         }
+
+        $this->eventDispatcher->dispatch(new WorkerBootingEvent());
 
         try {
             while ($request = $worker->waitRequest()) {

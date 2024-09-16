@@ -11,6 +11,7 @@ use FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\RPCEvent;
 use FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\SubRefreshEvent;
 use FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\SubscribeEvent;
 use FluffyDiscord\RoadRunnerBundle\Event\Worker\Centrifugo\AfterRespondEvent;
+use FluffyDiscord\RoadRunnerBundle\Event\Worker\WorkerBootingEvent;
 use FluffyDiscord\RoadRunnerBundle\Exception\NoCentrifugoResponseProvidedException;
 use FluffyDiscord\RoadRunnerBundle\Exception\UnsupportedCentrifugoRequestTypeException;
 use RoadRunner\Centrifugal\API\DTO\V1\DisconnectResponse;
@@ -44,6 +45,8 @@ readonly class CentrifugoWorker implements WorkerInterface
         if (!$this->lazyBoot) {
             $this->kernel->boot();
         }
+
+        $this->eventDispatcher->dispatch(new WorkerBootingEvent());
 
         while ($request = $this->worker->waitRequest()) {
             $this->sentryHubInterface?->pushScope();
