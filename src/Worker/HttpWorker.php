@@ -80,8 +80,9 @@ readonly class HttpWorker implements WorkerInterface
                     $this->sentryHubInterface?->popScope();
                 }
             }
-        } catch (\Throwable) {
+        } catch (\Throwable $throwable) {
             $worker->getWorker()->stop();
+            throw $throwable;
         }
     }
 }
