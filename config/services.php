@@ -70,6 +70,7 @@ return static function (ContainerConfigurator $container) {
         ->args([
             false,
             service(KernelInterface::class),
+            service(EventDispatcherInterface::class),
             service(SentryHubInterface::class)->nullOnInvalid(),
             service(HttpFoundationFactoryInterface::class)->nullOnInvalid(),
         ])
