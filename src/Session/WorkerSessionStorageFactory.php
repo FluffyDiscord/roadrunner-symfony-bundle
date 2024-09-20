@@ -11,41 +11,32 @@ use Symfony\Component\HttpFoundation\Session\Storage\SessionStorageFactoryInterf
 use Symfony\Component\HttpFoundation\Session\Storage\SessionStorageInterface;
 use Symfony\Contracts\Service\ResetInterface;
 
-class WorkerSessionStorageFactory implements SessionStorageFactoryInterface, ResetInterface
+readonly class WorkerSessionStorageFactory implements SessionStorageFactoryInterface
 {
-    private ?WorkerSessionStorage $workerSessionStorage = null;
-
     public function __construct(
         #[Autowire(param: "session.storage.options")]
-        private readonly array                                       $options,
+        private array                                       $options,
 
         #[Autowire(service: "session.handler")]
-        private readonly AbstractProxy|\SessionHandlerInterface|null $handler,
+        private AbstractProxy|\SessionHandlerInterface|null $handler,
 
         #[Autowire(service: "worker_session_factory_metadata_bag")]
-        private readonly ?MetadataBag                                $metaBag,
+        private ?MetadataBag                                $metaBag,
 
-        private readonly RequestStack                                $requestStack,
-        private readonly bool                                        $secure = false,
+        private RequestStack                                $requestStack,
+        private bool                                        $secure = false,
     )
     {
     }
 
     public function createStorage(?Request $request): SessionStorageInterface
     {
-        if ($this->workerSessionStorage === null) {
-            $this->workerSessionStorage = new WorkerSessionStorage($this->options, $this->handler, $this->metaBag, $this->requestStack);
-        }
+        $workerSessionStorage = new WorkerSessionStorage($this->options, $this->handler, $this->metaBag, $this->requestStack);
 
         if ($this->secure && $request?->isSecure()) {
-            $this->workerSessionStorage->setOptions(['cookie_secure' => true]);
+            $workerSessionStorage->setOptions(['cookie_secure' => true]);
         }
 
-        return $this->workerSessionStorage;
-    }
-
-    public function reset(): void
-    {
-        $this->workerSessionStorage?->reset();
+        return $workerSessionStorage;
     }
 }
