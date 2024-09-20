@@ -51,12 +51,14 @@ readonly class HttpWorker implements WorkerInterface
 
             // Initialize routing and other lazy services that Symfony has.
             // Reduces first real request response time more than 50%.
-            $this->kernel->handle(new Request());
+            if ($_ENV["APP_ENV"] === "prod") {
+                $this->kernel->handle(new Request());
 
-            // Preload reflections, up to 2ms savings for each, YMMW
-            new \ReflectionClass(StreamedJsonResponse::class);
-            new \ReflectionClass(StreamedResponse::class);
-            new \ReflectionClass(BinaryFileResponse::class);
+                // Preload reflections, up to 2ms savings for each, YMMW
+                new \ReflectionClass(StreamedJsonResponse::class);
+                new \ReflectionClass(StreamedResponse::class);
+                new \ReflectionClass(BinaryFileResponse::class);
+            }
         }
 
         $this->eventDispatcher->dispatch(new WorkerBootingEvent());
