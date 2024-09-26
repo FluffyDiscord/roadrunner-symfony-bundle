@@ -7,6 +7,7 @@ use FluffyDiscord\RoadRunnerBundle\Factory\BinaryFileResponseWrapper;
 use FluffyDiscord\RoadRunnerBundle\Factory\DefaultResponseWrapper;
 use FluffyDiscord\RoadRunnerBundle\Factory\StreamedJsonResponseWrapper;
 use FluffyDiscord\RoadRunnerBundle\Factory\StreamedResponseWrapper;
+use GuzzleHttp\Promise\PromiseInterface;
 use Nyholm\Psr7;
 use Sentry\State\HubInterface as SentryHubInterface;
 use Spiral\RoadRunner;
@@ -93,7 +94,13 @@ readonly class HttpWorker implements WorkerInterface
                     $worker->getWorker()->error((string)$throwable);
 
                 } finally {
-                    $this->sentryHubInterface?->getClient()?->flush()->wait(false);
+                    $result = $this->sentryHubInterface?->getClient()?->flush();
+
+                    // sentry v4 compatibility
+                    if($result instanceof PromiseInterface) {
+                        $result->wait(false);
+                    }
+
                     $this->sentryHubInterface?->popScope();
                 }
             }

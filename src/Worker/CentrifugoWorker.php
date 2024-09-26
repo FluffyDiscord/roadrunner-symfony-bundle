@@ -14,6 +14,7 @@ use FluffyDiscord\RoadRunnerBundle\Event\Worker\Centrifugo\AfterRespondEvent;
 use FluffyDiscord\RoadRunnerBundle\Event\Worker\WorkerBootingEvent;
 use FluffyDiscord\RoadRunnerBundle\Exception\NoCentrifugoResponseProvidedException;
 use FluffyDiscord\RoadRunnerBundle\Exception\UnsupportedCentrifugoRequestTypeException;
+use GuzzleHttp\Promise\PromiseInterface;
 use RoadRunner\Centrifugal\API\DTO\V1\DisconnectResponse;
 use RoadRunner\Centrifugo\CentrifugoWorker as RoadRunnerCentrifugoWorker;
 use RoadRunner\Centrifugo\Payload\ConnectResponse;
@@ -89,7 +90,12 @@ readonly class CentrifugoWorker implements WorkerInterface
                 $this->sentryHubInterface?->captureException($throwable);
                 $request->error(500, (string)$throwable);
             } finally {
-                $this->sentryHubInterface?->getClient()?->flush()->wait(false);
+                $result = $this->sentryHubInterface?->getClient()?->flush();
+
+                // sentry v4 compatibility
+                if($result instanceof PromiseInterface) {
+                    $result->wait(false);
+                }
                 $this->sentryHubInterface?->popScope();
             }
         }
