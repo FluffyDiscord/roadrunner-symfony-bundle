@@ -32,7 +32,10 @@ class BinaryFileResponseTest extends TestCase
         $symfonyResponse->sendContent();
         $content = ob_get_clean();
 
-        $this->assertSame($expected, $content);
+        $this->assertSame(
+            hash("xxh128", $expected),
+            hash("xxh128", $content),
+        );
     }
 
     #[DataProvider("responseProvider")]
@@ -52,7 +55,10 @@ class BinaryFileResponseTest extends TestCase
         $symfonyResponse->sendContent();
         $content = ob_get_clean();
 
-        $this->assertSame(substr($expected, $rangeStart, $rangeEnd - ($rangeStart - 1)), $content);
+        $this->assertSame(
+            hash("xxh128", substr($expected, $rangeStart, $rangeEnd - ($rangeStart - 1))),
+            hash("xxh128", $content),
+        );
     }
 
     #[DataProvider("responseProvider")]
@@ -63,7 +69,10 @@ class BinaryFileResponseTest extends TestCase
     {
         $content = implode("", iterator_to_array(BinaryFileResponseWrapper::wrap($symfonyResponse, Request::createFromGlobals())));
 
-        $this->assertSame($expected, $content);
+        $this->assertSame(
+            hash("xxh128", $expected),
+            hash("xxh128", $content),
+        );
     }
 
     #[DataProvider("responseProvider")]
@@ -79,8 +88,11 @@ class BinaryFileResponseTest extends TestCase
 
         $symfonyResponse->prepare($request);
 
-        $content = implode("", iterator_to_array(BinaryFileResponseWrapper::wrap($symfonyResponse, Request::createFromGlobals())));
+        $content = implode("", iterator_to_array(BinaryFileResponseWrapper::wrap($symfonyResponse, $request)));
 
-        $this->assertSame(substr($expected, $rangeStart, $rangeEnd - ($rangeStart - 1)), $content);
+        $this->assertSame(
+            hash("xxh128", substr($expected, $rangeStart, $rangeEnd - ($rangeStart - 1))),
+            hash("xxh128", $content),
+        );
     }
 }

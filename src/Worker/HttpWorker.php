@@ -7,7 +7,7 @@ use FluffyDiscord\RoadRunnerBundle\Factory\BinaryFileResponseWrapper;
 use FluffyDiscord\RoadRunnerBundle\Factory\DefaultResponseWrapper;
 use FluffyDiscord\RoadRunnerBundle\Factory\StreamedJsonResponseWrapper;
 use FluffyDiscord\RoadRunnerBundle\Factory\StreamedResponseWrapper;
-use GuzzleHttp\Promise\PromiseInterface;
+use GuzzleHttp\Promise\PromiseInterface; // Sentry v4 compatibility
 use Nyholm\Psr7;
 use Sentry\State\HubInterface as SentryHubInterface;
 use Spiral\RoadRunner;
@@ -26,7 +26,10 @@ readonly class HttpWorker implements WorkerInterface
     private HttpFoundationFactoryInterface $httpFoundationFactory;
     private Psr7\Factory\Psr17Factory $psrFactory;
 
+    public const string DUMMY_REQUEST_ATTRIBUTE = "rr_dummy_request";
+
     public function __construct(
+        private bool                     $earlyRouterInitialization,
         private bool                     $lazyBoot,
         private KernelInterface          $kernel,
         private EventDispatcherInterface $eventDispatcher,
@@ -51,15 +54,15 @@ readonly class HttpWorker implements WorkerInterface
             $this->kernel->boot();
 
             // Initialize routing and other lazy services that Symfony has.
-            // Reduces first real request response time more than 50%.
-            if ($_ENV["APP_ENV"] === "prod") {
-                $this->kernel->handle(new Request());
-
-                // Preload reflections, up to 2ms savings for each, YMMW
-                new \ReflectionClass(StreamedJsonResponse::class);
-                new \ReflectionClass(StreamedResponse::class);
-                new \ReflectionClass(BinaryFileResponse::class);
+            // Reduces first real request response time more than 50%, YMMW
+            if ($this->earlyRouterInitialization) {
+                $this->kernel->handle(new Request(attributes: [self::DUMMY_REQUEST_ATTRIBUTE => true]));
             }
+
+            // Preload reflections, up to 2ms savings for each, YMMW
+            new \ReflectionClass(StreamedJsonResponse::class);
+            new \ReflectionClass(StreamedResponse::class);
+            new \ReflectionClass(BinaryFileResponse::class);
         }
 
         $this->eventDispatcher->dispatch(new WorkerBootingEvent());

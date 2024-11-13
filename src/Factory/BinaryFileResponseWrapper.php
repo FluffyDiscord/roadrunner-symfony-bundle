@@ -17,6 +17,7 @@ class BinaryFileResponseWrapper
         $response->prepare($request);
 
         $reflectionClass = new \ReflectionClass($response);
+        $tempFileObject = $reflectionClass->getProperty("tempFileObject")->getValue($response);
         $maxlen = $reflectionClass->getProperty("maxlen")->getValue($response);
         $offset = $reflectionClass->getProperty("offset")->getValue($response);
         $chunkSize = $reflectionClass->getProperty("chunkSize")->getValue($response);
@@ -27,25 +28,29 @@ class BinaryFileResponseWrapper
                 return;
             }
 
-            $file = fopen($response->getFile()->getPathname(), "r");
-
-            if ($maxlen === 0) {
+            if (0 === $maxlen) {
                 return;
             }
 
-            if ($offset !== 0) {
-                fseek($file, $offset);
+            if ($tempFileObject) {
+                $file = $tempFileObject;
+                $file->rewind();
+            } else {
+                $file = new \SplFileObject($response->getFile()->getPathname(), 'r');
+            }
+
+            if (0 !== $offset) {
+                $file->fseek($offset);
             }
 
             $length = $maxlen;
-            while ($length && !feof($file)) {
+            while ($length && !$file->eof()) {
                 $read = $length > $chunkSize || 0 > $length ? $chunkSize : $length;
 
-                if (false === $data = fread($file, $read)) {
+                if (false === $data = $file->fread($read)) {
                     break;
                 }
-
-                while ("" !== $data) {
+                while ('' !== $data) {
                     try {
                         yield $data;
                     } catch (StreamStoppedException) {
@@ -58,10 +63,8 @@ class BinaryFileResponseWrapper
                     $data = substr($data, $read);
                 }
             }
-
-            fclose($file);
         } finally {
-            if ($deleteFileAfterSend && is_file($response->getFile()->getPathname())) {
+            if (null === $tempFileObject && $deleteFileAfterSend && is_file($response->getFile()->getPathname())) {
                 unlink($response->getFile()->getPathname());
             }
         }

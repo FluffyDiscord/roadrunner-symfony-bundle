@@ -10,16 +10,16 @@
     }
   ],
   "require": {
-    "php": ">=8.2",
+    "php": ">=8.3",
     "nyholm/psr7": "^1.8",
-    "spiral/roadrunner": "^v2024.1",
-    "symfony/dependency-injection": "^7.0",
-    "symfony/http-kernel": "^7.0",
-    "symfony/psr-http-message-bridge": "^7.0",
-    "symfony/runtime": "^7.0",
-    "symfony/framework-bundle": "^7.0",
-    "spiral/roadrunner-worker": "^v3.5",
-    "spiral/roadrunner-http": "^v3.5",
+    "spiral/roadrunner": "^v2024",
+    "symfony/dependency-injection": "^7.1",
+    "symfony/http-kernel": "^7.1",
+    "symfony/psr-http-message-bridge": "^7.1",
+    "symfony/runtime": "^7.1",
+    "symfony/framework-bundle": "^7.1",
+    "spiral/roadrunner-worker": "^v3",
+    "spiral/roadrunner-http": "^v3",
     "spiral/roadrunner-cli": "^v2.6"
   },
   "minimum-stability": "dev",
@@ -41,10 +41,10 @@
     }
   },
   "require-dev": {
-    "sentry/sentry-symfony": "^4.13",
+    "sentry/sentry-symfony": "^5",
     "phpunit/phpunit": "^10.5",
-    "symfony/mime": "^7.0",
-    "roadrunner-php/centrifugo": "^v2.1",
-    "spiral/roadrunner-kv": "^v4.1"
+    "symfony/mime": "^7.1",
+    "roadrunner-php/centrifugo": "^v2",
+    "spiral/roadrunner-kv": "^v4"
   }
 }
