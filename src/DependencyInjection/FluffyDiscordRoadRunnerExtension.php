@@ -25,9 +25,16 @@ class FluffyDiscordRoadRunnerExtension extends Extension
 
         $config = $this->processConfiguration(new Configuration(), $configs);
 
-        if (isset($config["http"]["lazy_boot"]) && $container->hasDefinition(HttpWorker::class)) {
-            $definition = $container->getDefinition(HttpWorker::class);
-            $definition->replaceArgument(0, $config["http"]["lazy_boot"]);
+        if ($container->hasDefinition(HttpWorker::class)) {
+            if (isset($config["http"]["early_router_initialization"])) {
+                $definition = $container->getDefinition(HttpWorker::class);
+                $definition->replaceArgument(0, $config["http"]["early_router_initialization"]);
+            }
+
+            if (isset($config["http"]["lazy_boot"])) {
+                $definition = $container->getDefinition(HttpWorker::class);
+                $definition->replaceArgument(1, $config["http"]["lazy_boot"]);
+            }
         }
 
         if (isset($config["centrifugo"]["lazy_boot"]) && $container->hasDefinition(CentrifugoWorker::class)) {

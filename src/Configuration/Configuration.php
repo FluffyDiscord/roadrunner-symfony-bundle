@@ -24,6 +24,7 @@ class Configuration implements ConfigurationInterface
                 ->arrayNode("http")
                     ->children()
                         ->booleanNode("lazy_boot")->defaultFalse()->end()
+                        ->booleanNode("early_router_initialization")->defaultTrue()->end()
                     ->end()
                 ->end()
                 ->arrayNode("centrifugo")

@@ -36,7 +36,10 @@ class StreamedJsonResponseTest extends TestCase
         $symfonyResponse->sendContent();
         $content = ob_get_clean();
 
-        $this->assertSame($expected, $content);
+        $this->assertSame(
+            hash("xxh128", $expected),
+            hash("xxh128", $content),
+        );
     }
 
     #[DataProvider("responseProvider")]
@@ -47,6 +50,9 @@ class StreamedJsonResponseTest extends TestCase
     {
         $content = implode("", iterator_to_array(StreamedJsonResponseWrapper::wrap($symfonyResponse)));
 
-        $this->assertSame($expected, $content);
+        $this->assertSame(
+            hash("xxh128", $expected),
+            hash("xxh128", $content),
+        );
     }
 }
