@@ -79,7 +79,7 @@ class BinaryFileResponseTest extends TestCase
 
         $symfonyResponse->prepare($request);
 
-        $content = implode("", iterator_to_array(BinaryFileResponseWrapper::wrap($symfonyResponse, Request::createFromGlobals())));
+        $content = implode("", iterator_to_array(BinaryFileResponseWrapper::wrap($symfonyResponse, $request)));
 
         $this->assertSame(substr($expected, $rangeStart, $rangeEnd - ($rangeStart - 1)), $content);
     }
