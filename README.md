@@ -121,11 +121,11 @@ class MyController
 
 ## Sessions
 
-Currently, Symfony might struggle with sessions in worker mode, like loosing logged user or the opposite,
+Currently, Symfony might sometimes struggle with sessions in worker mode, like loosing logged user or the opposite,
 leaking logged user session to another request due to missing globals (explained at the end).
 
 Bundle introduces `FluffyDiscord\RoadRunnerBundle\Session\WorkerSessionStorageFactory`, that handles native session correctly.
-This factory gets registered automatically by default if you are using `symfony/flex` (pending flex recipe PR). You can also register it manually, for example in `framework.yaml`:
+Register it manually if you happen to run into these issues, for example in `framework.yaml`:
 
 ```yaml
 framework:
