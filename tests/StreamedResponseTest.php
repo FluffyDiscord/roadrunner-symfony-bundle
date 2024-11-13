@@ -44,9 +44,15 @@ class StreamedResponseTest extends TestCase
         $content = ob_get_clean();
 
         if ($isGenerator) {
-            $this->assertSame("", $content);
+            $this->assertSame(
+                hash("xxh128", ""),
+                hash("xxh128", $content),
+            );
         } else {
-            $this->assertSame($expected, $content);
+            $this->assertSame(
+                hash("xxh128", $expected),
+                hash("xxh128", $content),
+            );
         }
     }
 
@@ -65,7 +71,10 @@ class StreamedResponseTest extends TestCase
 
         $content = implode("", iterator_to_array(StreamedResponseWrapper::wrap($symfonyResponse)));
 
-        $this->assertSame($expected, $content);
+        $this->assertSame(
+            hash("xxh128", $expected),
+            hash("xxh128", $content),
+        );
     }
 
     #[DataProvider("responseProvider")]
@@ -78,6 +87,9 @@ class StreamedResponseTest extends TestCase
         // did not wrap the response
         $content = implode("", iterator_to_array(StreamedResponseWrapper::wrap($symfonyResponse)));
 
-        $this->assertSame($expected, $content);
+        $this->assertSame(
+            hash("xxh128", $expected),
+            hash("xxh128", $content),
+        );
     }
 }
