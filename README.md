@@ -103,12 +103,14 @@ fluffy_discord_road_runner:
 
 
 ## Running behind a load balancer or a proxy
-If you want to use `REMOTE_ADDR` as trusted proxy, replace it with `0.0.0.0/0` instead 
+If you want to use `REMOTE_ADDR` as [trusted proxy](https://symfony.com/doc/current/deployment/proxies.html#solution-settrustedproxies), replace it with `private_ranges` instead 
 or else your trusted headers will not work.
 
 Symfony is using the `$_SERVER['REMOTE_ADDR']` to find out the proxy address,
 but in the context of RoadRunner, `$_SERVER` contains only environment 
 variables and the `REMOTE_ADDS` is missing.
+
+
 
 ## Response/file streaming
 
