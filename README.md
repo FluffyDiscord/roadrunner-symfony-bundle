@@ -219,9 +219,10 @@ Be aware that if you do not set any response, bundle will send `DisconnectRespon
 - It is no longer needed and might potentially bring issues to you like memory leaks.
 - Do not use/create local class/array caches in your services. Try to make them stateless or if they cannot be,
 add [ResetInterface](https://github.com/symfony/contracts/blob/main/Service/ResetInterface.php) to clean up before each request.
-- Symfony forms might leak data across requests due to local caching it uses. Make sure your form `defaultOptions` are stateless. 
-Do not store anything sensitive/important as it will be leaked in the following requests.
-- Simplify your `User` session serialization by taking advantage of `EquatableInterface` and custom de/serialization logic. 
+- Symfony forms might leak data across requests due to local caching it uses. Make sure your form `defaultOptions` are static/immutable. 
+Do not store anything dynamic as it will be cached and used in the following requests. Setting dynamic
+config values when creating the form type, eg. in controller, is fine.
+- Simplify your `User` session serialization by taking advantage of `EquatableInterface` and a custom de/serialization logic. 
 This will prevent errors because of detached Doctrine entities and, as a side bonus, will speed up loading user from sessions.
 ```php
 <?php
