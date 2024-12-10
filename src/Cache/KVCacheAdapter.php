@@ -2,6 +2,7 @@
 
 namespace FluffyDiscord\RoadRunnerBundle\Cache;
 
+use FluffyDiscord\RoadRunnerBundle\Exception\CacheAutoRegisterException;
 use FluffyDiscord\RoadRunnerBundle\Exception\SodiumKeypairException;
 use FluffyDiscord\RoadRunnerBundle\Exception\SodiumNotEnabledException;
 use Spiral\Goridge\RPC\RPCInterface;
@@ -10,6 +11,7 @@ use Spiral\RoadRunner\KeyValue\Serializer\DefaultSerializer;
 use Spiral\RoadRunner\KeyValue\Serializer\IgbinarySerializer;
 use Spiral\RoadRunner\KeyValue\Serializer\SodiumSerializer;
 use Symfony\Component\Cache\Adapter\Psr16Adapter;
+use Spiral\RoadRunner\KeyValue\Cache;
 
 class KVCacheAdapter extends Psr16Adapter
 {
@@ -22,6 +24,10 @@ class KVCacheAdapter extends Psr16Adapter
         ?string      $keypairPath,
     ): self
     {
+        if (!class_exists(Cache::class)) {
+            throw new CacheAutoRegisterException("Run 'composer require spiral/roadrunner-kv' to enable RoadRunner KV cache");
+        }
+
         $serializer = null;
         if ($serializerClass === null && function_exists("igbinary_serialize")) {
             $serializer = new IgbinarySerializer();
