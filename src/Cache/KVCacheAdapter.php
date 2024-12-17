@@ -24,10 +24,6 @@ class KVCacheAdapter extends Psr16Adapter
         ?string      $keypairPath,
     ): self
     {
-        if (!class_exists(Cache::class)) {
-            throw new CacheAutoRegisterException("Run 'composer require spiral/roadrunner-kv' to enable RoadRunner KV cache");
-        }
-
         $serializer = null;
         if ($serializerClass === null && function_exists("igbinary_serialize")) {
             $serializer = new IgbinarySerializer();

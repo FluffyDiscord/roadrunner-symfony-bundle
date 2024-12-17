@@ -10,6 +10,7 @@ use FluffyDiscord\RoadRunnerBundle\Worker\CentrifugoWorker;
 use FluffyDiscord\RoadRunnerBundle\Worker\HttpWorker;
 use Spiral\Goridge\Exception\RelayException;
 use Spiral\Goridge\RPC\RPCInterface;
+use Spiral\RoadRunner\KeyValue\Cache;
 use Symfony\Component\Config\FileLocator;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\Extension\Extension;
@@ -46,6 +47,10 @@ class FluffyDiscordRoadRunnerExtension extends Extension
             $rrConfig = $this->getRoadRunnerConfig($container, $config);
 
             foreach (array_keys($rrConfig["kv"] ?? []) as $name) {
+                if (!class_exists(Cache::class)) {
+                    throw new CacheAutoRegisterException("You are trying to auto register RoadRunner KV cache without installing the corresponding package. Run 'composer require spiral/roadrunner-kv' to install & enable RoadRunner KV cache");
+                }
+
                 $container
                     ->register("cache.adapter.rr_kv.{$name}", KVCacheAdapter::class)
                     ->setFactory([KVCacheAdapter::class, "create"])
