@@ -9,7 +9,6 @@ use Symfony\Component\HttpFoundation\Session\Storage\MetadataBag;
 use Symfony\Component\HttpFoundation\Session\Storage\Proxy\AbstractProxy;
 use Symfony\Component\HttpFoundation\Session\Storage\SessionStorageFactoryInterface;
 use Symfony\Component\HttpFoundation\Session\Storage\SessionStorageInterface;
-use Symfony\Contracts\Service\ResetInterface;
 
 readonly class WorkerSessionStorageFactory implements SessionStorageFactoryInterface
 {
@@ -24,19 +23,32 @@ readonly class WorkerSessionStorageFactory implements SessionStorageFactoryInter
         private ?MetadataBag                                $metaBag,
 
         private RequestStack                                $requestStack,
-        private bool                                        $secure = false,
+        private ?bool                                       $secure = null,
     )
     {
+        if ($this->secure !== null) {
+            trigger_deprecation("fluffydiscord/roadrunner-symfony-bundle", "3.2.0", 'Passing "$secure" in constructor is deprecated, use framework.session options instead');
+        }
     }
 
     public function createStorage(?Request $request): SessionStorageInterface
     {
         $workerSessionStorage = new WorkerSessionStorage($this->options, $this->handler, $this->metaBag, $this->requestStack);
 
-        if ($this->secure && $request?->isSecure()) {
+        if ($this->isSecure($request)) {
             $workerSessionStorage->setOptions(['cookie_secure' => true]);
         }
 
         return $workerSessionStorage;
+    }
+
+    private function isSecure(?Request $request): bool
+    {
+        $cookieSecure = $this->secure;
+        if ($cookieSecure === null) {
+            $cookieSecure = 'auto' === ($this->options['cookie_secure'] ?? null);
+        }
+
+        return $cookieSecure && $request?->isSecure();
     }
 }

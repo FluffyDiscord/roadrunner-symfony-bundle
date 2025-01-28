@@ -97,7 +97,7 @@ return static function (ContainerConfigurator $container) {
                     param('session.metadata.update_threshold'),
                 ]),
             service(RequestStack::class),
-            false,
+            null,
         ])
     ;
 
