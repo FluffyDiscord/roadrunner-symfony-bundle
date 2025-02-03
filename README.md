@@ -203,13 +203,9 @@ Be aware that if you do not set any response, bundle will send `DisconnectRespon
 
 ## Developing with Symfony and RoadRunner
 
-- If possible, stop using lazy loading in your services, inject services immediately.
-- It is no longer needed and might potentially bring issues to you like memory leaks.
-- Do not use/create local class/array caches in your services. Try to make them stateless or if they cannot be,
-add [ResetInterface](https://github.com/symfony/contracts/blob/main/Service/ResetInterface.php) to clean up before each request.
-- Symfony forms might leak data across requests due to local caching it uses. Make sure your form `defaultOptions` are static/immutable. 
-Do not store anything dynamic as it will be cached and used in the following requests. Setting dynamic
-config values when creating the form type, eg. in controller, is fine.
+- If possible, stop using lazy loading in your services, inject services immediately. Lazy loaded services might introduce memory leaks and make your services slower to initialize when requests arrive.
+- Do not use/create local class/array caches in your services, only if you know, what you are doing. Try to make them stateless or use [ResetInterface](https://github.com/symfony/contracts/blob/main/Service/ResetInterface.php) to clean up before each request, so state is not being shared.
+- Symfony forms might leak data across requests due to caching, see section bellow.
 - Simplify your `User` session serialization by taking advantage of `EquatableInterface` and a custom de/serialization logic. 
 This will prevent errors because of detached Doctrine entities and, as a side bonus, will speed up loading user from sessions.
 ```php
@@ -267,6 +263,50 @@ class User implements UserInterface, PasswordAuthenticatedUserInterface, Equatab
         ;
     }
 }
+```
+
+### OptionsResolver (Forms)
+
+Symfony caches **OptionsResolver::setDefaults()** calls,
+so they resolve only once for current worker when someone uses
+them for the first time.
+
+This may lead to sharing sensitive information across requests in the context of a single worker,
+if you do not use defaults correctly.
+
+Consider this Form, which has major flaw that will leak user email to subsequent requests
+that worker receives.
+```php
+class MyType extends AbstractType
+{
+    // your buildForm() and what not
+    // ...
+    
+    // invalid use of setDefaults()
+    public function configureOptions(OptionsResolver $resolver): void
+    {
+        $resolver->setDefaults([
+            // loads current user
+            // and reuses his email forever until worker restarts
+            // everyone, even in anonymous browser tabs or different sessions,
+            // will see their email 
+            "label" => $this->security->getUser()->getEmail(),
+        ]);
+    }
+}
+```
+
+You should really use only static/stateless default values
+and dynamic options should be passed when
+`OptionsResolver` is used, or form is being created, eg:
+
+```php
+// with this the user email will
+// stay within this single request
+// and won't be leaked to subsequent worker requests
+$correctForm = $this->createForm(MyType::class, options: [
+    "label" => $this->getUser()->getEmail(),
+]);
 ```
 
 ## Debugging (recommendations)
