@@ -3,7 +3,6 @@
 namespace Symfony\Component\DependencyInjection\Loader\Configurator;
 
 use FluffyDiscord\RoadRunnerBundle\Factory\RPCFactory;
-use FluffyDiscord\RoadRunnerBundle\Session\WorkerSessionStorageFactory;
 use FluffyDiscord\RoadRunnerBundle\Worker\CentrifugoWorker;
 use FluffyDiscord\RoadRunnerBundle\Worker\HttpWorker as BundleHttpWorker;
 use FluffyDiscord\RoadRunnerBundle\Worker\WorkerRegistry;
@@ -82,22 +81,6 @@ return static function (ContainerConfigurator $container) {
         ->call("registerWorker", [
             Environment\Mode::MODE_HTTP,
             service(BundleHttpWorker::class),
-        ])
-    ;
-
-    // Worker sessions fix
-    $services
-        ->set(WorkerSessionStorageFactory::class)
-        ->args([
-            param('session.storage.options'),
-            service('session.handler'),
-            inline_service(MetadataBag::class)
-                ->args([
-                    param('session.metadata.storage_key'),
-                    param('session.metadata.update_threshold'),
-                ]),
-            service(RequestStack::class),
-            null,
         ])
     ;
 
