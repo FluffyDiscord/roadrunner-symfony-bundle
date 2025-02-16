@@ -7,7 +7,7 @@ use FluffyDiscord\RoadRunnerBundle\Factory\BinaryFileResponseWrapper;
 use FluffyDiscord\RoadRunnerBundle\Factory\DefaultResponseWrapper;
 use FluffyDiscord\RoadRunnerBundle\Factory\StreamedJsonResponseWrapper;
 use FluffyDiscord\RoadRunnerBundle\Factory\StreamedResponseWrapper;
-use GuzzleHttp\Promise\PromiseInterface; // Sentry v4 compatibility
+use GuzzleHttp\Promise\PromiseInterface;
 use Nyholm\Psr7;
 use Sentry\State\HubInterface as SentryHubInterface;
 use Spiral\RoadRunner;
@@ -18,8 +18,11 @@ use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\StreamedJsonResponse;
 use Symfony\Component\HttpFoundation\StreamedResponse;
+use Symfony\Component\HttpKernel\Kernel;
 use Symfony\Component\HttpKernel\KernelInterface;
 use Symfony\Component\HttpKernel\TerminableInterface;
+
+// Sentry v4 compatibility
 
 class HttpWorker implements WorkerInterface
 {
@@ -60,7 +63,10 @@ class HttpWorker implements WorkerInterface
             }
 
             // Preload reflections, up to 2ms savings for each, YMMW
-            new \ReflectionClass(StreamedJsonResponse::class);
+            if (Kernel::MAJOR_VERSION >= 6) {
+                new \ReflectionClass(StreamedJsonResponse::class);
+            }
+
             new \ReflectionClass(StreamedResponse::class);
             new \ReflectionClass(BinaryFileResponse::class);
         }
@@ -100,7 +106,7 @@ class HttpWorker implements WorkerInterface
                     $result = $this->sentryHubInterface?->getClient()?->flush();
 
                     // sentry v4 compatibility
-                    if($result instanceof PromiseInterface) {
+                    if ($result instanceof PromiseInterface) {
                         $result->wait(false);
                     }
 
