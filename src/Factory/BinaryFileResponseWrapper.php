@@ -26,16 +26,21 @@ class BinaryFileResponseWrapper
 
         $maxlen = $reflectionClass->getProperty("maxlen")->getValue($response);
         $offset = $reflectionClass->getProperty("offset")->getValue($response);
-        $chunkSize = $reflectionClass->getProperty("chunkSize")->getValue($response);
+
+        $chunkSize = 16 * 1024;
+        if(Kernel::MAJOR_VERSION >= 6) {
+            $chunkSize = $reflectionClass->getProperty("chunkSize")->getValue($response);
+        }
+
         $deleteFileAfterSend = $reflectionClass->getProperty("deleteFileAfterSend")->getValue($response);
 
         try {
             if (!$response->isSuccessful()) {
-                return;
+                return yield "";
             }
 
             if (0 === $maxlen) {
-                return;
+                return yield "";
             }
 
             if ($tempFileObject) {
