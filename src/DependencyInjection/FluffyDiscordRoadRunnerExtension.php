@@ -43,7 +43,7 @@ class FluffyDiscordRoadRunnerExtension extends Extension
             $definition->replaceArgument(0, $config["centrifugo"]["lazy_boot"]);
         }
 
-        if (class_exists(Cache::class) && (!isset($config["kv"]["auto_register"]) || $config["kv"]["auto_register"])) {
+        if (class_exists(Cache::class) && (!isset($config["kv"]["auto_register"]) || $config["kv"]["auto_register"] === true)) {
             $rrConfig = $this->getRoadRunnerConfig($container, $config);
 
             foreach (array_keys($rrConfig["kv"] ?? []) as $name) {
