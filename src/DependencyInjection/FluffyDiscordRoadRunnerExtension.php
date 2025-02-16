@@ -43,14 +43,10 @@ class FluffyDiscordRoadRunnerExtension extends Extension
             $definition->replaceArgument(0, $config["centrifugo"]["lazy_boot"]);
         }
 
-        if (!isset($config["kv"]["auto_register"]) || $config["kv"]["auto_register"]) {
+        if (class_exists(Cache::class) && (!isset($config["kv"]["auto_register"]) || $config["kv"]["auto_register"])) {
             $rrConfig = $this->getRoadRunnerConfig($container, $config);
 
             foreach (array_keys($rrConfig["kv"] ?? []) as $name) {
-                if (!class_exists(Cache::class)) {
-                    throw new CacheAutoRegisterException("You are trying to auto register RoadRunner KV cache without installing the corresponding package. Run 'composer require spiral/roadrunner-kv' to install & enable RoadRunner KV cache");
-                }
-
                 $container
                     ->register("cache.adapter.rr_kv.{$name}", KVCacheAdapter::class)
                     ->setFactory([KVCacheAdapter::class, "create"])
