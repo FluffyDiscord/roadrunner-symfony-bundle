@@ -21,20 +21,20 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 use Symfony\Component\HttpKernel\KernelInterface;
 use Symfony\Component\HttpKernel\TerminableInterface;
 
-readonly class HttpWorker implements WorkerInterface
+class HttpWorker implements WorkerInterface
 {
     private HttpFoundationFactoryInterface $httpFoundationFactory;
     private Psr7\Factory\Psr17Factory $psrFactory;
 
-    public const string DUMMY_REQUEST_ATTRIBUTE = "rr_dummy_request";
+    public const DUMMY_REQUEST_ATTRIBUTE = "rr_dummy_request";
 
     public function __construct(
-        private bool                     $earlyRouterInitialization,
-        private bool                     $lazyBoot,
-        private KernelInterface          $kernel,
-        private EventDispatcherInterface $eventDispatcher,
-        private ?SentryHubInterface      $sentryHubInterface = null,
-        ?HttpFoundationFactoryInterface  $httpFoundationFactory = null,
+        private readonly bool                     $earlyRouterInitialization,
+        private readonly bool                     $lazyBoot,
+        private readonly KernelInterface          $kernel,
+        private readonly EventDispatcherInterface $eventDispatcher,
+        private readonly ?SentryHubInterface      $sentryHubInterface = null,
+        ?HttpFoundationFactoryInterface           $httpFoundationFactory = null,
     )
     {
         $this->psrFactory = new Psr7\Factory\Psr17Factory();
