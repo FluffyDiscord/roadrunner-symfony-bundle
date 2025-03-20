@@ -46,8 +46,8 @@ class Kernel extends BaseKernel
 }
 ```
 
-This allows your worker to respond to new requests quicker, because the default 
-behavior of Symfony's kernel is to reset your services before request was handled
+The default behavior of Symfony's kernel is to reset your services 
+before request is handled and slows down the initial reaction time.
 
 |    |  When new request arrives  |  Your app  |  After response was sent back  |
 | -- | ------------------------| ----------------| ----------------------- |
