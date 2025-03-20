@@ -3,6 +3,7 @@
 namespace FluffyDiscord\RoadRunnerBundle\Worker;
 
 use FluffyDiscord\RoadRunnerBundle\Event\Worker\WorkerBootingEvent;
+use FluffyDiscord\RoadRunnerBundle\Event\Worker\WorkerResponseSentEvent;
 use FluffyDiscord\RoadRunnerBundle\Factory\BinaryFileResponseWrapper;
 use FluffyDiscord\RoadRunnerBundle\Factory\DefaultResponseWrapper;
 use FluffyDiscord\RoadRunnerBundle\Factory\StreamedJsonResponseWrapper;
@@ -93,6 +94,8 @@ class HttpWorker implements WorkerInterface
                         $content,
                         $symfonyResponse->headers->all(),
                     );
+
+                    $this->eventDispatcher->dispatch(new WorkerResponseSentEvent());
 
                     if ($this->kernel instanceof TerminableInterface) {
                         $this->kernel->terminate($symfonyRequest, $symfonyResponse);

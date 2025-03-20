@@ -3,7 +3,6 @@
 namespace FluffyDiscord\RoadRunnerBundle\DependencyInjection;
 
 use FluffyDiscord\RoadRunnerBundle\Cache\KVCacheAdapter;
-use FluffyDiscord\RoadRunnerBundle\Configuration\Configuration;
 use FluffyDiscord\RoadRunnerBundle\Exception\CacheAutoRegisterException;
 use FluffyDiscord\RoadRunnerBundle\Exception\InvalidRPCConfigurationException;
 use FluffyDiscord\RoadRunnerBundle\Worker\CentrifugoWorker;

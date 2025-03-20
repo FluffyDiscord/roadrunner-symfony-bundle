@@ -2,6 +2,7 @@
 
 namespace Symfony\Component\DependencyInjection\Loader\Configurator;
 
+use FluffyDiscord\RoadRunnerBundle\EventListener\WorkerResponseSendEventListener;
 use FluffyDiscord\RoadRunnerBundle\Factory\RPCFactory;
 use FluffyDiscord\RoadRunnerBundle\Worker\CentrifugoWorker;
 use FluffyDiscord\RoadRunnerBundle\Worker\HttpWorker as BundleHttpWorker;
@@ -59,6 +60,15 @@ return static function (ContainerConfigurator $container) {
     $services
         ->set(WorkerRegistry::class)
         ->public()
+    ;
+
+    $services
+        ->set(WorkerResponseSendEventListener::class)
+        ->public()
+        ->args([
+            service("services_resetter"),
+        ])
+        ->tag("kernel.event_listener", ["priority" => -256])
     ;
 
     $services

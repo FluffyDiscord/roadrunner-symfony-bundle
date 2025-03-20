@@ -12,6 +12,8 @@ use FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\SubRefreshEvent;
 use FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\SubscribeEvent;
 use FluffyDiscord\RoadRunnerBundle\Event\Worker\Centrifugo\AfterRespondEvent;
 use FluffyDiscord\RoadRunnerBundle\Event\Worker\WorkerBootingEvent;
+use FluffyDiscord\RoadRunnerBundle\Event\Worker\WorkerRequestReceivedEvent;
+use FluffyDiscord\RoadRunnerBundle\Event\Worker\WorkerResponseSentEvent;
 use FluffyDiscord\RoadRunnerBundle\Exception\NoCentrifugoResponseProvidedException;
 use FluffyDiscord\RoadRunnerBundle\Exception\UnsupportedCentrifugoRequestTypeException;
 use GuzzleHttp\Promise\PromiseInterface; // Sentry v4 compatibility
@@ -51,7 +53,6 @@ class CentrifugoWorker implements WorkerInterface
             $this->sentryHubInterface?->pushScope();
 
             try {
-                // allow kernel to reset services
                 $this->kernel->boot();
 
                 $event = match (true) {
@@ -83,6 +84,7 @@ class CentrifugoWorker implements WorkerInterface
                 }
 
                 $this->eventDispatcher->dispatch(new AfterRespondEvent());
+                $this->eventDispatcher->dispatch(new WorkerResponseSentEvent());
 
             } catch (\Throwable $throwable) {
                 $this->sentryHubInterface?->captureException($throwable);
