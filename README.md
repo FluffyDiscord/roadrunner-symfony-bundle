@@ -46,6 +46,18 @@ class Kernel extends BaseKernel
 }
 ```
 
+This allows your worker to respond to new requests quicker, because the default 
+behavior of Symfony's kernel is to reset your services before request was handled
+
+|    |  When new request arrives  |  Your app  |  After response was sent back  |
+| -- | ------------------------| ----------------| ----------------------- |
+| Symfony | does a reset, if something fails here, request may be lost | waits for reset to be done, then handles your request |  |
+| RoadRunnerBundle |  | immediately handles your request | does a reset |  
+
+You might want to manually refresh Doctrine connections before each request is handled 
+you are using `Mysql`, `MariaDB` or other database that cannot handle long/persistent
+connection. For this, it's up to you to create event listener for `WorkerRequestReceivedEvent`
+
 ## Configuration
 
 `fluffy_discord_road_runner.yaml`
