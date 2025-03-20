@@ -3,6 +3,7 @@
 namespace FluffyDiscord\RoadRunnerBundle\Worker;
 
 use FluffyDiscord\RoadRunnerBundle\Event\Worker\WorkerBootingEvent;
+use FluffyDiscord\RoadRunnerBundle\Event\Worker\WorkerRequestReceivedEvent;
 use FluffyDiscord\RoadRunnerBundle\Event\Worker\WorkerResponseSentEvent;
 use FluffyDiscord\RoadRunnerBundle\Factory\BinaryFileResponseWrapper;
 use FluffyDiscord\RoadRunnerBundle\Factory\DefaultResponseWrapper;
@@ -79,6 +80,8 @@ class HttpWorker implements WorkerInterface
                 $this->sentryHubInterface?->pushScope();
 
                 try {
+                    $this->eventDispatcher->dispatch(new WorkerRequestReceivedEvent());
+
                     $symfonyRequest = $this->httpFoundationFactory->createRequest($request);
                     $symfonyResponse = $this->kernel->handle($symfonyRequest);
 

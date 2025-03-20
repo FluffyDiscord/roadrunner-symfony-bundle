@@ -53,6 +53,8 @@ class CentrifugoWorker implements WorkerInterface
             $this->sentryHubInterface?->pushScope();
 
             try {
+                $this->eventDispatcher->dispatch(new WorkerRequestReceivedEvent());
+
                 $this->kernel->boot();
 
                 $event = match (true) {
