@@ -65,7 +65,7 @@ return static function (ContainerConfigurator $container) {
         ->set(BundleHttpWorker::class)
         ->public()
         ->args([
-            $_ENV["APP_ENV"] === "prod",
+            true,
             false,
             service(KernelInterface::class),
             service(EventDispatcherInterface::class),
