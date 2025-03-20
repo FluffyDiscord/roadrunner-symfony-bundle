@@ -10,7 +10,7 @@ composer require fluffydiscord/roadrunner-symfony-bundle
 
 ## Usage
 
-Define the environment variable `APP_RUNTIME` in `.rr.yaml` and set up `rpc` plugin:
+1. Define the environment variable `APP_RUNTIME` in `.rr.yaml` and set up `rpc` plugin:
 
 `.rr.yaml`
 ```yaml
@@ -28,74 +28,103 @@ Don't forget to add the `RR_RPC` to your `.env`:
 RR_RPC=tcp://127.0.0.1:6001
 ```
 
+2. Replace `MicroKernelTrait` with `RoadRunnerMicroKernelTrait` in your `Kernel.php`:
+
+```diff
+<?php
+
+namespace App\Kernel;
+
+- use Symfony\Bundle\FrameworkBundle\Kernel\MicroKernelTrait;
++ use FluffyDiscord\RoadRunnerBundle\Kernel\RoadRunnerMicroKernelTrait;
+use Symfony\Component\HttpKernel\Kernel as BaseKernel;
+
+class Kernel extends BaseKernel
+{
+-    use MicroKernelTrait;
++    use RoadRunnerMicroKernelTrait;
+}
+```
+
 ## Configuration
 
 `fluffy_discord_road_runner.yaml`
 ```yaml
 fluffy_discord_road_runner:
-  # Optional
-  # Specify relative path from "kernel.project_dir" to your RoadRunner config file
-  # if you want to run cache:warmup without having your RoadRunner running in background,
-  # e.g. when building Docker images. Default is ".rr.yaml"
+  # Specify relative path from "kernel.project_dir"
+  # to your RoadRunner config file if you want to
+  # run cache:warmup without having your RoadRunner
+  # running in background, e.g. when building Docker images.
   rr_config_path: ".rr.yaml"
     
+  # Http worker
   # https://docs.roadrunner.dev/http/http
   http:
-    # Optional
-    # -----------
     # This decides when to boot the Symfony kernel.
     #
-    # false (default) - before first request (worker takes some time to be ready, but app has consistent response times)
-    # true - once first request arrives (worker is ready immediately, but inconsistent response times due to kernel boot time spikes)
+    # false (default) - before first request (worker takes some time
+    # to be ready, but app has consistent response times)
+    # true - once first request arrives (worker is ready immediately,
+    # but inconsistent response times due to kernel boot time spikes)
     #
-    # If you use large amount of workers, you might want to set this to true or else the RR boot up might
-    # take a lot of time or just boot up using only a few "emergency" workers 
-    # and then use dynamic worker scaling as described here https://docs.roadrunner.dev/php-worker/scaling
+    # If you use large amount of workers, you might want to set this
+    # to true or else the RR boot up might take a lot of time
+    # or just boot up using only a few "emergency" workers
+    # and then use dynamic worker scaling as described here
+    # https://docs.roadrunner.dev/php-worker/scaling
     lazy_boot: false
 
-    # Optional
-    # -----------
-    # This decides if Symfony routing should be preloaded when worker starts and boots Symfony kernel.
+    # This decides if Symfony routing should be preloaded
+    # when worker starts and boots Symfony kernel.
+    #
     # This option halves the initial request response time.
-    # (based on a project with over 400 routes and quite a lot of services, YMMW)
+    # (based on a project with over 400 routes
+    # and quite a lot of services, YMMW)
     #
-    # true (default in PROD) - sends one dummy (empty) HTTP request to the kernel to initialize routing and services around it
-    # false (default in DEV) - only when first worker request arrives, routing and services are loaded
+    # true - sends one dummy (empty) HTTP request
+    # for kernel to initialize routing and services around it
     #
-    # You might want to create a dummy "/" route for the route to "land",
-    # or listen to onKernelRequest events and look in the request for the attribute
+    # false - only when first request arrives
+    # routing and it's services are loaded
+    #
+    # You might want to create a dummy "/"
+    # route for the route to "land",
+    # or listen to onKernelRequest events
+    # and look in the request for the attribute
     # FluffyDiscord\RoadRunnerBundle\Worker\HttpWorker::DUMMY_REQUEST_ATTRIBUTE
-    # Set this to "false" if you have any issues and report them to me.
-    early_router_initialization: true
+    early_router_initialization: false
 
+  # Centrifugo (websockets)
+  # Will activate only when "roadrunner-php/centrifugo" is installed.
   # https://docs.roadrunner.dev/plugins/centrifuge
   centrifugo:
-    # Optional
-    # -----------
-    # See http section
+    # See http section,
+    # behaves the same way.
     lazy_boot: false
 
+  # Key-Value storage
+  # Will activate only when "spiral/roadrunner-kv" is installed.
   # https://docs.roadrunner.dev/key-value/overview-kv
   kv:
-    # Optional
-    # -----------
-    # If true (default), bundle will automatically register all "kv" adapters in your .rr.yaml.
+    # If true, bundle will automatically register
+    # all "kv" adapters in your .rr.yaml.
     # Registered services have alias "cache.adapter.rr_kv.NAME"
     auto_register: true
 
-    # Optional
-    # -----------
-    # Which serializer should be used.
-    # By default, "IgbinarySerializer" will be used if "igbinary" php extension 
-    # is installed (recommended), otherwise "DefaultSerializer".
-    # You are free to create your own serializer, it needs to implement
+    # Which data serializer should be used.
+    #
+    # By default, "IgbinarySerializer" will be used
+    # if "igbinary" php extension
+    # is installed, otherwise "DefaultSerializer".
+    #
+    # You are free to create your own serializer.
+    # It needs to implement
     # Spiral\RoadRunner\KeyValue\Serializer\SerializerInterface
     serializer: null
 
-    # Optional
-    # -----------
-    # Specify relative path from "kernel.project_dir" to a keypair file 
-    # for end-to-end encryption. "sodium" php extension is required. 
+    # Specify relative path from "kernel.project_dir"
+    # to a keypair file for end-to-end encryption.
+    # "sodium" php extension is required.
     # https://docs.roadrunner.dev/key-value/overview-kv#end-to-end-value-encryption
     keypair_path: bin/keypair.key
 

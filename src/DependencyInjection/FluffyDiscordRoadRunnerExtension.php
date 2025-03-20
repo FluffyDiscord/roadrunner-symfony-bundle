@@ -24,7 +24,8 @@ class FluffyDiscordRoadRunnerExtension extends Extension
         $loader = new PhpFileLoader($container, new FileLocator(__DIR__ . "/../../config"));
         $loader->load("services.php");
 
-        $config = $this->processConfiguration(new Configuration(), $configs);
+        $configuration = $this->getConfiguration([], $container);
+        $config = $this->processConfiguration($configuration, $configs);
 
         if ($container->hasDefinition(HttpWorker::class)) {
             if (isset($config["http"]["early_router_initialization"])) {
