@@ -20,7 +20,7 @@ class BinaryFileResponseWrapper
         $reflectionClass = new \ReflectionClass($response);
 
         $tempFileObject = null;
-        if(Kernel::MAJOR_VERSION >= 7) {
+        if(Kernel::MAJOR_VERSION >= 7 && Kernel::MINOR_VERSION >= 1) {
             $tempFileObject = $reflectionClass->getProperty("tempFileObject")->getValue($response);
         }
 
