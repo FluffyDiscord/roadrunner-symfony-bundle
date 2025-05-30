@@ -9,12 +9,15 @@ class WorkerResponseSendEventListener
 {
     public function __construct(
         private readonly ServicesResetter $serviceResetter,
+        private readonly bool             $isDebug,
     )
     {
     }
 
     public function __invoke(WorkerResponseSentEvent $event): void
     {
-        $this->serviceResetter->reset();
+        if (!$this->isDebug) {
+            $this->serviceResetter->reset();
+        }
     }
 }

@@ -67,6 +67,7 @@ return static function (ContainerConfigurator $container) {
         ->public()
         ->args([
             service("services_resetter"),
+            param("kernel.debug"),
         ])
         ->tag("kernel.event_listener", ["priority" => -256])
     ;
