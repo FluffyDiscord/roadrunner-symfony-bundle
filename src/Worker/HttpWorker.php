@@ -15,9 +15,11 @@ use Sentry\State\HubInterface as SentryHubInterface;
 use Spiral\RoadRunner;
 use Symfony\Bridge\PsrHttpMessage\Factory\HttpFoundationFactory;
 use Symfony\Bridge\PsrHttpMessage\HttpFoundationFactoryInterface;
+use Symfony\Component\DependencyInjection\Attribute\Autowire;
 use Symfony\Component\EventDispatcher\EventDispatcherInterface;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpFoundation\StreamedJsonResponse;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 use Symfony\Component\HttpKernel\Kernel;
@@ -38,6 +40,7 @@ class HttpWorker implements WorkerInterface
         private readonly bool                     $lazyBoot,
         private readonly KernelInterface          $kernel,
         private readonly EventDispatcherInterface $eventDispatcher,
+        private readonly bool                     $isProduction,
         private readonly ?SentryHubInterface      $sentryHubInterface = null,
         ?HttpFoundationFactoryInterface           $httpFoundationFactory = null,
     )
@@ -75,53 +78,64 @@ class HttpWorker implements WorkerInterface
 
         $this->eventDispatcher->dispatch(new WorkerBootingEvent());
 
-        try {
-            while ($request = $worker->waitRequest()) {
+        while (true) {
+            try {
+                $request = $worker->waitRequest();
+                if ($request === null) {
+                    break;
+                }
+            } catch (\Throwable $throwable) {
+                $worker->respond(new Psr7\Response(Response::HTTP_BAD_REQUEST));
+                continue;
+            }
+
+            try {
                 $this->sentryHubInterface?->pushScope();
 
-                try {
-                    $this->eventDispatcher->dispatch(new WorkerRequestReceivedEvent());
+                $this->eventDispatcher->dispatch(new WorkerRequestReceivedEvent());
 
-                    $symfonyRequest = $this->httpFoundationFactory->createRequest($request);
-                    $symfonyResponse = $this->kernel->handle($symfonyRequest);
+                $symfonyRequest = $this->httpFoundationFactory->createRequest($request);
+                $symfonyResponse = $this->kernel->handle($symfonyRequest);
 
-                    $content = match (true) {
-                        $symfonyResponse instanceof StreamedJsonResponse => StreamedJsonResponseWrapper::wrap($symfonyResponse),
-                        $symfonyResponse instanceof StreamedResponse => StreamedResponseWrapper::wrap($symfonyResponse),
-                        $symfonyResponse instanceof BinaryFileResponse => BinaryFileResponseWrapper::wrap($symfonyResponse, $symfonyRequest),
-                        default => DefaultResponseWrapper::wrap($symfonyResponse),
-                    };
+                $content = match (true) {
+                    $symfonyResponse instanceof StreamedJsonResponse => StreamedJsonResponseWrapper::wrap($symfonyResponse),
+                    $symfonyResponse instanceof StreamedResponse => StreamedResponseWrapper::wrap($symfonyResponse),
+                    $symfonyResponse instanceof BinaryFileResponse => BinaryFileResponseWrapper::wrap($symfonyResponse, $symfonyRequest),
+                    default => DefaultResponseWrapper::wrap($symfonyResponse),
+                };
 
-                    $worker->getHttpWorker()->respond(
-                        $symfonyResponse->getStatusCode(),
-                        $content,
-                        $symfonyResponse->headers->all(),
-                    );
+                $worker->getHttpWorker()->respond(
+                    $symfonyResponse->getStatusCode(),
+                    $content,
+                    $symfonyResponse->headers->all(),
+                );
 
-                    $this->eventDispatcher->dispatch(new WorkerResponseSentEvent());
+                $this->eventDispatcher->dispatch(new WorkerResponseSentEvent());
 
-                    if ($this->kernel instanceof TerminableInterface) {
-                        $this->kernel->terminate($symfonyRequest, $symfonyResponse);
-                    }
-
-                } catch (\Throwable $throwable) {
-                    $this->sentryHubInterface?->captureException($throwable);
-                    $worker->getWorker()->error((string)$throwable);
-
-                } finally {
-                    $result = $this->sentryHubInterface?->getClient()?->flush();
-
-                    // sentry v4 compatibility
-                    if ($result instanceof PromiseInterface) {
-                        $result->wait(false);
-                    }
-
-                    $this->sentryHubInterface?->popScope();
+                if ($this->kernel instanceof TerminableInterface) {
+                    $this->kernel->terminate($symfonyRequest, $symfonyResponse);
                 }
+            } catch (\Throwable $throwable) {
+                $this->sentryHubInterface?->captureException($throwable);
+
+                if($this->isProduction) {
+                    $worker->respond(new Psr7\Response(Response::HTTP_INTERNAL_SERVER_ERROR));
+                } else {
+                    $worker->respond(new Psr7\Response(Response::HTTP_INTERNAL_SERVER_ERROR, body: (string)$throwable));
+                }
+
+                $worker->getWorker()->error((string)$throwable);
+
+            } finally {
+                $result = $this->sentryHubInterface?->getClient()?->flush();
+
+                // sentry v4 compatibility
+                if ($result instanceof PromiseInterface) {
+                    $result->wait(false);
+                }
+
+                $this->sentryHubInterface?->popScope();
             }
-        } catch (\Throwable $throwable) {
-            $worker->getWorker()->stop();
-            throw $throwable;
         }
     }
 }
