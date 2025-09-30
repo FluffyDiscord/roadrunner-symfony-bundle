@@ -17,7 +17,7 @@ class BinaryFileResponseTestCase extends BaseTestCase
         return [
             "Whole and with range starting from zero"       => [new BinaryFileResponse($fileWithContent), file_get_contents($fileWithContent), 0, 6023],
             "Whole and with range starting from 4525 bytes" => [new BinaryFileResponse($fileWithContent), file_get_contents($fileWithContent), 4525, 14509],
-            "Empty file"                                    => [new BinaryFileResponse($emptyFile), file_get_contents($emptyFile), 0],
+            "Empty file"                                    => [new BinaryFileResponse($emptyFile), file_get_contents($emptyFile), 0, 0],
         ];
     }
 

@@ -12,7 +12,7 @@
   "require": {
     "php": ">=8.1",
     "nyholm/psr7": "^1.8",
-    "spiral/roadrunner": "^v2024",
+    "spiral/roadrunner": "^v2024 || ^v2025",
     "symfony/dependency-injection": "^7.0 || ^6.4 || ^5.4",
     "symfony/http-kernel": "^7.0 || ^6.4 || ^5.4",
     "symfony/psr-http-message-bridge": "^7.0 || ^6.4 || ^2.3",
@@ -21,7 +21,7 @@
     "symfony/event-dispatcher": "^7.0 || ^6.4 || ^5.4",
     "spiral/roadrunner-worker": "^v3",
     "spiral/roadrunner-http": "^v3",
-    "spiral/roadrunner-cli": "^v2.6"
+    "spiral/roadrunner-cli": "^v2"
   },
   "minimum-stability": "dev",
   "prefer-stable": true,
