@@ -21,7 +21,8 @@
     "symfony/event-dispatcher": "^7.0 || ^6.4 || ^5.4",
     "spiral/roadrunner-worker": "^v3",
     "spiral/roadrunner-http": "^v3",
-    "spiral/roadrunner-cli": "^v2"
+    "spiral/roadrunner-cli": "^v2",
+    "symfony/expression-language": "^7.3"
   },
   "minimum-stability": "dev",
   "prefer-stable": true,
