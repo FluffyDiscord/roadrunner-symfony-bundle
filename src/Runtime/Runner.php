@@ -6,11 +6,11 @@ use FluffyDiscord\RoadRunnerBundle\Worker\WorkerRegistry;
 use Symfony\Component\HttpKernel\KernelInterface;
 use Symfony\Component\Runtime\RunnerInterface;
 
-readonly class Runner implements RunnerInterface
+class Runner implements RunnerInterface
 {
     public function __construct(
-        private KernelInterface $kernel,
-        private string          $mode,
+        private readonly KernelInterface $kernel,
+        private readonly string          $mode,
     )
     {
     }

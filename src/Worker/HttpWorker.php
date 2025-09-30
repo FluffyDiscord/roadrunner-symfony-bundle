@@ -3,38 +3,46 @@
 namespace FluffyDiscord\RoadRunnerBundle\Worker;
 
 use FluffyDiscord\RoadRunnerBundle\Event\Worker\WorkerBootingEvent;
+use FluffyDiscord\RoadRunnerBundle\Event\Worker\WorkerRequestReceivedEvent;
+use FluffyDiscord\RoadRunnerBundle\Event\Worker\WorkerResponseSentEvent;
 use FluffyDiscord\RoadRunnerBundle\Factory\BinaryFileResponseWrapper;
 use FluffyDiscord\RoadRunnerBundle\Factory\DefaultResponseWrapper;
 use FluffyDiscord\RoadRunnerBundle\Factory\StreamedJsonResponseWrapper;
 use FluffyDiscord\RoadRunnerBundle\Factory\StreamedResponseWrapper;
-use GuzzleHttp\Promise\PromiseInterface; // Sentry v4 compatibility
+use GuzzleHttp\Promise\PromiseInterface;
 use Nyholm\Psr7;
 use Sentry\State\HubInterface as SentryHubInterface;
 use Spiral\RoadRunner;
 use Symfony\Bridge\PsrHttpMessage\Factory\HttpFoundationFactory;
 use Symfony\Bridge\PsrHttpMessage\HttpFoundationFactoryInterface;
+use Symfony\Component\DependencyInjection\Attribute\Autowire;
 use Symfony\Component\EventDispatcher\EventDispatcherInterface;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpFoundation\StreamedJsonResponse;
 use Symfony\Component\HttpFoundation\StreamedResponse;
+use Symfony\Component\HttpKernel\Kernel;
 use Symfony\Component\HttpKernel\KernelInterface;
 use Symfony\Component\HttpKernel\TerminableInterface;
 
-readonly class HttpWorker implements WorkerInterface
+// Sentry v4 compatibility
+
+class HttpWorker implements WorkerInterface
 {
     private HttpFoundationFactoryInterface $httpFoundationFactory;
     private Psr7\Factory\Psr17Factory $psrFactory;
 
-    public const string DUMMY_REQUEST_ATTRIBUTE = "rr_dummy_request";
+    public const DUMMY_REQUEST_ATTRIBUTE = "rr_dummy_request";
 
     public function __construct(
-        private bool                     $earlyRouterInitialization,
-        private bool                     $lazyBoot,
-        private KernelInterface          $kernel,
-        private EventDispatcherInterface $eventDispatcher,
-        private ?SentryHubInterface      $sentryHubInterface = null,
-        ?HttpFoundationFactoryInterface  $httpFoundationFactory = null,
+        private readonly bool                     $earlyRouterInitialization,
+        private readonly bool                     $lazyBoot,
+        private readonly KernelInterface          $kernel,
+        private readonly EventDispatcherInterface $eventDispatcher,
+        private readonly bool                     $isProduction,
+        private readonly ?SentryHubInterface      $sentryHubInterface = null,
+        ?HttpFoundationFactoryInterface           $httpFoundationFactory = null,
     )
     {
         $this->psrFactory = new Psr7\Factory\Psr17Factory();
@@ -60,56 +68,74 @@ readonly class HttpWorker implements WorkerInterface
             }
 
             // Preload reflections, up to 2ms savings for each, YMMW
-            new \ReflectionClass(StreamedJsonResponse::class);
+            if (Kernel::MAJOR_VERSION >= 6) {
+                new \ReflectionClass(StreamedJsonResponse::class);
+            }
+
             new \ReflectionClass(StreamedResponse::class);
             new \ReflectionClass(BinaryFileResponse::class);
         }
 
         $this->eventDispatcher->dispatch(new WorkerBootingEvent());
 
-        try {
-            while ($request = $worker->waitRequest()) {
+        while (true) {
+            try {
+                $request = $worker->waitRequest();
+                if ($request === null) {
+                    break;
+                }
+            } catch (\Throwable $throwable) {
+                $worker->respond(new Psr7\Response(Response::HTTP_BAD_REQUEST));
+                continue;
+            }
+
+            try {
                 $this->sentryHubInterface?->pushScope();
 
-                try {
-                    $symfonyRequest = $this->httpFoundationFactory->createRequest($request);
-                    $symfonyResponse = $this->kernel->handle($symfonyRequest);
+                $this->eventDispatcher->dispatch(new WorkerRequestReceivedEvent());
 
-                    $content = match (true) {
-                        $symfonyResponse instanceof StreamedJsonResponse => StreamedJsonResponseWrapper::wrap($symfonyResponse),
-                        $symfonyResponse instanceof StreamedResponse => StreamedResponseWrapper::wrap($symfonyResponse),
-                        $symfonyResponse instanceof BinaryFileResponse => BinaryFileResponseWrapper::wrap($symfonyResponse, $symfonyRequest),
-                        default => DefaultResponseWrapper::wrap($symfonyResponse),
-                    };
+                $symfonyRequest = $this->httpFoundationFactory->createRequest($request);
+                $symfonyResponse = $this->kernel->handle($symfonyRequest);
 
-                    $worker->getHttpWorker()->respond(
-                        $symfonyResponse->getStatusCode(),
-                        $content,
-                        $symfonyResponse->headers->all(),
-                    );
+                $content = match (true) {
+                    $symfonyResponse instanceof StreamedJsonResponse => StreamedJsonResponseWrapper::wrap($symfonyResponse),
+                    $symfonyResponse instanceof StreamedResponse => StreamedResponseWrapper::wrap($symfonyResponse),
+                    $symfonyResponse instanceof BinaryFileResponse => BinaryFileResponseWrapper::wrap($symfonyResponse, $symfonyRequest),
+                    default => DefaultResponseWrapper::wrap($symfonyResponse),
+                };
 
-                    if ($this->kernel instanceof TerminableInterface) {
-                        $this->kernel->terminate($symfonyRequest, $symfonyResponse);
-                    }
+                $worker->getHttpWorker()->respond(
+                    $symfonyResponse->getStatusCode(),
+                    $content,
+                    $symfonyResponse->headers->all(),
+                );
 
-                } catch (\Throwable $throwable) {
-                    $this->sentryHubInterface?->captureException($throwable);
-                    $worker->getWorker()->error((string)$throwable);
+                $this->eventDispatcher->dispatch(new WorkerResponseSentEvent());
 
-                } finally {
-                    $result = $this->sentryHubInterface?->getClient()?->flush();
-
-                    // sentry v4 compatibility
-                    if($result instanceof PromiseInterface) {
-                        $result->wait(false);
-                    }
-
-                    $this->sentryHubInterface?->popScope();
+                if ($this->kernel instanceof TerminableInterface) {
+                    $this->kernel->terminate($symfonyRequest, $symfonyResponse);
                 }
+            } catch (\Throwable $throwable) {
+                $this->sentryHubInterface?->captureException($throwable);
+
+                if($this->isProduction) {
+                    $worker->respond(new Psr7\Response(Response::HTTP_INTERNAL_SERVER_ERROR));
+                } else {
+                    $worker->respond(new Psr7\Response(Response::HTTP_INTERNAL_SERVER_ERROR, body: (string)$throwable));
+                }
+
+                $worker->getWorker()->error((string)$throwable);
+
+            } finally {
+                $result = $this->sentryHubInterface?->getClient()?->flush();
+
+                // sentry v4 compatibility
+                if ($result instanceof PromiseInterface) {
+                    $result->wait(false);
+                }
+
+                $this->sentryHubInterface?->popScope();
             }
-        } catch (\Throwable $throwable) {
-            $worker->getWorker()->stop();
-            throw $throwable;
         }
     }
 }

@@ -3,7 +3,6 @@
 namespace FluffyDiscord\RoadRunnerBundle\DependencyInjection;
 
 use FluffyDiscord\RoadRunnerBundle\Cache\KVCacheAdapter;
-use FluffyDiscord\RoadRunnerBundle\Configuration\Configuration;
 use FluffyDiscord\RoadRunnerBundle\Exception\CacheAutoRegisterException;
 use FluffyDiscord\RoadRunnerBundle\Exception\InvalidRPCConfigurationException;
 use FluffyDiscord\RoadRunnerBundle\Worker\CentrifugoWorker;
@@ -24,7 +23,8 @@ class FluffyDiscordRoadRunnerExtension extends Extension
         $loader = new PhpFileLoader($container, new FileLocator(__DIR__ . "/../../config"));
         $loader->load("services.php");
 
-        $config = $this->processConfiguration(new Configuration(), $configs);
+        $configuration = $this->getConfiguration([], $container);
+        $config = $this->processConfiguration($configuration, $configs);
 
         if ($container->hasDefinition(HttpWorker::class)) {
             if (isset($config["http"]["early_router_initialization"])) {
@@ -43,14 +43,10 @@ class FluffyDiscordRoadRunnerExtension extends Extension
             $definition->replaceArgument(0, $config["centrifugo"]["lazy_boot"]);
         }
 
-        if (!isset($config["kv"]["auto_register"]) || $config["kv"]["auto_register"]) {
+        if (class_exists(Cache::class) && (!isset($config["kv"]["auto_register"]) || $config["kv"]["auto_register"] === true)) {
             $rrConfig = $this->getRoadRunnerConfig($container, $config);
 
             foreach (array_keys($rrConfig["kv"] ?? []) as $name) {
-                if (!class_exists(Cache::class)) {
-                    throw new CacheAutoRegisterException("You are trying to auto register RoadRunner KV cache without installing the corresponding package. Run 'composer require spiral/roadrunner-kv' to install & enable RoadRunner KV cache");
-                }
-
                 $container
                     ->register("cache.adapter.rr_kv.{$name}", KVCacheAdapter::class)
                     ->setFactory([KVCacheAdapter::class, "create"])

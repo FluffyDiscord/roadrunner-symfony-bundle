@@ -10,7 +10,7 @@ composer require fluffydiscord/roadrunner-symfony-bundle
 
 ## Usage
 
-Define the environment variable `APP_RUNTIME` in `.rr.yaml` and set up `rpc` plugin:
+1. Define the environment variable `APP_RUNTIME` in `.rr.yaml` and set up `rpc` plugin:
 
 `.rr.yaml`
 ```yaml
@@ -28,74 +28,115 @@ Don't forget to add the `RR_RPC` to your `.env`:
 RR_RPC=tcp://127.0.0.1:6001
 ```
 
+2. Replace `MicroKernelTrait` with `RoadRunnerMicroKernelTrait` in your `Kernel.php`:
+
+```diff
+<?php
+
+namespace App\Kernel;
+
+- use Symfony\Bundle\FrameworkBundle\Kernel\MicroKernelTrait;
++ use FluffyDiscord\RoadRunnerBundle\Kernel\RoadRunnerMicroKernelTrait;
+use Symfony\Component\HttpKernel\Kernel as BaseKernel;
+
+class Kernel extends BaseKernel
+{
+-    use MicroKernelTrait;
++    use RoadRunnerMicroKernelTrait;
+}
+```
+
+The default behavior of Symfony's kernel is to reset your services 
+before request is handled and slows down the initial reaction time.
+
+|    |  When new request arrives  |  Your app  |  After response was sent back  |
+| -- | ------------------------| ----------------| ----------------------- |
+| Symfony | does a reset, if something fails here, request may be lost | waits for reset to be done, then handles your request |  |
+| RoadRunnerBundle |  | immediately handles your request | does a reset |  
+
+You might want to manually refresh Doctrine connections before each request is handled 
+you are using `Mysql`, `MariaDB` or other database that cannot handle long/persistent
+connection. For this, it's up to you to create event listener for `WorkerRequestReceivedEvent`
+
 ## Configuration
 
 `fluffy_discord_road_runner.yaml`
 ```yaml
 fluffy_discord_road_runner:
-  # Optional
-  # Specify relative path from "kernel.project_dir" to your RoadRunner config file
-  # if you want to run cache:warmup without having your RoadRunner running in background,
-  # e.g. when building Docker images. Default is ".rr.yaml"
+  # Specify relative path from "kernel.project_dir"
+  # to your RoadRunner config file if you want to
+  # run cache:warmup without having your RoadRunner
+  # running in background, e.g. when building Docker images.
   rr_config_path: ".rr.yaml"
     
+  # Http worker
   # https://docs.roadrunner.dev/http/http
   http:
-    # Optional
-    # -----------
     # This decides when to boot the Symfony kernel.
     #
-    # false (default) - before first request (worker takes some time to be ready, but app has consistent response times)
-    # true - once first request arrives (worker is ready immediately, but inconsistent response times due to kernel boot time spikes)
+    # false (default) - before first request (worker takes some time
+    # to be ready, but app has consistent response times)
+    # true - once first request arrives (worker is ready immediately,
+    # but inconsistent response times due to kernel boot time spikes)
     #
-    # If you use large amount of workers, you might want to set this to true or else the RR boot up might
-    # take a lot of time or just boot up using only a few "emergency" workers 
-    # and then use dynamic worker scaling as described here https://docs.roadrunner.dev/php-worker/scaling
+    # If you use large amount of workers, you might want to set this
+    # to true or else the RR boot up might take a lot of time
+    # or just boot up using only a few "emergency" workers
+    # and then use dynamic worker scaling as described here
+    # https://docs.roadrunner.dev/php-worker/scaling
     lazy_boot: false
 
-    # Optional
-    # -----------
-    # This decides if Symfony routing should be preloaded when worker starts and boots Symfony kernel.
+    # This decides if Symfony routing should be preloaded
+    # when worker starts and boots Symfony kernel.
+    #
     # This option halves the initial request response time.
-    # (based on a project with over 400 routes and quite a lot of services, YMMW)
+    # (based on a project with over 400 routes
+    # and quite a lot of services, YMMW)
     #
-    # true (default in PROD) - sends one dummy (empty) HTTP request to the kernel to initialize routing and services around it
-    # false (default in DEV) - only when first worker request arrives, routing and services are loaded
+    # true - sends one dummy (empty) HTTP request
+    # for kernel to initialize routing and services around it
     #
-    # You might want to create a dummy "/" route for the route to "land",
-    # or listen to onKernelRequest events and look in the request for the attribute
+    # false - only when first request arrives
+    # routing and it's services are loaded
+    #
+    # You might want to create a dummy "/"
+    # route for the route to "land",
+    # or listen to onKernelRequest events
+    # and look in the request for the attribute
     # FluffyDiscord\RoadRunnerBundle\Worker\HttpWorker::DUMMY_REQUEST_ATTRIBUTE
-    # Set this to "false" if you have any issues and report them to me.
-    early_router_initialization: true
+    early_router_initialization: false
 
+  # Centrifugo (websockets)
+  # Will activate only when "roadrunner-php/centrifugo" is installed.
   # https://docs.roadrunner.dev/plugins/centrifuge
   centrifugo:
-    # Optional
-    # -----------
-    # See http section
+    # See http section,
+    # behaves the same way.
     lazy_boot: false
 
+  # Key-Value storage
+  # Will activate only when "spiral/roadrunner-kv" is installed.
   # https://docs.roadrunner.dev/key-value/overview-kv
   kv:
-    # Optional
-    # -----------
-    # If true (default), bundle will automatically register all "kv" adapters in your .rr.yaml.
+    # If true, bundle will automatically register
+    # all "kv" adapters in your .rr.yaml.
     # Registered services have alias "cache.adapter.rr_kv.NAME"
     auto_register: true
 
-    # Optional
-    # -----------
-    # Which serializer should be used.
-    # By default, "IgbinarySerializer" will be used if "igbinary" php extension 
-    # is installed (recommended), otherwise "DefaultSerializer".
-    # You are free to create your own serializer, it needs to implement
+    # Which data serializer should be used.
+    #
+    # By default, "IgbinarySerializer" will be used
+    # if "igbinary" php extension
+    # is installed, otherwise "DefaultSerializer".
+    #
+    # You are free to create your own serializer.
+    # It needs to implement
     # Spiral\RoadRunner\KeyValue\Serializer\SerializerInterface
     serializer: null
 
-    # Optional
-    # -----------
-    # Specify relative path from "kernel.project_dir" to a keypair file 
-    # for end-to-end encryption. "sodium" php extension is required. 
+    # Specify relative path from "kernel.project_dir"
+    # to a keypair file for end-to-end encryption.
+    # "sodium" php extension is required.
     # https://docs.roadrunner.dev/key-value/overview-kv#end-to-end-value-encryption
     keypair_path: bin/keypair.key
 
@@ -203,13 +244,9 @@ Be aware that if you do not set any response, bundle will send `DisconnectRespon
 
 ## Developing with Symfony and RoadRunner
 
-- If possible, stop using lazy loading in your services, inject services immediately.
-- It is no longer needed and might potentially bring issues to you like memory leaks.
-- Do not use/create local class/array caches in your services. Try to make them stateless or if they cannot be,
-add [ResetInterface](https://github.com/symfony/contracts/blob/main/Service/ResetInterface.php) to clean up before each request.
-- Symfony forms might leak data across requests due to local caching it uses. Make sure your form `defaultOptions` are static/immutable. 
-Do not store anything dynamic as it will be cached and used in the following requests. Setting dynamic
-config values when creating the form type, eg. in controller, is fine.
+- If possible, stop using lazy loading in your services, inject services immediately. Lazy loaded services might introduce memory leaks and make your services slower to initialize when requests arrive.
+- Do not use/create local class/array caches in your services, only if you know, what you are doing. Try to make them stateless or use [ResetInterface](https://github.com/symfony/contracts/blob/main/Service/ResetInterface.php) to clean up before each request, so state is not being shared.
+- Symfony forms might leak data across requests due to caching, see section bellow.
 - Simplify your `User` session serialization by taking advantage of `EquatableInterface` and a custom de/serialization logic. 
 This will prevent errors because of detached Doctrine entities and, as a side bonus, will speed up loading user from sessions.
 ```php
@@ -267,6 +304,50 @@ class User implements UserInterface, PasswordAuthenticatedUserInterface, Equatab
         ;
     }
 }
+```
+
+### OptionsResolver (Forms)
+
+Symfony caches **OptionsResolver::setDefaults()** calls,
+so they resolve only once for current worker when someone uses
+them for the first time.
+
+This may lead to sharing sensitive information across requests in the context of a single worker,
+if you do not use defaults correctly.
+
+Consider this Form, which has major flaw that will leak user email to subsequent requests
+that worker receives.
+```php
+class MyType extends AbstractType
+{
+    // your buildForm() and what not
+    // ...
+    
+    // invalid use of setDefaults()
+    public function configureOptions(OptionsResolver $resolver): void
+    {
+        $resolver->setDefaults([
+            // loads current user
+            // and reuses his email forever until worker restarts
+            // everyone, even in anonymous browser tabs or different sessions,
+            // will see their email 
+            "label" => $this->security->getUser()->getEmail(),
+        ]);
+    }
+}
+```
+
+You should really use only static/stateless default values
+and dynamic options should be passed when
+`OptionsResolver` is used, or form is being created, eg:
+
+```php
+// with this the user email will
+// stay within this single request
+// and won't be leaked to subsequent worker requests
+$correctForm = $this->createForm(MyType::class, options: [
+    "label" => $this->getUser()->getEmail(),
+]);
 ```
 
 ## Debugging (recommendations)

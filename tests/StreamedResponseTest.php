@@ -6,6 +6,7 @@ use FluffyDiscord\RoadRunnerBundle\Factory\StreamedResponseWrapper;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\HttpFoundation\StreamedResponse;
+use Symfony\Component\HttpKernel\Kernel;
 
 class StreamedResponseTest extends TestCase
 {
@@ -62,7 +63,12 @@ class StreamedResponseTest extends TestCase
         string           $expected,
     ): void
     {
-        $callback = $symfonyResponse->getCallback();
+        if (Kernel::MAJOR_VERSION >= 6) {
+            $callback = $symfonyResponse->getCallback();
+        } else {
+            $ref = new \ReflectionClass($symfonyResponse);
+            $callback = $ref->getProperty("callback")->getValue($symfonyResponse);
+        }
 
         // simulate double kernel callback
         $symfonyResponse->setCallback(static function () use ($callback) {

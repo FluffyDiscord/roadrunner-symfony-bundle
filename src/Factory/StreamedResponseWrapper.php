@@ -6,6 +6,7 @@ use Spiral\RoadRunner\Http\Exception\StreamStoppedException;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\RequestStack;
 use Symfony\Component\HttpFoundation\StreamedResponse;
+use Symfony\Component\HttpKernel\Kernel;
 
 /**
  * Basically a copy of BinaryFileResponse->sendContent()
@@ -15,14 +16,19 @@ class StreamedResponseWrapper
 {
     public static function wrap(StreamedResponse $response): \Generator
     {
-        $kernelCallback = $response->getCallback();
+        if (Kernel::MAJOR_VERSION >= 6) {
+            $kernelCallback = $response->getCallback();
+        } else {
+            $ref = new \ReflectionClass($response);
+            $kernelCallback = $ref->getProperty("callback")->getValue($response);
+        }
 
         $kernelCallbackRef = new \ReflectionFunction($kernelCallback);
         $closureVars = $kernelCallbackRef->getClosureUsedVariables();
 
         // was not wrapped in Kernel
         if (!isset($closureVars["callback"])) {
-            $closureVars["callback"] = $response->getCallback();
+            $closureVars["callback"] = $kernelCallback;
         }
 
         $ref = new \ReflectionFunction($closureVars["callback"]);

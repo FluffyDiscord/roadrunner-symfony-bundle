@@ -2,6 +2,7 @@
 
 namespace Symfony\Component\DependencyInjection\Loader\Configurator;
 
+use FluffyDiscord\RoadRunnerBundle\EventListener\WorkerResponseSendEventListener;
 use FluffyDiscord\RoadRunnerBundle\Factory\RPCFactory;
 use FluffyDiscord\RoadRunnerBundle\Worker\CentrifugoWorker;
 use FluffyDiscord\RoadRunnerBundle\Worker\HttpWorker as BundleHttpWorker;
@@ -20,8 +21,6 @@ use Spiral\RoadRunner\Worker as RoadRunnerWorker;
 use Spiral\RoadRunner\WorkerInterface as RoadRunnerWorkerInterface;
 use Symfony\Bridge\PsrHttpMessage\HttpFoundationFactoryInterface;
 use Symfony\Component\EventDispatcher\EventDispatcherInterface;
-use Symfony\Component\HttpFoundation\RequestStack;
-use Symfony\Component\HttpFoundation\Session\Storage\MetadataBag;
 use Symfony\Component\HttpKernel\KernelInterface;
 
 return static function (ContainerConfigurator $container) {
@@ -64,13 +63,24 @@ return static function (ContainerConfigurator $container) {
     ;
 
     $services
+        ->set(WorkerResponseSendEventListener::class)
+        ->public()
+        ->args([
+            service("services_resetter"),
+            param("kernel.debug"),
+        ])
+        ->tag("kernel.event_listener", ["priority" => -256])
+    ;
+
+    $services
         ->set(BundleHttpWorker::class)
         ->public()
         ->args([
-            $_ENV["APP_ENV"] === "prod",
+            true,
             false,
             service(KernelInterface::class),
             service(EventDispatcherInterface::class),
+            expr('env("APP_ENV") == "prod"'),
             service(SentryHubInterface::class)->nullOnInvalid(),
             service(HttpFoundationFactoryInterface::class)->nullOnInvalid(),
         ])
