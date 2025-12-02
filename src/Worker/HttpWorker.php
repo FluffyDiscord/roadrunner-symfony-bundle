@@ -15,7 +15,6 @@ use Sentry\State\HubInterface as SentryHubInterface;
 use Spiral\RoadRunner;
 use Symfony\Bridge\PsrHttpMessage\Factory\HttpFoundationFactory;
 use Symfony\Bridge\PsrHttpMessage\HttpFoundationFactoryInterface;
-use Symfony\Component\DependencyInjection\Attribute\Autowire;
 use Symfony\Component\EventDispatcher\EventDispatcherInterface;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -40,7 +39,7 @@ class HttpWorker implements WorkerInterface
         private readonly bool                     $lazyBoot,
         private readonly KernelInterface          $kernel,
         private readonly EventDispatcherInterface $eventDispatcher,
-        private readonly bool                     $isProduction,
+        private readonly bool                     $isDebug,
         private readonly ?SentryHubInterface      $sentryHubInterface = null,
         ?HttpFoundationFactoryInterface           $httpFoundationFactory = null,
     )
@@ -118,14 +117,11 @@ class HttpWorker implements WorkerInterface
             } catch (\Throwable $throwable) {
                 $this->sentryHubInterface?->captureException($throwable);
 
-                if($this->isProduction) {
-                    $worker->respond(new Psr7\Response(Response::HTTP_INTERNAL_SERVER_ERROR));
+                if($this->isDebug) {
+                    $worker->respond(new Psr7\Response(Response::HTTP_INTERNAL_SERVER_ERROR, body: print_r($throwable, true)));
                 } else {
-                    $worker->respond(new Psr7\Response(Response::HTTP_INTERNAL_SERVER_ERROR, body: (string)$throwable));
+                    $worker->respond(new Psr7\Response(Response::HTTP_INTERNAL_SERVER_ERROR));
                 }
-
-                $worker->getWorker()->error((string)$throwable);
-
             } finally {
                 $result = $this->sentryHubInterface?->getClient()?->flush();
 

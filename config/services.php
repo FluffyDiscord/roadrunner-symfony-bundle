@@ -80,7 +80,7 @@ return static function (ContainerConfigurator $container) {
             false,
             service(KernelInterface::class),
             service(EventDispatcherInterface::class),
-            expr('env("APP_ENV") == "prod"'),
+            param('kernel.debug'),
             service(SentryHubInterface::class)->nullOnInvalid(),
             service(HttpFoundationFactoryInterface::class)->nullOnInvalid(),
         ])
