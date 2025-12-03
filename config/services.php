@@ -2,11 +2,20 @@
 
 namespace Symfony\Component\DependencyInjection\Loader\Configurator;
 
+use FluffyDiscord\RoadRunnerBundle\DataCollector\TemporalCollector;
 use FluffyDiscord\RoadRunnerBundle\EventListener\WorkerResponseSendEventListener;
+use FluffyDiscord\RoadRunnerBundle\Factory\RPCConnectionFactory;
 use FluffyDiscord\RoadRunnerBundle\Factory\RPCFactory;
+use FluffyDiscord\RoadRunnerBundle\Temporal\DefaultTemporalWorker;
+use FluffyDiscord\RoadRunnerBundle\Temporal\DefaultTemporalWorkerFactory;
+use FluffyDiscord\RoadRunnerBundle\Temporal\TemporalWorkerFactoryInterface;
+use FluffyDiscord\RoadRunnerBundle\Temporal\TemporalWorkerInitializer;
+use FluffyDiscord\RoadRunnerBundle\Temporal\TemporalWorkerInterface;
 use FluffyDiscord\RoadRunnerBundle\Worker\CentrifugoWorker;
 use FluffyDiscord\RoadRunnerBundle\Worker\HttpWorker as BundleHttpWorker;
+use FluffyDiscord\RoadRunnerBundle\Worker\TemporalWorker;
 use FluffyDiscord\RoadRunnerBundle\Worker\WorkerRegistry;
+use Monolog\Logger as MonologLogger;
 use RoadRunner\Centrifugo\CentrifugoWorker as RoadRunnerCentrifugoWorker;
 use RoadRunner\Centrifugo\CentrifugoWorkerInterface;
 use RoadRunner\Centrifugo\Request\RequestFactory;
@@ -22,6 +31,8 @@ use Spiral\RoadRunner\WorkerInterface as RoadRunnerWorkerInterface;
 use Symfony\Bridge\PsrHttpMessage\HttpFoundationFactoryInterface;
 use Symfony\Component\EventDispatcher\EventDispatcherInterface;
 use Symfony\Component\HttpKernel\KernelInterface;
+use Temporal\Worker\Transport\RPCConnectionInterface;
+use Temporal\Workflow\WorkflowInterface;
 
 return static function (ContainerConfigurator $container) {
     $services = $container->services();
@@ -93,6 +104,74 @@ return static function (ContainerConfigurator $container) {
             service(BundleHttpWorker::class),
         ])
     ;
+
+    // Temporal
+    if (class_exists(WorkflowInterface::class)) {
+        $services
+            ->set(TemporalCollector::class)
+            ->autoconfigure()
+            ->autowire()
+            ->tag('data_collector', [
+                'id' => 'fluffy_discord.roadrunner.temporal',
+            ])
+        ;
+
+        $services
+            ->set(TemporalWorker::class)
+            ->public()
+            ->args([
+                service(KernelInterface::class),
+                service(EventDispatcherInterface::class),
+                service(TemporalWorkerFactoryInterface::class),
+                service(TemporalWorkerInitializer::class),
+                service(SentryHubInterface::class)->nullOnInvalid(),
+            ])
+        ;
+
+        $services
+            ->set(TemporalWorkerInitializer::class)
+            ->public()
+            ->autowire()
+            ->autoconfigure()
+        ;
+
+        $services
+            ->set(RPCConnectionInterface::class)
+            ->public()
+            ->factory([RPCConnectionFactory::class, "fromEnvironment"])
+            ->args([
+                service(EnvironmentInterface::class),
+            ])
+        ;
+
+        $services
+            ->set(DefaultTemporalWorkerFactory::class)
+            ->public()
+            ->args([
+                service(RPCConnectionInterface::class),
+            ])
+        ;
+
+        $services->alias(TemporalWorkerFactoryInterface::class, DefaultTemporalWorkerFactory::class);
+
+        $services
+            ->set(DefaultTemporalWorker::class)
+            ->public()
+            ->args([
+                service('monolog.logger.temporal')->nullOnInvalid(),
+            ])
+        ;
+
+        $services->alias(TemporalWorkerInterface::class, DefaultTemporalWorker::class);
+
+        $services
+            ->get(WorkerRegistry::class)
+            ->call("registerWorker", [
+                Environment\Mode::MODE_TEMPORAL,
+                service(TemporalWorker::class),
+            ])
+        ;
+    }
 
     // Centrifugo
     if (class_exists(RoadRunnerCentrifugoWorker::class)) {

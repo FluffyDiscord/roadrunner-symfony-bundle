@@ -242,6 +242,31 @@ readonly class ChatListener
 
 Be aware that if you do not set any response, bundle will send `DisconnectResponse` back by default.
 
+## Temporal
+
+Bundle has basic [Temporal](https://learn.temporal.io/getting_started/php/) integration. After installing `temporal/sdk` bundle automatically
+registers all classes implementing `FluffyDiscord\RoadRunnerBundle\Temporal\TemporalWorkerInterface` (check `DefaultTemporalWorker`) as individual workers. 
+To assign **Workflow** or **Activity** to Temporal Worker, implements them as Temporal PHP SDK wants 
+and add `TemporalTaskQueue` PHP attribute on top of that class/interface with the name of the worker.
+
+```php
+#[TemporalTaskQueue('my_own_worker')] // <-- the only difference
+#[ActivityInterface("file_activities.")] // example from official temporal documentation
+interface FileProcessingActivities
+{
+    public function upload(string $bucketName, string $localName, string $targetName);
+
+    #[ActivityMethod("transcode_file")]
+    public function download(string $bucketName, string $remoteName);
+
+    public function processFile(): string;
+
+    public function deleteLocalFile(string $fileName);
+}
+```
+
+To change `WorkerFactory` options, implement your own service with `TemporalWorkerFactoryInterface` interface, eg. `DefaultTemporalWorkerFactory`. 
+
 ## Developing with Symfony and RoadRunner
 
 - If possible, stop using lazy loading in your services, inject services immediately. Lazy loaded services might introduce memory leaks and make your services slower to initialize when requests arrive.

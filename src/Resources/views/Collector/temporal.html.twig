@@ -1,0 +1,146 @@
+{% extends "@WebProfiler/Profiler/layout.html.twig" %}
+
+{% block toolbar %}
+    {% set icon %}
+        {{ include('@FluffyDiscordRoadRunner/Collector/icon.svg') }}
+        {#        <span class="sf-toolbar-value"></span>#}
+    {% endset %}
+    {% set text %}
+        <div class="sf-toolbar-info-piece">
+            <b>Temporal</b>
+        </div>
+
+        <div class="sf-toolbar-info-piece">
+            <b>Workers</b>
+            <span class="sf-toolbar-status">{{ collector.workers | length }}</span>
+        </div>
+        <div class="sf-toolbar-info-piece">
+            <b>Workflows</b>
+            <span class="sf-toolbar-status">{{ collector.workflows | length }}</span>
+        </div>
+        <div class="sf-toolbar-info-piece">
+            <b>Activities</b>
+            <span class="sf-toolbar-status">{{ collector.activities | length }}</span>
+        </div>
+    {% endset %}
+    {{ include('@WebProfiler/Profiler/toolbar_item.html.twig', { 'link': true }) }}
+{% endblock %}
+
+{% block menu %}
+    <span class="label">
+    <span class="icon">
+    {{ include('@FluffyDiscordRoadRunner/Collector/icon.svg') }}
+    </span>
+    <strong>Temporal</strong>
+    </span>
+{% endblock %}
+
+{% block panel %}
+    <h2>Rendered tags</h2>
+
+    <div class="sf-tabs">
+        <div class="tab">
+            <h3 class="tab-title">Workers</h3>
+            <div class="tab-content">
+                {% if collector.workers is not empty %}
+                    <table>
+                        <thead>
+                        <tr>
+                            <th>Class</th>
+                            <th>Workflows</th>
+                            <th>Activities</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        {% for worker in collector.workers %}
+                            <tr>
+                                <td class="font-normal">{{ worker }}</td>
+                                <td class="font-normal">
+                                    {% if collector.getWorkerWorkflows(worker) is not empty %}
+                                        {% for workflow in collector.getWorkerWorkflows(worker) %}
+                                            <ul>
+                                               <li>{{ workflow }}</li>
+                                            </ul>
+                                        {% endfor %}
+                                    {% else %}
+                                        <div class="empty">
+                                            <p>No workflows assigned.</p>
+                                        </div>
+                                    {% endif %}
+                                </td>
+                                <td class="font-normal">
+                                    {% if collector.getWorkerActivities(worker) is not empty %}
+                                        {% for activity in collector.getWorkerActivities(worker) %}
+                                            <ul>
+                                               <li>{{ activity }}</li>
+                                            </ul>
+                                        {% endfor %}
+                                    {% else %}
+                                        <div class="empty">
+                                            <p>No activities assigned.</p>
+                                        </div>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                {% else %}
+                    <div class="empty">
+                        <p>No workers registered.</p>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+        <div class="tab">
+            <h3 class="tab-title">Workflows</h3>
+            <div class="tab-content">
+                {% if collector.workflows is not empty %}
+                    <table>
+                        <thead>
+                        <tr>
+                            <th>Class</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        {% for workflow in collector.workflows %}
+                            <tr>
+                                <td class="font-normal">{{ workflow }}</td>
+                            </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                {% else %}
+                    <div class="empty">
+                        <p>No workflows registered.</p>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+        <div class="tab">
+            <h3 class="tab-title">Activities</h3>
+            <div class="tab-content">
+                {% if collector.activities is not empty %}
+                    <table>
+                        <thead>
+                        <tr>
+                            <th>Class</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        {% for activity in collector.activities %}
+                            <tr>
+                                <td class="font-normal">{{ activity }}</td>
+                            </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                {% else %}
+                    <div class="empty">
+                        <p>No activities registered.</p>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+{% endblock %}
