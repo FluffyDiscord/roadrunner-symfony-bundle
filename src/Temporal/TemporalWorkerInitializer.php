@@ -2,13 +2,16 @@
 
 namespace FluffyDiscord\RoadRunnerBundle\Temporal;
 
+use FluffyDiscord\RoadRunnerBundle\Exception\WorkerNotPristineException;
 use FluffyDiscord\RoadRunnerBundle\Kernel\RoadRunnerMicroKernelTrait;
 use FluffyDiscord\RoadRunnerBundle\Temporal\Attribute\TemporalTaskQueue;
 use JetBrains\PhpStorm\Immutable;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
 use Symfony\Component\HttpKernel\DependencyInjection\ServicesResetterInterface;
 use Symfony\Component\HttpKernel\KernelInterface;
+use Temporal\Internal\Declaration\Prototype\ActivityCollection;
 use Temporal\Worker\WorkerFactoryInterface;
+use Temporal\Worker\WorkerInterface;
 
 /**
  * TODO: get rid of this class and implement loader in the container compilation step
@@ -57,6 +60,8 @@ class TemporalWorkerInitializer
         foreach ($this->workers as $worker) {
             $temporalWorker = $worker->create($workerFactory);
 
+            $this->ensureWorkerIsPristine($temporalWorker, $worker);
+
             /**
              * we are not using the {@see RoadRunnerMicroKernelTrait} modified boot,
              * as this should be enough
@@ -93,6 +98,14 @@ class TemporalWorkerInitializer
                     }
                 }
             }
+        }
+    }
+
+    private function ensureWorkerIsPristine(WorkerInterface $temporalWorker, TemporalWorkerInterface $worker): void
+    {
+        $workerActivities = $temporalWorker->getActivities();
+        if (count($workerActivities) !== 0 || count($temporalWorker->getWorkflows()) !== 0 || ($workerActivities instanceof ActivityCollection && $workerActivities->getFinalizer() !== null)) {
+            throw new WorkerNotPristineException(sprintf('Worker "%s" cannot have any activity, workflow or activity finalizer manually set', $worker::class));
         }
     }
 }

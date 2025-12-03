@@ -3,8 +3,6 @@
 namespace FluffyDiscord\RoadRunnerBundle\Factory;
 
 use FluffyDiscord\RoadRunnerBundle\Exception\InvalidRPCConfigurationException;
-use Spiral\Goridge\RPC\RPC;
-use Spiral\Goridge\RPC\RPCInterface;
 use Spiral\RoadRunner\EnvironmentInterface;
 use Temporal\Worker\Transport\Goridge;
 use Temporal\Worker\Transport\RPCConnectionInterface;
