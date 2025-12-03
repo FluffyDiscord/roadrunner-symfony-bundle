@@ -25,7 +25,7 @@ class Runner implements RunnerInterface
         $worker = $registry->getWorker($this->mode);
 
         if (null === $worker) {
-            error_log(sprintf('Missing RR worker implementation for "%s" mode', $this->mode));
+            error_log(sprintf('This bundle does not support worker "%s" yet, open issue or make PR', $this->mode));
 
             return 1;
         }
