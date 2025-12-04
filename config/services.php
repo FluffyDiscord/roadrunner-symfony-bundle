@@ -158,7 +158,7 @@ return static function (ContainerConfigurator $container) {
             ->set(DefaultTemporalWorker::class)
             ->public()
             ->args([
-                service('monolog.logger.temporal')->nullOnInvalid(),
+                service('monolog.logger.temporal')->nullOnInvalid(), // TODO: not working
             ])
         ;
 

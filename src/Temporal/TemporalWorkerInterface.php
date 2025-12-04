@@ -2,7 +2,7 @@
 
 namespace FluffyDiscord\RoadRunnerBundle\Temporal;
 
-use FluffyDiscord\RoadRunnerBundle\Temporal\Attribute\TemporalTaskQueue;
+use FluffyDiscord\RoadRunnerBundle\Temporal\Attribute\AssignToWorker;
 use Temporal\Worker\WorkerFactoryInterface;
 use Temporal\Worker\WorkerInterface;
 
@@ -12,7 +12,7 @@ use Temporal\Worker\WorkerInterface;
  * which this bundle already provides.
  *
  * Do not directly add activities and workflows here,
- * use {@see TemporalTaskQueue} for assigning them to the worker task queue.
+ * use {@see AssignToWorker} for assigning them to the worker task queue.
  *
  * https://docs.temporal.io/best-practices/worker#separate-task-queues-logically
  */

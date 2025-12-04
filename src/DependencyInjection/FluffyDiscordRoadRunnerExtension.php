@@ -2,11 +2,12 @@
 
 namespace FluffyDiscord\RoadRunnerBundle\DependencyInjection;
 
-use App\Compiler\Collector\CollectorInterface;
 use FluffyDiscord\RoadRunnerBundle\Cache\KVCacheAdapter;
+use FluffyDiscord\RoadRunnerBundle\Exception\ActivityNotAssignedException;
 use FluffyDiscord\RoadRunnerBundle\Exception\CacheAutoRegisterException;
 use FluffyDiscord\RoadRunnerBundle\Exception\InvalidRPCConfigurationException;
-use FluffyDiscord\RoadRunnerBundle\Temporal\Attribute\TemporalTaskQueue;
+use FluffyDiscord\RoadRunnerBundle\Exception\WorkflowNotAssignedException;
+use FluffyDiscord\RoadRunnerBundle\Temporal\Attribute\AssignToWorker;
 use FluffyDiscord\RoadRunnerBundle\Temporal\TemporalWorkerInitializer;
 use FluffyDiscord\RoadRunnerBundle\Temporal\TemporalWorkerInterface;
 use FluffyDiscord\RoadRunnerBundle\Worker\CentrifugoWorker;
@@ -15,13 +16,11 @@ use Spiral\Goridge\Exception\RelayException;
 use Spiral\Goridge\RPC\RPCInterface;
 use Spiral\RoadRunner\KeyValue\Cache;
 use Symfony\Component\Config\FileLocator;
-use Symfony\Component\DependencyInjection\ChildDefinition;
 use Symfony\Component\DependencyInjection\Compiler\CompilerPassInterface;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\Definition;
 use Symfony\Component\DependencyInjection\Extension\Extension;
 use Symfony\Component\DependencyInjection\Loader\PhpFileLoader;
-use Symfony\Component\DependencyInjection\Reference;
 use Symfony\Component\Yaml\Yaml;
 use Temporal\Activity\ActivityInterface;
 use Temporal\Workflow\WorkflowInterface;
@@ -166,77 +165,112 @@ class FluffyDiscordRoadRunnerExtension extends Extension implements CompilerPass
         }
     }
 
-    /**
-     * @param ContainerBuilder $container
-     * @return void
-     */
     private function registerTemporal(ContainerBuilder $container): void
     {
         $workerInitializer = $container->getDefinition(TemporalWorkerInitializer::class);
 
         foreach ($container->getDefinitions() as $definition) {
+            $class = $this->getClassFromDefinition($definition);
+            if ($class === null) {
+                continue;
+            }
+
             $interfaces = $this->getDefinitionClassInterfaces($definition);
             if (in_array(TemporalWorkerInterface::class, $interfaces)) {
-                $workerInitializer->addMethodCall('addWorker', [new Reference($definition->getClass())]);
+                $definition->addTag('fluffydiscord.roadrunner.temporal.worker');
+                continue;
             }
-        }
 
-        $container->registerAttributeForAutoconfiguration(TemporalTaskQueue::class, static function (ChildDefinition $definition, TemporalTaskQueue $attribute, \ReflectionClass $reflector) use ($workerInitializer): void {
+            $reflector = new \ReflectionClass($class);
+
+            $toSearch = [
+                ActivityInterface::class,
+                WorkflowInterface::class,
+            ];
+
             $isActivity = false;
             $isWorkflow = false;
-
-            $classReflection = $reflector;
+            $reflectionClass = $reflector;
+            $taskQueues = [];
             while (true) {
-                foreach ($classReflection->getAttributes() as $attribute) {
-                    if ($attribute->newInstance() instanceof ActivityInterface) {
-                        $isActivity = true;
-                        break;
-                    }
-
-                    if ($attribute->newInstance() instanceof WorkflowInterface) {
-                        $isWorkflow = true;
-                        break;
-                    }
-                }
-
-                $classReflection = $classReflection->getParentClass();
-                if ($classReflection === false) {
-                    break;
-                }
-            }
-
-            if (!$isActivity && !$isWorkflow) {
-                foreach ($reflector->getInterfaces() as $interface) {
-                    foreach ($interface->getAttributes() as $attribute) {
-                        if ($attribute->newInstance() instanceof ActivityInterface) {
+                foreach ($toSearch as $classToSearch) {
+                    $attributes = $reflectionClass->getAttributes($classToSearch);
+                    if ($attributes !== []) {
+                        if ($classToSearch === ActivityInterface::class) {
                             $isActivity = true;
-                            break 2;
+                        }
+                        if ($classToSearch === WorkflowInterface::class) {
+                            $isWorkflow = true;
                         }
 
-                        if ($attribute->newInstance() instanceof WorkflowInterface) {
-                            $isWorkflow = true;
-                            break 2;
+                        foreach ($reflectionClass->getAttributes(AssignToWorker::class) as $attribute) {
+                            $attributeInstance = $attribute->newInstance();
+                            assert($attributeInstance instanceof AssignToWorker);
+
+                            $taskQueues[] = $attributeInstance->taskQueue;
+                        }
+
+                        break;
+                    }
+                }
+
+                $reflectionClass = $reflectionClass->getParentClass();
+                if ($reflectionClass !== false) {
+                    continue;
+                }
+
+                if (!$isActivity && !$isWorkflow) {
+                    foreach ($interfaces as $interface) {
+                        $interfaceReflectionClass = new \ReflectionClass($interface);
+                        foreach ($toSearch as $classToSearch) {
+                            $attributes = $interfaceReflectionClass->getAttributes($classToSearch);
+                            if ($attributes === []) {
+                                continue;
+                            }
+
+                            if ($classToSearch === ActivityInterface::class) {
+                                $isActivity = true;
+                            }
+                            if ($classToSearch === WorkflowInterface::class) {
+                                $isWorkflow = true;
+                            }
+
+                            foreach ($interfaceReflectionClass->getAttributes(AssignToWorker::class) as $attribute) {
+                                $attributeInstance = $attribute->newInstance();
+                                assert($attributeInstance instanceof AssignToWorker);
+
+                                $taskQueues[] = $attributeInstance->taskQueue;
+                            }
+
+                            break;
                         }
                     }
                 }
+
+                break;
             }
 
             if ($isActivity) {
-                // make all activities as factories
+                if ($taskQueues === []) {
+                    throw new ActivityNotAssignedException(sprintf('Activity %s is missing #[%s]', $class, AssignToWorker::class));
+                }
+
+                $workerInitializer->addMethodCall('addActivity', [$class, $taskQueues]);
+
                 $definition->setShared(false);
-
-                // pass just a string
-                $workerInitializer->addMethodCall('addActivity', [$workerInitializer->getClass()]);
-
-                $definition->addTag('fluffydiscord.roadrunner.temporal.activity');
+                $definition->setPublic(true);
+                $definition->addTag('fluffydiscord.roadrunner.temporal.activity', ['taskQueues' => $taskQueues]);
             }
 
             if ($isWorkflow) {
-                // pass just a string
-                $workerInitializer->addMethodCall('addWorkflow', [$workerInitializer->getClass()]);
+                if ($taskQueues === []) {
+                    throw new WorkflowNotAssignedException(sprintf('Workflow %s is missing #[%s]', $class, AssignToWorker::class));
+                }
 
-                $definition->addTag('fluffydiscord.roadrunner.temporal.workflow');
+                $workerInitializer->addMethodCall('addWorkflow', [$class, $taskQueues]);
+
+                $definition->addTag('fluffydiscord.roadrunner.temporal.workflow', ['taskQueues' => $taskQueues]);
             }
-        });
+        }
     }
 }

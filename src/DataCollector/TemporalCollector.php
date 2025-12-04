@@ -2,73 +2,72 @@
 
 namespace FluffyDiscord\RoadRunnerBundle\DataCollector;
 
-use FluffyDiscord\RoadRunnerBundle\Temporal\Attribute\TemporalTaskQueue;
+use FluffyDiscord\RoadRunnerBundle\Temporal\TemporalWorkerFactoryInterface;
 use FluffyDiscord\RoadRunnerBundle\Temporal\TemporalWorkerInitializer;
 use Symfony\Bundle\FrameworkBundle\DataCollector\AbstractDataCollector;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
+use Temporal\Internal\Declaration\Prototype\ActivityPrototype;
+use Temporal\Internal\Declaration\Prototype\WorkflowPrototype;
 
 final class TemporalCollector extends AbstractDataCollector
 {
     public function __construct(
-        private readonly TemporalWorkerInitializer $workerInitializer,
+        private readonly TemporalWorkerFactoryInterface $temporalWorkerFactory,
+        private readonly TemporalWorkerInitializer      $temporalWorkerInitializer,
     )
     {
+
     }
 
     public function collect(Request $request, Response $response, ?\Throwable $exception = null): void
     {
         $this->data = [
-            'activities'        => $this->workerInitializer->activities,
-            'workflows'         => $this->workerInitializer->workflows,
-            'workers'           => array_keys($this->workerInitializer->workers),
-            'worker_activities' => [],
-            'worker_workflows'  => [],
+            'activities' => [],
+            'workflows'  => [],
+            'workers'    => [],
         ];
 
-        foreach ($this->data['workflows'] as $workflow) {
-            $reflection = new \ReflectionClass($workflow);
-            foreach ($reflection->getAttributes(TemporalTaskQueue::class) as $attribute) {
-                $attributeInstance = $attribute->newInstance();
-                assert($attributeInstance instanceof TemporalTaskQueue);
+        $workerFactory = $this->temporalWorkerFactory->create();
 
-                foreach ($attributeInstance->name as $name) {
-                    $this->addWorkerWorkflow($name, $workflow);
-                }
+        $workers = $this->temporalWorkerInitializer->initialize($workerFactory);
+
+        foreach ($workers as $worker) {
+            $this->data['workers'][] = [
+                'class'      => $worker['factory']::class,
+                'id'         => $worker['worker']->getId(),
+                'activities' => array_map(
+                    static fn(ActivityPrototype $activity) => [
+                        'class' => $activity->getClass()->getName(),
+                        'id'    => $activity->getID(),
+                    ],
+                    iterator_to_array($worker['worker']->getActivities()),
+                ),
+                'workflows'  => array_map(
+                    static fn(WorkflowPrototype $workflow) => [
+                        'class' => $workflow->getClass()->getName(),
+                        'id'    => $workflow->getID(),
+                    ],
+                    iterator_to_array($worker['worker']->getWorkflows()),
+                ),
+            ];
+
+            foreach ($worker['worker']->getActivities() as $activity) {
+                $this->data['activities'][$activity->getClass()->getName()] = [
+                    'class'      => $activity->getClass()->getName(),
+                    'id'         => $activity->getID(),
+                    'taskQueues' => array_unique([...$this->data['activities'][$activity->getClass()->getName()] ?? [], $worker['worker']->getId()]),
+                ];
+            }
+
+            foreach ($worker['worker']->getWorkflows() as $workflow) {
+                $this->data['workflows'][$workflow->getClass()->getName()] = [
+                    'class'      => $workflow->getClass()->getName(),
+                    'id'         => $workflow->getID(),
+                    'taskQueues' => array_unique([...$this->data['workflows'][$workflow->getClass()->getName()] ?? [], $worker['worker']->getId()]),
+                ];
             }
         }
-
-        foreach ($this->data['activities'] as $activity) {
-            $reflection = new \ReflectionClass($activity);
-            foreach ($reflection->getAttributes(TemporalTaskQueue::class) as $attribute) {
-                $attributeInstance = $attribute->newInstance();
-                assert($attributeInstance instanceof TemporalTaskQueue);
-
-                foreach ($attributeInstance->name as $name) {
-                    $this->addWorkerActivity($name, $activity);
-                }
-            }
-        }
-    }
-
-    private function addWorkerActivity(string $worker, string $activity): void
-    {
-        $this->data['worker_activities'][$worker][] = $activity;
-    }
-
-    private function addWorkerWorkflow(string $worker, string $workflow): void
-    {
-        $this->data['worker_workflows'][$worker][] = $workflow;
-    }
-
-    public function getWorkerActivities(string $worker): array
-    {
-        return $this->data['worker_activities'][$worker] ?? [];
-    }
-
-    public function getWorkerWorkflows(string $worker): array
-    {
-        return $this->data['worker_workflows'][$worker] ?? [];
     }
 
     public function getWorkers(): array

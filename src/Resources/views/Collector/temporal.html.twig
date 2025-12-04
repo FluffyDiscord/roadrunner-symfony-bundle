@@ -35,7 +35,7 @@
 {% endblock %}
 
 {% block panel %}
-    <h2>Rendered tags</h2>
+    <h2>Collected services</h2>
 
     <div class="sf-tabs">
         <div class="tab">
@@ -46,6 +46,7 @@
                         <thead>
                         <tr>
                             <th>Class</th>
+                            <th>Task&nbsp;queue</th>
                             <th>Workflows</th>
                             <th>Activities</th>
                         </tr>
@@ -53,12 +54,15 @@
                         <tbody>
                         {% for worker in collector.workers %}
                             <tr>
-                                <td class="font-normal">{{ worker }}</td>
+                                <td class="font-normal">{{ worker.class }}</td>
                                 <td class="font-normal">
-                                    {% if collector.getWorkerWorkflows(worker) is not empty %}
-                                        {% for workflow in collector.getWorkerWorkflows(worker) %}
+                                    <span class="badge badge-success">{{ worker.id }}</span>
+                                </td>
+                                <td class="font-normal">
+                                    {% if worker.workflows is not empty %}
+                                        {% for workflow in worker.workflows %}
                                             <ul>
-                                               <li>{{ workflow }}</li>
+                                                <li>{{ workflow.class }} <small>({{ workflow.id }})</small></li>
                                             </ul>
                                         {% endfor %}
                                     {% else %}
@@ -68,10 +72,10 @@
                                     {% endif %}
                                 </td>
                                 <td class="font-normal">
-                                    {% if collector.getWorkerActivities(worker) is not empty %}
-                                        {% for activity in collector.getWorkerActivities(worker) %}
+                                    {% if worker.activities is not empty %}
+                                        {% for activity in worker.activities %}
                                             <ul>
-                                               <li>{{ activity }}</li>
+                                               <li>{{ activity.class }} <small>({{ activity.id }})</small></li>
                                             </ul>
                                         {% endfor %}
                                     {% else %}
@@ -99,12 +103,20 @@
                         <thead>
                         <tr>
                             <th>Class</th>
+                            <th>ID</th>
+                            <th>Task&nbsp;queue</th>
                         </tr>
                         </thead>
                         <tbody>
                         {% for workflow in collector.workflows %}
                             <tr>
-                                <td class="font-normal">{{ workflow }}</td>
+                                <td class="font-normal">{{ workflow.class }}</td>
+                                <td class="font-normal">{{ workflow.id }}</td>
+                                <td class="font-normal">
+                                    {% for taskQueue in workflow.taskQueues %}
+                                        <span class="badge badge-success">{{ taskQueue }}</span>
+                                    {% endfor %}
+                                </td>
                             </tr>
                         {% endfor %}
                         </tbody>
@@ -124,12 +136,20 @@
                         <thead>
                         <tr>
                             <th>Class</th>
+                            <th>ID</th>
+                            <th>Task&nbsp;queue</th>
                         </tr>
                         </thead>
                         <tbody>
                         {% for activity in collector.activities %}
                             <tr>
-                                <td class="font-normal">{{ activity }}</td>
+                                <td class="font-normal">{{ activity.class }}</td>
+                                <td class="font-normal">{{ activity.id }}</td>
+                                <td class="font-normal">
+                                    {% for taskQueue in activity.taskQueues %}
+                                        <span class="badge badge-success">{{ taskQueue }}</span>
+                                    {% endfor %}
+                                </td>
                             </tr>
                         {% endfor %}
                         </tbody>
