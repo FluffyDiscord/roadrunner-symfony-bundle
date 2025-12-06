@@ -8,6 +8,7 @@ use FluffyDiscord\RoadRunnerBundle\Exception\CacheAutoRegisterException;
 use FluffyDiscord\RoadRunnerBundle\Exception\InvalidRPCConfigurationException;
 use FluffyDiscord\RoadRunnerBundle\Exception\WorkflowNotAssignedException;
 use FluffyDiscord\RoadRunnerBundle\Temporal\Attribute\AssignToWorker;
+use FluffyDiscord\RoadRunnerBundle\Temporal\DefaultTemporalWorker;
 use FluffyDiscord\RoadRunnerBundle\Temporal\TemporalWorkerInitializer;
 use FluffyDiscord\RoadRunnerBundle\Temporal\TemporalWorkerInterface;
 use FluffyDiscord\RoadRunnerBundle\Worker\CentrifugoWorker;
@@ -24,6 +25,8 @@ use Symfony\Component\DependencyInjection\Extension\PrependExtensionInterface;
 use Symfony\Component\DependencyInjection\Loader\PhpFileLoader;
 use Symfony\Component\Yaml\Yaml;
 use Temporal\Activity\ActivityInterface;
+use Temporal\Exception\ExceptionInterceptor;
+use Temporal\Worker\ServiceCredentials;
 use Temporal\Workflow\WorkflowInterface;
 
 class FluffyDiscordRoadRunnerExtension extends Extension implements CompilerPassInterface, PrependExtensionInterface
@@ -55,6 +58,8 @@ class FluffyDiscordRoadRunnerExtension extends Extension implements CompilerPass
             $definition = $container->getDefinition(CentrifugoWorker::class);
             $definition->replaceArgument(0, $config["centrifugo"]["lazy_boot"]);
         }
+
+        $this->replaceTemporalParameters($config, $container);
 
         if (class_exists(Cache::class) && (!isset($config["kv"]["auto_register"]) || $config["kv"]["auto_register"] === true)) {
             $this->registerKVCache($config, $container);
@@ -272,6 +277,24 @@ class FluffyDiscordRoadRunnerExtension extends Extension implements CompilerPass
 
                 $definition->addTag('fluffydiscord.roadrunner.temporal.workflow', ['taskQueues' => $taskQueues]);
             }
+        }
+    }
+
+    private function replaceTemporalParameters(array $config, ContainerBuilder $container): void
+    {
+        if (isset($config['temporal']['retryable_errors']) && $container->hasDefinition(ExceptionInterceptor::class)) {
+            $definition = $container->getDefinition(ExceptionInterceptor::class);
+            $definition->replaceArgument(0, $config['temporal']['retryable_errors']);
+        }
+
+        if (isset($config['temporal']['default_worker_options']) && $container->hasDefinition(DefaultTemporalWorker::class)) {
+            $definition = $container->getDefinition(DefaultTemporalWorker::class);
+            $definition->replaceArgument(0, $config['temporal']['default_worker_options']);
+        }
+
+        if (isset($config['temporal']['api_key']) && $container->hasDefinition(ServiceCredentials::class)) {
+            $definition = $container->getDefinition(ServiceCredentials::class);
+            $definition->replaceArgument(0, $config['temporal']['api_key']);
         }
     }
 }

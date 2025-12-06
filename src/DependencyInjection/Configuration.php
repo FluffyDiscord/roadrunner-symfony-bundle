@@ -5,7 +5,8 @@ namespace FluffyDiscord\RoadRunnerBundle\DependencyInjection;
 use FluffyDiscord\RoadRunnerBundle\Worker\HttpWorker;
 use Symfony\Component\Config\Definition\Builder\TreeBuilder;
 use Symfony\Component\Config\Definition\ConfigurationInterface;
-use Symfony\Component\HttpKernel\DependencyInjection\ServicesResetter;
+use Temporal\Exception\ExceptionInterceptorInterface;
+use Temporal\Worker\WorkerOptions;
 
 class Configuration implements ConfigurationInterface
 {
@@ -30,7 +31,7 @@ class Configuration implements ConfigurationInterface
                 ->arrayNode("http")
                     ->info($this->toInfo([
                         'Http worker',
-                        'https://docs.roadrunner.dev/http/http',
+                        'https://docs.roadrunner.dev/docs/http/http',
                     ]))
                     ->children()
                         ->booleanNode("lazy_boot")
@@ -46,7 +47,7 @@ class Configuration implements ConfigurationInterface
                                 'to true or else the RR boot up might take a lot of time',
                                 'or just boot up using only a few "emergency" workers',
                                 'and then use dynamic worker scaling as described here',
-                                'https://docs.roadrunner.dev/php-worker/scaling',
+                                'https://docs.roadrunner.dev/docs/php-worker/scaling',
                             ]))
                             ->defaultFalse()
                         ->end()
@@ -80,7 +81,7 @@ class Configuration implements ConfigurationInterface
                     ->info($this->toInfo([
                         'Key-Value storage',
                         'Will activate only when "spiral/roadrunner-kv" is installed.',
-                        'https://docs.roadrunner.dev/key-value/overview-kv',
+                        'https://docs.roadrunner.dev/docs/key-value/overview-kv',
                     ]))
                     ->children()
                         ->booleanNode("auto_register")
@@ -110,7 +111,7 @@ class Configuration implements ConfigurationInterface
                                 'Specify relative path from "kernel.project_dir"',
                                 'to a keypair file for end-to-end encryption.',
                                 '"sodium" php extension is required.',
-                                'https://docs.roadrunner.dev/key-value/overview-kv#end-to-end-value-encryption',
+                                'https://docs.roadrunner.dev/docs/key-value/overview-kv#end-to-end-value-encryption',
                             ]))
                             ->defaultNull()
                         ->end()
@@ -121,7 +122,7 @@ class Configuration implements ConfigurationInterface
                     ->info($this->toInfo([
                         'Centrifugo (websockets)',
                         'Will activate only when "roadrunner-php/centrifugo" is installed.',
-                        'https://docs.roadrunner.dev/plugins/centrifuge',
+                        'https://docs.roadrunner.dev/docs/plugins/centrifuge',
                     ]))
                     ->children()
                         ->booleanNode("lazy_boot")
@@ -133,6 +134,60 @@ class Configuration implements ConfigurationInterface
                         ->end()
                     ->end()
                     ->addDefaultsIfNotSet()
+                ->end()
+                ->arrayNode('temporal')
+                    ->info($this->toInfo([
+                        'Temporal',
+                        'Will activate only when "temporal/sdk" is installed.',
+                        'https://docs.roadrunner.dev/docs/plugins/temporal',
+                    ]))
+                    ->children()
+                        ->scalarNode('api_key')
+                            ->info($this->toInfo([
+                                'API key to connect to your Temporal instance',
+                            ]))
+                            ->defaultNull()
+                        ->end()
+                        ->arrayNode('retryable_errors')
+                            ->info($this->toInfo([
+                                'Array list of exceptions',
+                                'that will let Temporal know that the workflows',
+                                'can be retried. It\'s being checked as $error instanceOf YourException',
+                                'so keep that in mind. Exceptions not listed will stop workflow execution.',
+                                'By default everything extending '.\Error::class.' can be retried.',
+                                'If you need something custom, decorate or register your own interceptor.',
+                                'More info at '.ExceptionInterceptorInterface::class,
+                            ]))
+                            ->scalarPrototype()->end()
+                            ->defaultValue([
+                                \Error::class,
+                            ])
+                        ->end()
+                        ->arrayNode('default_worker_options')
+                            ->info($this->toInfo([
+                                'Shortcut to set default worker options,',
+                                'instead of creating your own class just for that.'.
+                                'Available options: '.WorkerOptions::class,
+                            ]))
+                            ->prototype('variable')
+                            ->validate()
+                            ->always(function ($v) {
+                                $validOptions = array_keys(get_class_vars(WorkerOptions::class));
+                                foreach (array_keys($v) as $key) {
+                                    if (!in_array($key, $validOptions)) {
+                                        throw new \InvalidArgumentException(sprintf(
+                                            'Unknown worker option "%s". Available options are: %s',
+                                            $key,
+                                            implode(', ', $validOptions),
+                                        ));
+                                    }
+                                }
+
+                                return $v;
+                            })
+                            ->end()
+                        ->end()
+                    ->end()
                 ->end()
             ->end()
         ;

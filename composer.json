@@ -12,17 +12,18 @@
   "require": {
     "php": ">=8.1",
     "nyholm/psr7": "^1.8",
-    "spiral/roadrunner": "^v2024 || ^v2025",
-    "symfony/dependency-injection": "^7.0 || ^6.4 || ^5.4",
-    "symfony/http-kernel": "^7.0 || ^6.4 || ^5.4",
-    "symfony/psr-http-message-bridge": "^7.0 || ^6.4 || ^2.3",
-    "symfony/runtime": "^7.0 || ^6.4 || ^5.4",
-    "symfony/framework-bundle": "^7.0 || ^6.4 || ^5.4",
-    "symfony/event-dispatcher": "^7.0 || ^6.4 || ^5.4",
+    "spiral/roadrunner": "^v2025",
+    "symfony/dependency-injection": "^7.4 || ^6.4",
+    "symfony/http-kernel": "^7.4 || ^6.4",
+    "symfony/psr-http-message-bridge": "^7.4 || ^6.4",
+    "symfony/runtime": "^7.4 || ^6.4",
+    "symfony/framework-bundle": "^7.4 || ^6.4",
+    "symfony/event-dispatcher": "^7.4 || ^6.4",
     "spiral/roadrunner-worker": "^v3",
     "spiral/roadrunner-http": "^v3",
     "spiral/roadrunner-cli": "^v2",
-    "symfony/expression-language": "^7.3"
+    "symfony/expression-language": "^7.4 || ^6.4",
+    "symfony/property-access": "^7.4 || ^6.4"
   },
   "minimum-stability": "dev",
   "prefer-stable": true,
@@ -45,7 +46,7 @@
   "require-dev": {
     "sentry/sentry-symfony": "^4 || ^5",
     "phpunit/phpunit": "^10.5",
-    "symfony/mime": "^7.0 || ^6.4 || ^5.4",
+    "symfony/mime": "^7.0 || ^6.4",
     "roadrunner-php/centrifugo": "^v2",
     "spiral/roadrunner-kv": "^v4",
     "temporal/sdk": "^2.16"

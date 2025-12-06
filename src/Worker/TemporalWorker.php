@@ -8,6 +8,7 @@ use FluffyDiscord\RoadRunnerBundle\Temporal\TemporalWorkerInitializer;
 use Sentry\State\HubInterface as SentryHubInterface;
 use Symfony\Component\EventDispatcher\EventDispatcherInterface;
 use Symfony\Component\HttpKernel\KernelInterface;
+use Temporal\Worker\Transport\HostConnectionInterface;
 
 class TemporalWorker implements WorkerInterface
 {
@@ -16,6 +17,7 @@ class TemporalWorker implements WorkerInterface
         private readonly EventDispatcherInterface       $eventDispatcher,
         private readonly TemporalWorkerFactoryInterface $temporalWorkerFactory,
         private readonly TemporalWorkerInitializer      $temporalWorkerInitializer,
+        private readonly HostConnectionInterface        $hostConnection,
         private readonly ?SentryHubInterface            $sentryHubInterface = null,
     )
     {
@@ -31,6 +33,6 @@ class TemporalWorker implements WorkerInterface
 
         $this->temporalWorkerInitializer->initialize($workerFactory);
 
-        $workerFactory->run();
+        $workerFactory->run($this->hostConnection);
     }
 }

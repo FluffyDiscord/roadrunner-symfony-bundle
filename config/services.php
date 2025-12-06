@@ -8,6 +8,11 @@ use FluffyDiscord\RoadRunnerBundle\Factory\RPCConnectionFactory;
 use FluffyDiscord\RoadRunnerBundle\Factory\RPCFactory;
 use FluffyDiscord\RoadRunnerBundle\Temporal\DefaultTemporalWorker;
 use FluffyDiscord\RoadRunnerBundle\Temporal\DefaultTemporalWorkerFactory;
+use FluffyDiscord\RoadRunnerBundle\Temporal\Interceptor\ActivityInboundInterceptor;
+use FluffyDiscord\RoadRunnerBundle\Temporal\Interceptor\WorkflowClientCallsInterceptor;
+use FluffyDiscord\RoadRunnerBundle\Temporal\Interceptor\WorkflowInboundCallsInterceptor;
+use FluffyDiscord\RoadRunnerBundle\Temporal\Interceptor\WorkflowOutboundCallsInterceptor;
+use FluffyDiscord\RoadRunnerBundle\Temporal\TemporalCredentialsFactory;
 use FluffyDiscord\RoadRunnerBundle\Temporal\TemporalWorkerFactoryInterface;
 use FluffyDiscord\RoadRunnerBundle\Temporal\TemporalWorkerInitializer;
 use FluffyDiscord\RoadRunnerBundle\Temporal\TemporalWorkerInterface;
@@ -31,6 +36,16 @@ use Spiral\RoadRunner\WorkerInterface as RoadRunnerWorkerInterface;
 use Symfony\Bridge\PsrHttpMessage\HttpFoundationFactoryInterface;
 use Symfony\Component\EventDispatcher\EventDispatcherInterface;
 use Symfony\Component\HttpKernel\KernelInterface;
+use Temporal\DataConverter\DataConverter;
+use Temporal\DataConverter\DataConverterInterface;
+use Temporal\Exception\ExceptionInterceptor;
+use Temporal\Exception\ExceptionInterceptorInterface;
+use Temporal\Interceptor\PipelineProvider;
+use Temporal\Interceptor\SimplePipelineProvider;
+use Temporal\Internal\Interceptor\Interceptor;
+use Temporal\Worker\ServiceCredentials;
+use Temporal\Worker\Transport\HostConnectionInterface;
+use Temporal\Worker\Transport\RoadRunner;
 use Temporal\Worker\Transport\RPCConnectionInterface;
 use Temporal\Workflow\WorkflowInterface;
 
@@ -124,6 +139,7 @@ return static function (ContainerConfigurator $container) {
                 service(EventDispatcherInterface::class),
                 service(TemporalWorkerFactoryInterface::class),
                 service(TemporalWorkerInitializer::class),
+                service(HostConnectionInterface::class),
                 service(SentryHubInterface::class)->nullOnInvalid(),
             ])
         ;
@@ -149,16 +165,58 @@ return static function (ContainerConfigurator $container) {
             ->public()
             ->args([
                 service(RPCConnectionInterface::class),
+                service(DataConverterInterface::class),
+                service(ServiceCredentials::class),
             ])
         ;
 
         $services->alias(TemporalWorkerFactoryInterface::class, DefaultTemporalWorkerFactory::class);
 
         $services
+            ->set(ExceptionInterceptor::class)
+            ->public()
+            ->args([
+                [
+                    \Error::class,
+                ],
+            ])
+        ;
+
+        $services->alias(ExceptionInterceptorInterface::class, ExceptionInterceptor::class);
+
+        $services
+            ->set(DataConverter::class)
+            ->factory([DataConverter::class, 'createDefault'])
+        ;
+
+        $services->alias(DataConverterInterface::class, DataConverter::class);
+
+        $services
+            ->set(RoadRunner::class)
+            ->factory([RoadRunner::class, 'create'])
+            ->args([
+                service(EnvironmentInterface::class),
+            ])
+        ;
+
+        $services->alias(HostConnectionInterface::class, RoadRunner::class);
+
+        $services
+            ->set(ServiceCredentials::class)
+            ->factory([TemporalCredentialsFactory::class, 'create'])
+            ->args([
+                null,
+            ])
+        ;
+
+        $services
             ->set(DefaultTemporalWorker::class)
             ->public()
             ->args([
-                service('monolog.logger.temporal')->nullOnInvalid(), // TODO: not working
+                [],
+                service('monolog.logger.temporal')->nullOnInvalid(),
+                service(ExceptionInterceptorInterface::class),
+                service(PipelineProvider::class),
             ])
         ;
 
@@ -171,7 +229,58 @@ return static function (ContainerConfigurator $container) {
                 service(TemporalWorker::class),
             ])
         ;
+
+        $services
+            ->instanceof(Interceptor::class)
+            ->tag('fluffy_discord.roadrunner.temporal.interceptor')
+        ;
+
+        $services
+            ->set(SimplePipelineProvider::class)
+            ->args([
+                tagged_iterator('fluffy_discord.roadrunner.temporal.interceptor'),
+            ])
+        ;
+
+        $services->alias(PipelineProvider::class, SimplePipelineProvider::class);
+
+        $services
+            ->set(ActivityInboundInterceptor::class)
+            ->args([
+                service(EventDispatcherInterface::class),
+            ])
+        ;
+
+        $services->alias(\Temporal\Interceptor\ActivityInboundInterceptor::class, ActivityInboundInterceptor::class);
+
+        $services
+            ->set(WorkflowClientCallsInterceptor::class)
+            ->args([
+                service(EventDispatcherInterface::class),
+            ])
+        ;
+
+        $services->alias(\Temporal\Interceptor\WorkflowClientCallsInterceptor::class, WorkflowClientCallsInterceptor::class);
+
+        $services
+            ->set(WorkflowInboundCallsInterceptor::class)
+            ->args([
+                service(EventDispatcherInterface::class),
+            ])
+        ;
+
+        $services->alias(\Temporal\Interceptor\WorkflowInboundCallsInterceptor::class, WorkflowClientCallsInterceptor::class);
+
+        $services
+            ->set(WorkflowOutboundCallsInterceptor::class)
+            ->args([
+                service(EventDispatcherInterface::class),
+            ])
+        ;
+
+        $services->alias(\Temporal\Interceptor\WorkflowOutboundCallsInterceptor::class, WorkflowClientCallsInterceptor::class);
     }
+
 
     // Centrifugo
     if (class_exists(RoadRunnerCentrifugoWorker::class)) {
