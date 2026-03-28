@@ -3,7 +3,6 @@
 namespace FluffyDiscord\RoadRunnerBundle\Tests;
 
 use FluffyDiscord\RoadRunnerBundle\Factory\StreamedJsonResponseWrapper;
-use FluffyDiscord\RoadRunnerBundle\Tests\Attributes\SkipForSymfonyVersion;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Component\HttpFoundation\StreamedJsonResponse;
 
@@ -26,7 +25,6 @@ class StreamedJsonResponseTestCase extends BaseTestCase
         ];
     }
 
-    #[SkipForSymfonyVersion("<", "6.4")]
     #[DataProvider("responseProvider")]
     public function testVanillaResponse(
         StreamedJsonResponse $symfonyResponse,
@@ -43,7 +41,6 @@ class StreamedJsonResponseTestCase extends BaseTestCase
         );
     }
 
-    #[SkipForSymfonyVersion("<", "6.4")]
     #[DataProvider("responseProvider")]
     public function testBundleResponseWrapper(
         StreamedJsonResponse $symfonyResponse,

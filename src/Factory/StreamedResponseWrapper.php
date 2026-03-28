@@ -6,7 +6,6 @@ use Spiral\RoadRunner\Http\Exception\StreamStoppedException;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\RequestStack;
 use Symfony\Component\HttpFoundation\StreamedResponse;
-use Symfony\Component\HttpKernel\Kernel;
 
 /**
  * Basically a copy of BinaryFileResponse->sendContent()
@@ -16,11 +15,10 @@ class StreamedResponseWrapper
 {
     public static function wrap(StreamedResponse $response): \Generator
     {
-        if (Kernel::MAJOR_VERSION >= 6) {
-            $kernelCallback = $response->getCallback();
-        } else {
-            $ref = new \ReflectionClass($response);
-            $kernelCallback = $ref->getProperty("callback")->getValue($response);
+        $kernelCallback = $response->getCallback();
+        if ($kernelCallback === null) {
+            yield DefaultResponseWrapper::wrap($response);
+            return;
         }
 
         $kernelCallbackRef = new \ReflectionFunction($kernelCallback);
@@ -31,7 +29,13 @@ class StreamedResponseWrapper
             $closureVars["callback"] = $kernelCallback;
         }
 
-        $ref = new \ReflectionFunction($closureVars["callback"]);
+        $callback = $closureVars["callback"];
+        if (!$callback instanceof \Closure) {
+            yield DefaultResponseWrapper::wrap($response);
+            return;
+        }
+
+        $ref = new \ReflectionFunction($callback);
         if (!$ref->isGenerator()) {
             yield DefaultResponseWrapper::wrap($response);
             return;
@@ -45,9 +49,13 @@ class StreamedResponseWrapper
 
         // simulate Kernel wrap
         try {
-            $requestStack?->push($request);
+            if ($request !== null) {
+                $requestStack?->push($request);
+            }
 
-            foreach ($closureVars["callback"]() as $output) {
+            /** @var \Generator<mixed> $generator */
+            $generator = $callback();
+            foreach ($generator as $output) {
                 try {
                     yield $output;
                 } catch (StreamStoppedException) {

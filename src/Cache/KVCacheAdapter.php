@@ -8,6 +8,7 @@ use Spiral\Goridge\RPC\RPCInterface;
 use Spiral\RoadRunner\KeyValue\Factory;
 use Spiral\RoadRunner\KeyValue\Serializer\DefaultSerializer;
 use Spiral\RoadRunner\KeyValue\Serializer\IgbinarySerializer;
+use Spiral\RoadRunner\KeyValue\Serializer\SerializerInterface;
 use Spiral\RoadRunner\KeyValue\Serializer\SodiumSerializer;
 use Symfony\Component\Cache\Adapter\Psr16Adapter;
 
@@ -32,7 +33,11 @@ class KVCacheAdapter extends Psr16Adapter
                 throw new \LogicException(sprintf('Serializer class "%s" does not exist', $serializerClass));
             }
 
-            $serializer = new $serializerClass();
+            $instance = new $serializerClass();
+            if (!$instance instanceof SerializerInterface) {
+                throw new \LogicException(sprintf('Serializer class "%s" must implement %s', $serializerClass, SerializerInterface::class));
+            }
+            $serializer = $instance;
         }
 
         $factory = new Factory(
@@ -63,6 +68,6 @@ class KVCacheAdapter extends Psr16Adapter
             $factory = $factory->withSerializer($sodiumSerializer);
         }
 
-        return new self($factory->select($name), $namespace);
+        return new self($factory->select($name ?: throw new \LogicException('KV store name must not be empty')), $namespace);
     }
 }

@@ -12,13 +12,17 @@ class StreamedJsonResponseWrapper
     {
         $reflectionClass = new \ReflectionClass($response);
 
+        /** @var int $encodingOptions */
         $encodingOptions = $reflectionClass->getProperty("encodingOptions")->getValue($response);
+        /** @var iterable<mixed> $data */
         $data = $reflectionClass->getProperty("data")->getValue($response);
+        /** @var string $placeholder */
         $placeholder = $reflectionClass->getConstant("PLACEHOLDER");
 
         return self::stream($data, $encodingOptions, $placeholder);
     }
 
+    /** @param iterable<mixed> $data */
     private static function stream(iterable $data, int $encodingOptions, string $placeholder): \Generator
     {
         $jsonEncodingOptions = \JSON_THROW_ON_ERROR | $encodingOptions;
@@ -48,6 +52,7 @@ class StreamedJsonResponseWrapper
         yield json_encode($data, $jsonEncodingOptions);
     }
 
+    /** @param array<mixed> $data */
     private static function streamArray(array $data, int $jsonEncodingOptions, int $keyEncodingOptions, string $placeholder): \Generator
     {
         $generators = [];
@@ -70,7 +75,7 @@ class StreamedJsonResponseWrapper
             }
         });
 
-        $jsonParts = explode('"' . $placeholder . '"', json_encode($data, $jsonEncodingOptions));
+        $jsonParts = explode('"' . $placeholder . '"', (string)json_encode($data, $jsonEncodingOptions));
 
         foreach ($generators as $index => $generator) {
             // send first and between parts of the structure
@@ -85,6 +90,7 @@ class StreamedJsonResponseWrapper
         yield $jsonParts[array_key_last($jsonParts)];
     }
 
+    /** @param iterable<mixed, mixed> $iterable */
     private static function streamIterable(iterable $iterable, int $jsonEncodingOptions, int $keyEncodingOptions, string $placeholder): \Generator
     {
         $isFirstItem = true;
@@ -107,6 +113,7 @@ class StreamedJsonResponseWrapper
             }
 
             if ('{' === $startTag) {
+                /** @var int|string $key */
                 yield json_encode((string)$key, $keyEncodingOptions) . ':';
             }
 

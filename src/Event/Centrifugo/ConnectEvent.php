@@ -29,6 +29,9 @@ class ConnectEvent extends Event implements CentrifugoEventInterface
 
     public function setResponse(ConnectResponse|ResponseInterface|null $response): self
     {
+        if ($response !== null && !$response instanceof ConnectResponse) {
+            throw new \InvalidArgumentException(sprintf('Expected %s, got %s', ConnectResponse::class, $response::class));
+        }
         $this->response = $response;
         return $this;
     }

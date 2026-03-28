@@ -5,11 +5,11 @@ namespace FluffyDiscord\RoadRunnerBundle\Tests\Attributes;
 use Composer\InstalledVersions;
 
 #[\Attribute(\Attribute::TARGET_METHOD)]
-class SkipForSymfonyVersion
+readonly class SkipForSymfonyVersion
 {
     public function __construct(
-        public readonly string $operator,
-        public readonly string $version,
+        public string $operator,
+        public string $version,
     )
     {
     }

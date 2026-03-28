@@ -10,8 +10,9 @@ class Runtime extends SymfonyRuntime
 {
     public function getRunner(?object $application): RunnerInterface
     {
-        if ($application instanceof KernelInterface && false !== getenv("RR_MODE")) {
-            return new Runner($application, getenv("RR_MODE"));
+        $rrMode = getenv("RR_MODE");
+        if ($application instanceof KernelInterface && $rrMode !== false) {
+            return new Runner($application, $rrMode);
         }
 
         return parent::getRunner($application);

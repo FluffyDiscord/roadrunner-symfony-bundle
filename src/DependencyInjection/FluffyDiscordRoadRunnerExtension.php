@@ -24,29 +24,26 @@ class FluffyDiscordRoadRunnerExtension extends Extension
         $loader->load("services.php");
 
         $configuration = $this->getConfiguration([], $container);
+        /** @var array{http: array{early_router_initialization: bool, lazy_boot: bool}, centrifugo: array{lazy_boot: bool}, kv: array{auto_register: bool, serializer: ?string, keypair_path: ?string}, rr_config_path: ?string} $config */
         $config = $this->processConfiguration($configuration, $configs);
 
         if ($container->hasDefinition(HttpWorker::class)) {
-            if (isset($config["http"]["early_router_initialization"])) {
-                $definition = $container->getDefinition(HttpWorker::class);
-                $definition->replaceArgument(0, $config["http"]["early_router_initialization"]);
-            }
-
-            if (isset($config["http"]["lazy_boot"])) {
-                $definition = $container->getDefinition(HttpWorker::class);
-                $definition->replaceArgument(1, $config["http"]["lazy_boot"]);
-            }
+            $definition = $container->getDefinition(HttpWorker::class);
+            $definition->replaceArgument(0, $config["http"]["early_router_initialization"]);
+            $definition->replaceArgument(1, $config["http"]["lazy_boot"]);
         }
 
-        if (isset($config["centrifugo"]["lazy_boot"]) && $container->hasDefinition(CentrifugoWorker::class)) {
+        if ($container->hasDefinition(CentrifugoWorker::class)) {
             $definition = $container->getDefinition(CentrifugoWorker::class);
             $definition->replaceArgument(0, $config["centrifugo"]["lazy_boot"]);
         }
 
-        if (class_exists(Cache::class) && (!isset($config["kv"]["auto_register"]) || $config["kv"]["auto_register"] === true)) {
+        if (class_exists(Cache::class) && $config["kv"]["auto_register"] === true) {
             $rrConfig = $this->getRoadRunnerConfig($container, $config);
 
-            foreach (array_keys($rrConfig["kv"] ?? []) as $name) {
+            /** @var array<string, mixed> $kvConfig */
+            $kvConfig = $rrConfig["kv"] ?? [];
+            foreach (array_keys($kvConfig) as $name) {
                 $container
                     ->register("cache.adapter.rr_kv.{$name}", KVCacheAdapter::class)
                     ->setFactory([KVCacheAdapter::class, "create"])
@@ -55,14 +52,17 @@ class FluffyDiscordRoadRunnerExtension extends Extension
                         $container->getDefinition(RPCInterface::class),
                         $name,
                         $container->getParameter("kernel.project_dir"),
-                        $config["kv"]["serializer"] ?? null,
-                        $config["kv"]["keypair_path"] ?? null,
+                        $config["kv"]["serializer"],
+                        $config["kv"]["keypair_path"],
                     ])
                 ;
             }
         }
     }
 
+    /** @param array{rr_config_path: ?string} $config
+     *  @return array<string, mixed>
+     */
     private function getRoadRunnerConfig(ContainerBuilder $container, array $config): array
     {
         try {
@@ -71,13 +71,21 @@ class FluffyDiscordRoadRunnerExtension extends Extension
             throw new CacheAutoRegisterException($invalidRPCConfigurationException->getMessage(), previous: $invalidRPCConfigurationException);
         }
 
+        assert($rpc instanceof RPCInterface);
+
         try {
-            return json_decode(base64_decode($rpc->call("rpc.Config", null)), true, 512, JSON_THROW_ON_ERROR);
+            /** @var string $rpcResult */
+            $rpcResult = $rpc->call("rpc.Config", null);
+            /** @var array<string, mixed> $decoded */
+            $decoded = json_decode(base64_decode($rpcResult), true, 512, JSON_THROW_ON_ERROR);
+            return $decoded;
         } catch (\JsonException $jsonException) {
             throw new CacheAutoRegisterException($jsonException->getMessage(), previous: $jsonException);
         } catch (RelayException $relayException) {
             if ($config["rr_config_path"] !== null) {
-                $rrConfigPathname = $container->getParameter("kernel.project_dir") . "/" . $config["rr_config_path"];
+                /** @var string $projectDir */
+                $projectDir = $container->getParameter("kernel.project_dir");
+                $rrConfigPathname = $projectDir . "/" . $config["rr_config_path"];
                 if (!file_exists($rrConfigPathname)) {
                     throw new CacheAutoRegisterException(sprintf('Specified RoadRunner config was not found: %s', $rrConfigPathname), previous: $relayException);
                 }
@@ -87,6 +95,7 @@ class FluffyDiscordRoadRunnerExtension extends Extension
                     throw new CacheAutoRegisterException(sprintf('Unable to read RoadRunner config, check permissions: %s', $rrConfigPathname), previous: $relayException);
                 }
 
+                /** @var array<string, mixed> */
                 return Yaml::parse($yamlConfig);
             }
 

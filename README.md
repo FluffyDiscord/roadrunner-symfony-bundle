@@ -47,16 +47,15 @@ class Kernel extends BaseKernel
 ```
 
 The default behavior of Symfony's kernel is to reset your services 
-before request is handled and slows down the initial reaction time.
+before request is handled and this adds latency to every request.
 
-|    |  When new request arrives  |  Your app  |  After response was sent back  |
-| -- | ------------------------| ----------------| ----------------------- |
-| Symfony | does a reset, if something fails here, request may be lost | waits for reset to be done, then handles your request |  |
-| RoadRunnerBundle |  | immediately handles your request | does a reset |  
+|    | When new request arrives                                           | Your app                                              | After response was sent back |
+| -- |--------------------------------------------------------------------|-------------------------------------------------------|------------------------------|
+| Symfony | does a reset, if something fails here, request won't be handled    | waits for reset to be done, then handles your request | **kernel does nothing**          |
+| RoadRunnerBundle | **kernel does nothing**, this ensures request is passed to you app |       immediately handles your request                                  | does a reset                 |  
 
-You might want to manually refresh Doctrine connections before each request is handled 
-you are using `Mysql`, `MariaDB` or other database that cannot handle long/persistent
-connection. For this, it's up to you to create event listener for `WorkerRequestReceivedEvent`
+- `PostgreSQL` - **no need to do anything**, if you did not disable persistent connections
+- `Mysql`, `MariaDB` - create listener for `WorkerRequestReceivedEvent` and reset your database connections
 
 ## Configuration
 
@@ -143,31 +142,30 @@ fluffy_discord_road_runner:
 ```
 
 
-## Running behind a load balancer or a proxy
+## Running behind a load balancer/reverse proxy
 If you want to use `REMOTE_ADDR` as [trusted proxy](https://symfony.com/doc/current/deployment/proxies.html#solution-settrustedproxies), replace it with `private_ranges` instead 
 or else your trusted headers will not work.
 
 Symfony is using the `$_SERVER['REMOTE_ADDR']` to find out the proxy address,
 but in the context of RoadRunner, `$_SERVER` contains only environment 
-variables and the `REMOTE_ADDS` is missing.
-
+variables and the `REMOTE_ADDS` is missing. This is intentional.
 
 
 ## Response/file streaming
 
-Build-in full support for Symfony's `BinaryFileResponse` and `StreamedJsonResponse`. The `StreamedResponse` needs one little 
-change to be fully streamable - you have to change the `callback` to a `\Generator`, replacing all `echo` with `yield`. Look at the example:
+Build-in support for Symfony's `BinaryFileResponse`, `StreamedResponse` and `StreamedJsonResponse`. Stream responses need one little 
+change to be fully streamable - you have to change their `callback` to a `\Generator` and replace all `echo` with `yield`. Look at the example:
 
 ```php
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
-class MyController
+#[Route("/stream")]
+class MyStreamController
 {
-    #[Route("/stream")]
-    public function myStreamResponse() 
+    public function __invoke() 
     {
         return new StreamedResponse(
-            function () {
+            function (): \Generator {
                 // replace all 'echo' or any outputs with 'yield'
                 // echo "data";
                 yield "data";
@@ -180,6 +178,16 @@ class MyController
 ## Sentry
 
 Built in support for [Sentry](https://packagist.org/packages/sentry/sentry-symfony). Just install & configure it as you normally do.
+
+```shell
+composer require sentry/sentry-symfony
+```
+
+## Monolog
+
+If possible, [do not use fingers_crossed](https://symfony.com/doc/current/logging.html#logging-handler-fingers_crossed) handler. It is made to [leak memory by design](https://symfony.com/doc/current/messenger.html#stateless-worker).
+Nevertheless, this bundle is still somewhat compatible with it due to calling `ServiceResetter` after each response. If you encounter hard error,
+your logs might be missing though. Nothing to be done there.
 
 ```shell
 composer require sentry/sentry-symfony

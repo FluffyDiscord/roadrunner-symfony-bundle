@@ -29,6 +29,9 @@ class SubRefreshEvent extends Event implements CentrifugoEventInterface
 
     public function setResponse(SubRefreshResponse|ResponseInterface|null $response): self
     {
+        if ($response !== null && !$response instanceof SubRefreshResponse) {
+            throw new \InvalidArgumentException(sprintf('Expected %s, got %s', SubRefreshResponse::class, $response::class));
+        }
         $this->response = $response;
         return $this;
     }

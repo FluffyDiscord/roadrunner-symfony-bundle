@@ -11,8 +11,8 @@ class BinaryFileResponseTestCase extends BaseTestCase
 {
     public static function responseProvider(): array
     {
-        $fileWithContent = __DIR__ . "/dummy/civic_renewal_forms.zip";
-        $emptyFile = __DIR__ . "/dummy/empty.txt";
+        $fileWithContent = __DIR__ . "/_dummy/civic_renewal_forms.zip";
+        $emptyFile = __DIR__ . "/_dummy/empty.txt";
 
         return [
             "Whole and with range starting from zero"       => [new BinaryFileResponse($fileWithContent), file_get_contents($fileWithContent), 0, 6023],
