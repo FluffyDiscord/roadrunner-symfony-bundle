@@ -2,15 +2,19 @@
 
 namespace FluffyDiscord\RoadRunnerBundle\DependencyInjection;
 
+use FluffyDiscord\RoadRunnerBundle\Attribute\AsCentrifugoChannelListener;
+use FluffyDiscord\RoadRunnerBundle\Attribute\AsCentrifugoRpcListener;
 use FluffyDiscord\RoadRunnerBundle\Cache\KVCacheAdapter;
 use FluffyDiscord\RoadRunnerBundle\Exception\CacheAutoRegisterException;
 use FluffyDiscord\RoadRunnerBundle\Exception\InvalidRPCConfigurationException;
 use FluffyDiscord\RoadRunnerBundle\Worker\CentrifugoWorker;
 use FluffyDiscord\RoadRunnerBundle\Worker\HttpWorker;
+use RoadRunner\Centrifugo\CentrifugoWorker as RoadRunnerCentrifugoWorker;
 use Spiral\Goridge\Exception\RelayException;
 use Spiral\Goridge\RPC\RPCInterface;
 use Spiral\RoadRunner\KeyValue\Cache;
 use Symfony\Component\Config\FileLocator;
+use Symfony\Component\DependencyInjection\ChildDefinition;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\Extension\Extension;
 use Symfony\Component\DependencyInjection\Loader\PhpFileLoader;
@@ -22,6 +26,45 @@ class FluffyDiscordRoadRunnerExtension extends Extension
     {
         $loader = new PhpFileLoader($container, new FileLocator(__DIR__ . "/../../config"));
         $loader->load("services.php");
+
+        if (class_exists(RoadRunnerCentrifugoWorker::class)) {
+            $container->registerAttributeForAutoconfiguration(
+                AsCentrifugoChannelListener::class,
+                static function (ChildDefinition $definition, AsCentrifugoChannelListener $attr, \ReflectionClass|\ReflectionMethod $refl): void {
+                    $tag = [
+                        'channel'  => $attr->channel,
+                        'event'    => $attr->event,
+                        'priority' => $attr->priority,
+                        'method'   => $attr->method,
+                    ];
+                    if ($refl instanceof \ReflectionMethod) {
+                        $tag['method'] = $refl->getName();
+                        if ($tag['event'] === null) {
+                            $params = $refl->getParameters();
+                            if ($params !== [] && ($type = $params[0]->getType()) instanceof \ReflectionNamedType) {
+                                $tag['event'] = $type->getName();
+                            }
+                        }
+                    }
+                    $definition->addTag('fluffy_discord.centrifugo_channel_listener', $tag);
+                },
+            );
+
+            $container->registerAttributeForAutoconfiguration(
+                AsCentrifugoRpcListener::class,
+                static function (ChildDefinition $definition, AsCentrifugoRpcListener $attr, \ReflectionClass|\ReflectionMethod $refl): void {
+                    $tag = [
+                        'rpc_method' => $attr->rpcMethod,
+                        'priority'   => $attr->priority,
+                        'method'     => $attr->method,
+                    ];
+                    if ($refl instanceof \ReflectionMethod) {
+                        $tag['method'] = $refl->getName();
+                    }
+                    $definition->addTag('fluffy_discord.centrifugo_rpc_listener', $tag);
+                },
+            );
+        }
 
         $configuration = $this->getConfiguration([], $container);
         /** @var array{http: array{early_router_initialization: bool, lazy_boot: bool}, centrifugo: array{lazy_boot: bool}, kv: array{auto_register: bool, serializer: ?string, keypair_path: ?string}, rr_config_path: ?string} $config */

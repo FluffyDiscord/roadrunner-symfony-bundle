@@ -250,6 +250,104 @@ readonly class ChatListener
 
 Be aware that if you do not set any response, bundle will send `DisconnectResponse` back by default.
 
+### Channel and RPC routing
+
+Instead of writing a single listener and manually handle each event, you can use the dedicated routing attributes.
+
+#### `#[AsCentrifugoChannelListener]`
+
+Routes `PublishEvent`, `SubscribeEvent`, `SubRefreshEvent`, and `ConnectEvent` to specific methods based on the channel name. Supports `*` as a wildcard.
+
+```php
+<?php
+
+namespace App\EventListener;
+
+use FluffyDiscord\RoadRunnerBundle\Attribute\AsCentrifugoChannelListener;
+use FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\PublishEvent;
+use FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\SubscribeEvent;
+
+class ChatListener
+{
+    // Event is inferred from the method's type hint.
+    // Only called for PublishEvent on channel "news".
+    #[AsCentrifugoChannelListener(channel: 'news')]
+    public function onNewsPublish(PublishEvent $event): void
+    {
+        // handle publish to the "news" channel
+    }
+
+    // Wildcard: matches "chat:general", "chat:room-42", etc.
+    #[AsCentrifugoChannelListener(channel: 'chat:*', priority: 10)]
+    public function onChatSubscribe(SubscribeEvent $event): void
+    {
+        $channel = $event->getRequest()->channel;
+        // handle subscription to any "chat:*" channel
+    }
+}
+```
+
+When placed on the **class**, you must also specify `event` and `method`:
+
+```php
+#[AsCentrifugoChannelListener(channel: 'private:*', event: PublishEvent::class, method: 'handle')]
+class PrivateChannelHandler
+{
+    public function handle(PublishEvent $event): void { ... }
+}
+```
+
+**Parameters:**
+
+| Parameter  | Type      | Default      | Description |
+|------------|-----------|--------------|-------------|
+| `channel`  | `string`  | *(required)* | Exact channel name or pattern with `*` wildcard (e.g. `chat:*`) |
+| `event`    | `?string` | `null`       | Event class FQCN. Optional on methods — inferred from the first parameter type hint |
+| `priority` | `int`     | `0`          | Higher = called first (within matched handlers for this channel) |
+| `method`   | `?string` | `null`       | Method to call. Auto-detected when placed on a method |
+
+#### `#[AsCentrifugoRpcListener]`
+
+Routes `RPCEvent` to a specific method based on the RPC method name.
+
+```php
+<?php
+
+namespace App\EventListener;
+
+use FluffyDiscord\RoadRunnerBundle\Attribute\AsCentrifugoRpcListener;
+use FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\RPCEvent;
+use RoadRunner\Centrifugo\Payload\RPCResponse;
+
+class RpcHandler
+{
+    #[AsCentrifugoRpcListener(rpcMethod: 'ping')]
+    public function onPing(RPCEvent $event): void
+    {
+        $event->setResponse(new RPCResponse(data: ['pong' => true]));
+    }
+
+    #[AsCentrifugoRpcListener(rpcMethod: 'getUserInfo')]
+    public function onGetUserInfo(RPCEvent $event): void
+    {
+        $data = $event->getRequest()->getData();
+        // ...
+    }
+}
+```
+
+**Parameters:**
+
+| Parameter   | Type      | Default      | Description |
+|-------------|-----------|--------------|-------------|
+| `rpcMethod` | `string`  | *(required)* | Exact RPC method name (matched against `RPCEvent::getRequest()->method`) |
+| `priority`  | `int`     | `0`          | Higher = called first |
+| `method`    | `?string` | `null`       | Method to call. Auto-detected when placed on a method |
+
+#### How it works
+
+The routing table is built **at container compile time** — there is no runtime overhead beyond a single hash-map lookup per request. Handlers are dispatched in priority order and respect `stopPropagation()`. The routing listeners fire at priority `-100`, after any plain `#[AsEventListener]` handlers at default priority `0`.
+
 ## Developing with Symfony and RoadRunner
 
 - If possible, stop using lazy loading in your services, inject services immediately. Lazy loaded services might introduce memory leaks and make your services slower to initialize when requests arrive.
