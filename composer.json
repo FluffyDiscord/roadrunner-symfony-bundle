@@ -1,54 +1,56 @@
 {
-  "name": "fluffydiscord/roadrunner-symfony-bundle",
-  "description": "Roadrunner runtime for Symfony",
-  "license": "MIT",
-  "type": "library",
-  "authors": [
-    {
-      "name": "Rostislav Kaleta",
-      "email": "rostislavkaleta@gmail.com"
+    "name" : "fluffydiscord/roadrunner-symfony-bundle",
+    "description" : "Roadrunner runtime for Symfony",
+    "license" : "MIT",
+    "type" : "library",
+    "authors" : [
+        {
+            "name" : "Rostislav Kaleta",
+            "email" : "rostislavkaleta@gmail.com"
+        }
+    ],
+    "require" : {
+        "php" : ">=8.5",
+        "ext-protobuf" : "*",
+        "nyholm/psr7" : "^1.8",
+        "spiral/roadrunner" : "^v2025 || ^3",
+        "symfony/dependency-injection" : "^7.4 || ^8",
+        "symfony/http-kernel" : "^7.4 || ^8",
+        "symfony/psr-http-message-bridge" : "^7.4 || ^8",
+        "symfony/runtime" : "^7.4 || ^8",
+        "symfony/framework-bundle" : "^7.4 || ^8",
+        "symfony/event-dispatcher" : "^7.4 || ^8",
+        "symfony/expression-language" : "^7.4 || ^8",
+        "spiral/roadrunner-worker" : "^v3",
+        "spiral/roadrunner-http" : "^v4",
+        "spiral/roadrunner-cli" : "^v2"
+    },
+    "minimum-stability" : "dev",
+    "prefer-stable" : true,
+    "autoload" : {
+        "psr-4" : {
+            "FluffyDiscord\\RoadRunnerBundle\\" : "src/"
+        }
+    },
+    "autoload-dev" : {
+        "psr-4" : {
+            "FluffyDiscord\\RoadRunnerBundle\\Tests\\" : "tests/"
+        },
+        "symfony/runtime" : true
+    },
+    "config" : {
+        "allow-plugins" : {
+            "php-http/discovery" : true,
+            "symfony/runtime" : true
+        }
+    },
+    "require-dev" : {
+        "sentry/sentry-symfony" : "^5",
+        "phpunit/phpunit" : "^13",
+        "symfony/mime" : "^7.4 || ^8",
+        "roadrunner-php/centrifugo" : "^v2",
+        "spiral/roadrunner-kv" : "^v4",
+        "phpstan/phpstan" : "^2.1",
+        "phpstan/phpstan-symfony" : "^2.0"
     }
-  ],
-  "require": {
-    "php": ">=8.5",
-    "nyholm/psr7": "^1.8",
-    "spiral/roadrunner": "^v2025 || ^3",
-    "symfony/dependency-injection": "^7.4 || ^8",
-    "symfony/http-kernel": "^7.4 || ^8",
-    "symfony/psr-http-message-bridge": "^7.4 || ^8",
-    "symfony/runtime": "^7.4 || ^8",
-    "symfony/framework-bundle": "^7.4 || ^8",
-    "symfony/event-dispatcher": "^7.4 || ^8",
-    "symfony/expression-language": "^7.4 || ^8",
-    "spiral/roadrunner-worker": "^v3",
-    "spiral/roadrunner-http": "^v4",
-    "spiral/roadrunner-cli": "^v2"
-  },
-  "minimum-stability": "dev",
-  "prefer-stable": true,
-  "autoload": {
-    "psr-4": {
-      "FluffyDiscord\\RoadRunnerBundle\\": "src/"
-    }
-  },
-  "autoload-dev": {
-    "psr-4": {
-      "FluffyDiscord\\RoadRunnerBundle\\Tests\\": "tests/"
-    }
-  },
-  "config": {
-    "allow-plugins": {
-      "symfony/runtime": true,
-      "php-http/discovery": true
-    }
-  },
-  "require-dev": {
-    "sentry/sentry-symfony": "^5",
-    "phpunit/phpunit": "^13",
-    "symfony/mime": "^7.4 || ^8",
-    "roadrunner-php/centrifugo": "^v2",
-    "spiral/roadrunner-kv": "^v4",
-    "phpstan/phpstan": "^2.1",
-    "phpstan/phpstan-symfony": "^2.0"
-  }
 }
