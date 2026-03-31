@@ -39,8 +39,9 @@
     },
     "config" : {
         "allow-plugins" : {
-            "php-http/discovery" : true,
-            "symfony/runtime" : true
+            "php-http/discovery": true,
+            "symfony/runtime": true,
+            "phpstan/extension-installer": true
         }
     },
     "require-dev" : {
@@ -50,6 +51,7 @@
         "roadrunner-php/centrifugo" : "^v2",
         "spiral/roadrunner-kv" : "^v4",
         "phpstan/phpstan" : "^2.1",
-        "phpstan/phpstan-symfony" : "^2.0"
+        "phpstan/phpstan-symfony" : "^2.0",
+        "phpstan/extension-installer": "^1.4"
     }
 }
