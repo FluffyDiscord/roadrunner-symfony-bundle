@@ -27,6 +27,10 @@ class FluffyDiscordRoadRunnerExtension extends Extension
         $loader = new PhpFileLoader($container, new FileLocator(__DIR__ . "/../../config"));
         $loader->load("services.php");
 
+        if ($container->getParameter('kernel.debug')) {
+            $loader->load("debug.php");
+        }
+
         if (class_exists(RoadRunnerCentrifugoWorker::class)) {
             $container->registerAttributeForAutoconfiguration(
                 AsCentrifugoChannelListener::class,
