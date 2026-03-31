@@ -107,8 +107,37 @@ class FluffyDiscordRoadRunnerExtension extends Extension
         }
     }
 
-    /** @param array{rr_config_path: ?string} $config
-     *  @return array<string, mixed>
+    /**
+     * @return array<string, mixed>
+     */
+    private function readRoadRunnerYaml(ContainerBuilder $container, ?string $rrConfigPath): array
+    {
+        if ($rrConfigPath === null) {
+            return [];
+        }
+
+        /** @var string $projectDir */
+        $projectDir = $container->getParameter("kernel.project_dir");
+        $pathname = $projectDir . "/" . $rrConfigPath;
+
+        $content = @file_get_contents($pathname);
+        if ($content === false) {
+            return [];
+        }
+
+        /** @var array<string, mixed> $parsed */
+        $parsed = Yaml::parse($content) ?? [];
+
+        return $parsed;
+    }
+
+    /**
+     * Returns the live RoadRunner config via RPC, falling back to the
+     * YAML file when RPC is unavailable.  Throws on hard failures so
+     * that KV auto-register gets clear error messages.
+     *
+     * @param array{rr_config_path: ?string} $config
+     * @return array<string, mixed>
      */
     private function getRoadRunnerConfig(ContainerBuilder $container, array $config): array
     {
@@ -129,21 +158,18 @@ class FluffyDiscordRoadRunnerExtension extends Extension
         } catch (\JsonException $jsonException) {
             throw new CacheAutoRegisterException($jsonException->getMessage(), previous: $jsonException);
         } catch (RelayException $relayException) {
+            $yaml = $this->readRoadRunnerYaml($container, $config["rr_config_path"]);
+            if ($yaml !== []) {
+                return $yaml;
+            }
+
             if ($config["rr_config_path"] !== null) {
                 /** @var string $projectDir */
                 $projectDir = $container->getParameter("kernel.project_dir");
-                $rrConfigPathname = $projectDir . "/" . $config["rr_config_path"];
-                if (!file_exists($rrConfigPathname)) {
-                    throw new CacheAutoRegisterException(sprintf('Specified RoadRunner config was not found: %s', $rrConfigPathname), previous: $relayException);
-                }
-
-                $yamlConfig = @file_get_contents($rrConfigPathname);
-                if ($yamlConfig === false) {
-                    throw new CacheAutoRegisterException(sprintf('Unable to read RoadRunner config, check permissions: %s', $rrConfigPathname), previous: $relayException);
-                }
-
-                /** @var array<string, mixed> */
-                return Yaml::parse($yamlConfig);
+                throw new CacheAutoRegisterException(
+                    sprintf('Unable to read RoadRunner config: %s', $projectDir . "/" . $config["rr_config_path"]),
+                    previous: $relayException,
+                );
             }
 
             throw new CacheAutoRegisterException('Error connecting to RPC service. Is RoadRunner running? Optionally set "rr_config_path" in bundle\'s config.', previous: $relayException);

@@ -48,7 +48,8 @@ class HttpWorkerExceptionTest extends AbstractHttpWorkerTestCase
             ->method('respond')
             ->with($this->callback(
                 fn($r) => $r->getStatusCode() === Response::HTTP_INTERNAL_SERVER_ERROR
-                    && str_contains((string)$r->getBody(), (string)$exception),
+                    && str_contains((string)$r->getBody(), 'debug info')
+                    && str_contains((string)$r->getBody(), 'RuntimeException'),
             ))
         ;
 

@@ -11,12 +11,15 @@ readonly class Runner implements RunnerInterface
     public function __construct(
         private KernelInterface $kernel,
         private string          $mode,
+        private string          $runtimeMode,
     )
     {
     }
 
     public function run(): int
     {
+        $_SERVER['APP_RUNTIME_MODE'] = $this->runtimeMode;
+
         $this->kernel->boot();
 
         $registry = $this->kernel->getContainer()->get(WorkerRegistry::class);

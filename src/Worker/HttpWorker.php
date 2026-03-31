@@ -18,6 +18,7 @@ use Symfony\Component\EventDispatcher\EventDispatcherInterface;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\ErrorHandler\ErrorRenderer\HtmlErrorRenderer;
 use Symfony\Component\HttpFoundation\StreamedJsonResponse;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 use Symfony\Component\HttpKernel\DependencyInjection\ServicesResetterInterface;
@@ -59,6 +60,8 @@ class HttpWorker implements WorkerInterface
 
     public function start(): void
     {
+        ignore_user_abort(true);
+
         $worker = $this->createPsr7Worker();
 
         if (!$this->lazyBoot) {
@@ -129,7 +132,16 @@ class HttpWorker implements WorkerInterface
 
                 if(!$responseSent) {
                     if($this->debug) {
-                        $worker->respond(new Psr7\Response(Response::HTTP_INTERNAL_SERVER_ERROR, body: (string)$throwable));
+                        try {
+                            $flattenException = new HtmlErrorRenderer(true)->render($throwable);
+                            $worker->respond(new Psr7\Response(
+                                $flattenException->getStatusCode(),
+                                $flattenException->getHeaders(),
+                                $flattenException->getAsString(),
+                            ));
+                        } catch (\Throwable) {
+                            $worker->respond(new Psr7\Response(Response::HTTP_INTERNAL_SERVER_ERROR, body: (string)$throwable));
+                        }
                     } else {
                         $worker->respond(new Psr7\Response(Response::HTTP_INTERNAL_SERVER_ERROR));
                     }
