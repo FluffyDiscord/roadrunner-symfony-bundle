@@ -14,11 +14,11 @@ use Sentry\State\HubInterface as SentryHubInterface;
 use Spiral\RoadRunner;
 use Symfony\Bridge\PsrHttpMessage\Factory\HttpFoundationFactory;
 use Symfony\Bridge\PsrHttpMessage\HttpFoundationFactoryInterface;
+use Symfony\Component\ErrorHandler\ErrorRenderer\HtmlErrorRenderer;
 use Symfony\Component\EventDispatcher\EventDispatcherInterface;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
-use Symfony\Component\ErrorHandler\ErrorRenderer\HtmlErrorRenderer;
 use Symfony\Component\HttpFoundation\StreamedJsonResponse;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 use Symfony\Component\HttpKernel\DependencyInjection\ServicesResetterInterface;
@@ -31,17 +31,22 @@ class HttpWorker implements WorkerInterface
     private HttpFoundationFactoryInterface $httpFoundationFactory;
     private Psr7\Factory\Psr17Factory $psrFactory;
 
+    /**
+     * to support early hints
+     */
+    public static ?\Spiral\RoadRunner\Http\HttpWorker $currentHttpWorker = null;
+
     public const string DUMMY_REQUEST_ATTRIBUTE = "rr_dummy_request";
 
     public function __construct(
-        private readonly bool                     $earlyRouterInitialization,
-        private readonly bool                     $lazyBoot,
-        private readonly KernelInterface          $kernel,
-        private readonly EventDispatcherInterface $eventDispatcher,
-        private readonly bool                     $debug,
+        private readonly bool                       $earlyRouterInitialization,
+        private readonly bool                       $lazyBoot,
+        private readonly KernelInterface            $kernel,
+        private readonly EventDispatcherInterface   $eventDispatcher,
+        private readonly bool                       $debug,
         private readonly ?ServicesResetterInterface $servicesResetter,
-        private readonly ?SentryHubInterface      $sentryHubInterface = null,
-        ?HttpFoundationFactoryInterface           $httpFoundationFactory = null,
+        private readonly ?SentryHubInterface        $sentryHubInterface = null,
+        ?HttpFoundationFactoryInterface             $httpFoundationFactory = null,
     )
     {
         $this->psrFactory = new Psr7\Factory\Psr17Factory();
@@ -63,6 +68,12 @@ class HttpWorker implements WorkerInterface
         ignore_user_abort(true);
 
         $worker = $this->createPsr7Worker();
+        self::$currentHttpWorker = $worker->getHttpWorker();
+
+        // support for early hints
+        if (!\function_exists('headers_send')) {
+            require_once __DIR__ . '/../Resources/headers_send_polyfill.php';
+        }
 
         if (!$this->lazyBoot) {
             $this->kernel->boot();
@@ -128,10 +139,11 @@ class HttpWorker implements WorkerInterface
 
                 try {
                     $this->sentryHubInterface?->captureException($throwable);
-                } catch (\Throwable) {}
+                } catch (\Throwable) {
+                }
 
-                if(!$responseSent) {
-                    if($this->debug) {
+                if (!$responseSent) {
+                    if ($this->debug) {
                         try {
                             $flattenException = new HtmlErrorRenderer(true)->render($throwable);
                             $worker->respond(new Psr7\Response(
@@ -178,10 +190,12 @@ class HttpWorker implements WorkerInterface
 
                 try {
                     $this->sentryHubInterface?->getClient()?->flush();
-                } catch (\Throwable) {}
+                } catch (\Throwable) {
+                }
                 try {
                     $this->sentryHubInterface?->popScope();
-                } catch (\Throwable) {}
+                } catch (\Throwable) {
+                }
 
                 unset($request, $symfonyRequest, $symfonyResponse, $content);
             }
