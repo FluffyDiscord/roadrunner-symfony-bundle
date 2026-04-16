@@ -175,6 +175,12 @@ class MyStreamController
 }
 ```
 
+## Early Hints (103)
+
+Symfony's `sendEarlyHints()` works out of the box by adding `headers_send()` polyfill that Franken SAPI exposes.
+
+More info at [Symfony docs](https://symfony.com/doc/current/web_link.html#early-hints)
+
 ## Sentry
 
 Built in support for [Sentry](https://packagist.org/packages/sentry/sentry-symfony). Just install & configure it as you normally do.
