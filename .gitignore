@@ -1,3 +1,5 @@
 /.phpunit.result.cache
 /vendor/
+.idea.dual-graph/
+.dual-graph/
 .idea

@@ -11,6 +11,9 @@ trait RoadRunnerMicroKernelTrait
     public function boot(): void
     {
         if (true === $this->booted) {
+            if ($this->debug) {
+                $this->startTime = microtime(true);
+            }
             return;
         }
 

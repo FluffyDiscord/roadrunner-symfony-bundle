@@ -6,17 +6,20 @@ use FluffyDiscord\RoadRunnerBundle\Worker\WorkerRegistry;
 use Symfony\Component\HttpKernel\KernelInterface;
 use Symfony\Component\Runtime\RunnerInterface;
 
-class Runner implements RunnerInterface
+readonly class Runner implements RunnerInterface
 {
     public function __construct(
-        private readonly KernelInterface $kernel,
-        private readonly string          $mode,
+        private KernelInterface $kernel,
+        private string          $mode,
+        private string          $runtimeMode,
     )
     {
     }
 
     public function run(): int
     {
+        $_SERVER['APP_RUNTIME_MODE'] = $this->runtimeMode;
+
         $this->kernel->boot();
 
         $registry = $this->kernel->getContainer()->get(WorkerRegistry::class);

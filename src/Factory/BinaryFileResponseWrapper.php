@@ -5,7 +5,6 @@ namespace FluffyDiscord\RoadRunnerBundle\Factory;
 use Spiral\RoadRunner\Http\Exception\StreamStoppedException;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\Request;
-use Symfony\Component\HttpKernel\Kernel;
 
 /**
  * Basically a copy of BinaryFileResponse->sendContent()
@@ -19,19 +18,15 @@ class BinaryFileResponseWrapper
 
         $reflectionClass = new \ReflectionClass($response);
 
-        $tempFileObject = null;
-        if(Kernel::MAJOR_VERSION >= 7 && Kernel::MINOR_VERSION >= 1) {
-            $tempFileObject = $reflectionClass->getProperty("tempFileObject")->getValue($response);
-        }
+        $tempFileObject = $reflectionClass->getProperty("tempFileObject")->getValue($response);
 
+        /** @var int $maxlen */
         $maxlen = $reflectionClass->getProperty("maxlen")->getValue($response);
+        /** @var int $offset */
         $offset = $reflectionClass->getProperty("offset")->getValue($response);
-
-        $chunkSize = 16 * 1024;
-        if(Kernel::MAJOR_VERSION >= 6) {
-            $chunkSize = $reflectionClass->getProperty("chunkSize")->getValue($response);
-        }
-
+        /** @var int $chunkSize */
+        $chunkSize = $reflectionClass->getProperty("chunkSize")->getValue($response);
+        /** @var bool $deleteFileAfterSend */
         $deleteFileAfterSend = $reflectionClass->getProperty("deleteFileAfterSend")->getValue($response);
 
         try {
@@ -43,7 +38,7 @@ class BinaryFileResponseWrapper
                 return yield "";
             }
 
-            if ($tempFileObject) {
+            if ($tempFileObject instanceof \SplFileObject) {
                 $file = $tempFileObject;
                 $file->rewind();
             } else {
@@ -75,7 +70,7 @@ class BinaryFileResponseWrapper
                 }
             }
         } finally {
-            if (null === $tempFileObject && $deleteFileAfterSend && is_file($response->getFile()->getPathname())) {
+            if (!$tempFileObject instanceof \SplFileObject && $deleteFileAfterSend && is_file($response->getFile()->getPathname())) {
                 unlink($response->getFile()->getPathname());
             }
         }

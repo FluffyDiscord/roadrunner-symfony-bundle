@@ -2,15 +2,19 @@
 
 namespace FluffyDiscord\RoadRunnerBundle\DependencyInjection;
 
+use FluffyDiscord\RoadRunnerBundle\Attribute\AsCentrifugoChannelListener;
+use FluffyDiscord\RoadRunnerBundle\Attribute\AsCentrifugoRpcListener;
 use FluffyDiscord\RoadRunnerBundle\Cache\KVCacheAdapter;
 use FluffyDiscord\RoadRunnerBundle\Exception\CacheAutoRegisterException;
 use FluffyDiscord\RoadRunnerBundle\Exception\InvalidRPCConfigurationException;
 use FluffyDiscord\RoadRunnerBundle\Worker\CentrifugoWorker;
 use FluffyDiscord\RoadRunnerBundle\Worker\HttpWorker;
+use RoadRunner\Centrifugo\CentrifugoWorker as RoadRunnerCentrifugoWorker;
 use Spiral\Goridge\Exception\RelayException;
 use Spiral\Goridge\RPC\RPCInterface;
 use Spiral\RoadRunner\KeyValue\Cache;
 use Symfony\Component\Config\FileLocator;
+use Symfony\Component\DependencyInjection\ChildDefinition;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\Extension\Extension;
 use Symfony\Component\DependencyInjection\Loader\PhpFileLoader;
@@ -23,30 +27,70 @@ class FluffyDiscordRoadRunnerExtension extends Extension
         $loader = new PhpFileLoader($container, new FileLocator(__DIR__ . "/../../config"));
         $loader->load("services.php");
 
+        if ($container->getParameter('kernel.debug')) {
+            $loader->load("debug.php");
+        }
+
+        if (class_exists(RoadRunnerCentrifugoWorker::class)) {
+            $container->registerAttributeForAutoconfiguration(
+                AsCentrifugoChannelListener::class,
+                static function (ChildDefinition $definition, AsCentrifugoChannelListener $attr, \ReflectionClass|\ReflectionMethod $refl): void {
+                    $tag = [
+                        'channel'  => $attr->channel,
+                        'event'    => $attr->event,
+                        'priority' => $attr->priority,
+                        'method'   => $attr->method,
+                    ];
+                    if ($refl instanceof \ReflectionMethod) {
+                        $tag['method'] = $refl->getName();
+                        if ($tag['event'] === null) {
+                            $params = $refl->getParameters();
+                            if ($params !== [] && ($type = $params[0]->getType()) instanceof \ReflectionNamedType) {
+                                $tag['event'] = $type->getName();
+                            }
+                        }
+                    }
+                    $definition->addTag('fluffy_discord.centrifugo_channel_listener', $tag);
+                },
+            );
+
+            $container->registerAttributeForAutoconfiguration(
+                AsCentrifugoRpcListener::class,
+                static function (ChildDefinition $definition, AsCentrifugoRpcListener $attr, \ReflectionClass|\ReflectionMethod $refl): void {
+                    $tag = [
+                        'rpc_method' => $attr->rpcMethod,
+                        'priority'   => $attr->priority,
+                        'method'     => $attr->method,
+                    ];
+                    if ($refl instanceof \ReflectionMethod) {
+                        $tag['method'] = $refl->getName();
+                    }
+                    $definition->addTag('fluffy_discord.centrifugo_rpc_listener', $tag);
+                },
+            );
+        }
+
         $configuration = $this->getConfiguration([], $container);
+        /** @var array{http: array{early_router_initialization: bool, lazy_boot: bool}, centrifugo: array{lazy_boot: bool}, kv: array{auto_register: bool, serializer: ?string, keypair_path: ?string}, rr_config_path: ?string} $config */
         $config = $this->processConfiguration($configuration, $configs);
 
         if ($container->hasDefinition(HttpWorker::class)) {
-            if (isset($config["http"]["early_router_initialization"])) {
-                $definition = $container->getDefinition(HttpWorker::class);
-                $definition->replaceArgument(0, $config["http"]["early_router_initialization"]);
-            }
-
-            if (isset($config["http"]["lazy_boot"])) {
-                $definition = $container->getDefinition(HttpWorker::class);
-                $definition->replaceArgument(1, $config["http"]["lazy_boot"]);
-            }
+            $definition = $container->getDefinition(HttpWorker::class);
+            $definition->replaceArgument(0, $config["http"]["early_router_initialization"]);
+            $definition->replaceArgument(1, $config["http"]["lazy_boot"]);
         }
 
-        if (isset($config["centrifugo"]["lazy_boot"]) && $container->hasDefinition(CentrifugoWorker::class)) {
+        if ($container->hasDefinition(CentrifugoWorker::class)) {
             $definition = $container->getDefinition(CentrifugoWorker::class);
             $definition->replaceArgument(0, $config["centrifugo"]["lazy_boot"]);
         }
 
-        if (class_exists(Cache::class) && (!isset($config["kv"]["auto_register"]) || $config["kv"]["auto_register"] === true)) {
+        if (class_exists(Cache::class) && $config["kv"]["auto_register"] === true) {
             $rrConfig = $this->getRoadRunnerConfig($container, $config);
 
-            foreach (array_keys($rrConfig["kv"] ?? []) as $name) {
+            /** @var array<string, mixed> $kvConfig */
+            $kvConfig = $rrConfig["kv"] ?? [];
+            foreach (array_keys($kvConfig) as $name) {
                 $container
                     ->register("cache.adapter.rr_kv.{$name}", KVCacheAdapter::class)
                     ->setFactory([KVCacheAdapter::class, "create"])
@@ -55,14 +99,46 @@ class FluffyDiscordRoadRunnerExtension extends Extension
                         $container->getDefinition(RPCInterface::class),
                         $name,
                         $container->getParameter("kernel.project_dir"),
-                        $config["kv"]["serializer"] ?? null,
-                        $config["kv"]["keypair_path"] ?? null,
+                        $config["kv"]["serializer"],
+                        $config["kv"]["keypair_path"],
                     ])
                 ;
             }
         }
     }
 
+    /**
+     * @return array<string, mixed>
+     */
+    private function readRoadRunnerYaml(ContainerBuilder $container, ?string $rrConfigPath): array
+    {
+        if ($rrConfigPath === null) {
+            return [];
+        }
+
+        /** @var string $projectDir */
+        $projectDir = $container->getParameter("kernel.project_dir");
+        $pathname = $projectDir . "/" . $rrConfigPath;
+
+        $content = @file_get_contents($pathname);
+        if ($content === false) {
+            return [];
+        }
+
+        /** @var array<string, mixed> $parsed */
+        $parsed = Yaml::parse($content) ?? [];
+
+        return $parsed;
+    }
+
+    /**
+     * Returns the live RoadRunner config via RPC, falling back to the
+     * YAML file when RPC is unavailable.  Throws on hard failures so
+     * that KV auto-register gets clear error messages.
+     *
+     * @param array{rr_config_path: ?string} $config
+     * @return array<string, mixed>
+     */
     private function getRoadRunnerConfig(ContainerBuilder $container, array $config): array
     {
         try {
@@ -71,23 +147,29 @@ class FluffyDiscordRoadRunnerExtension extends Extension
             throw new CacheAutoRegisterException($invalidRPCConfigurationException->getMessage(), previous: $invalidRPCConfigurationException);
         }
 
+        assert($rpc instanceof RPCInterface);
+
         try {
-            return json_decode(base64_decode($rpc->call("rpc.Config", null)), true, 512, JSON_THROW_ON_ERROR);
+            /** @var string $rpcResult */
+            $rpcResult = $rpc->call("rpc.Config", null);
+            /** @var array<string, mixed> $decoded */
+            $decoded = json_decode(base64_decode($rpcResult), true, 512, JSON_THROW_ON_ERROR);
+            return $decoded;
         } catch (\JsonException $jsonException) {
             throw new CacheAutoRegisterException($jsonException->getMessage(), previous: $jsonException);
         } catch (RelayException $relayException) {
+            $yaml = $this->readRoadRunnerYaml($container, $config["rr_config_path"]);
+            if ($yaml !== []) {
+                return $yaml;
+            }
+
             if ($config["rr_config_path"] !== null) {
-                $rrConfigPathname = $container->getParameter("kernel.project_dir") . "/" . $config["rr_config_path"];
-                if (!file_exists($rrConfigPathname)) {
-                    throw new CacheAutoRegisterException(sprintf('Specified RoadRunner config was not found: %s', $rrConfigPathname), previous: $relayException);
-                }
-
-                $yamlConfig = @file_get_contents($rrConfigPathname);
-                if ($yamlConfig === false) {
-                    throw new CacheAutoRegisterException(sprintf('Unable to read RoadRunner config, check permissions: %s', $rrConfigPathname), previous: $relayException);
-                }
-
-                return Yaml::parse($yamlConfig);
+                /** @var string $projectDir */
+                $projectDir = $container->getParameter("kernel.project_dir");
+                throw new CacheAutoRegisterException(
+                    sprintf('Unable to read RoadRunner config: %s', $projectDir . "/" . $config["rr_config_path"]),
+                    previous: $relayException,
+                );
             }
 
             throw new CacheAutoRegisterException('Error connecting to RPC service. Is RoadRunner running? Optionally set "rr_config_path" in bundle\'s config.', previous: $relayException);

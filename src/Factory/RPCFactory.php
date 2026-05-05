@@ -17,6 +17,10 @@ class RPCFactory
             throw new InvalidRPCConfigurationException("Please set 'RR_RPC' .env variable and enable 'rpc' plugin in your RoadRunner Yaml configuration, eg '.rr.yaml'");
         }
 
-        return RPC::create($environment->getRPCAddress());
+        $address = $environment->getRPCAddress();
+        if ($address === '') {
+            throw new InvalidRPCConfigurationException("RPC address from environment is empty");
+        }
+        return RPC::create($address);
     }
 }

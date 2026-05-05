@@ -47,16 +47,15 @@ class Kernel extends BaseKernel
 ```
 
 The default behavior of Symfony's kernel is to reset your services 
-before request is handled and slows down the initial reaction time.
+before request is handled and this adds latency to every request.
 
-|    |  When new request arrives  |  Your app  |  After response was sent back  |
-| -- | ------------------------| ----------------| ----------------------- |
-| Symfony | does a reset, if something fails here, request may be lost | waits for reset to be done, then handles your request |  |
-| RoadRunnerBundle |  | immediately handles your request | does a reset |  
+|    | When new request arrives                                           | Your app                                              | After response was sent back |
+| -- |--------------------------------------------------------------------|-------------------------------------------------------|------------------------------|
+| Symfony | does a reset, if something fails here, request won't be handled    | waits for reset to be done, then handles your request | **kernel does nothing**          |
+| RoadRunnerBundle | **kernel does nothing**, this ensures request is passed to you app |       immediately handles your request                                  | does a reset                 |  
 
-You might want to manually refresh Doctrine connections before each request is handled 
-you are using `Mysql`, `MariaDB` or other database that cannot handle long/persistent
-connection. For this, it's up to you to create event listener for `WorkerRequestReceivedEvent`
+- `PostgreSQL` - **no need to do anything**, if you did not disable persistent connections
+- `Mysql`, `MariaDB` - create listener for `WorkerRequestReceivedEvent` and reset your database connections
 
 ## Configuration
 
@@ -143,31 +142,30 @@ fluffy_discord_road_runner:
 ```
 
 
-## Running behind a load balancer or a proxy
+## Running behind a load balancer/reverse proxy
 If you want to use `REMOTE_ADDR` as [trusted proxy](https://symfony.com/doc/current/deployment/proxies.html#solution-settrustedproxies), replace it with `private_ranges` instead 
 or else your trusted headers will not work.
 
 Symfony is using the `$_SERVER['REMOTE_ADDR']` to find out the proxy address,
 but in the context of RoadRunner, `$_SERVER` contains only environment 
-variables and the `REMOTE_ADDS` is missing.
-
+variables and the `REMOTE_ADDS` is missing. This is intentional.
 
 
 ## Response/file streaming
 
-Build-in full support for Symfony's `BinaryFileResponse` and `StreamedJsonResponse`. The `StreamedResponse` needs one little 
-change to be fully streamable - you have to change the `callback` to a `\Generator`, replacing all `echo` with `yield`. Look at the example:
+Build-in support for Symfony's `BinaryFileResponse`, `StreamedResponse` and `StreamedJsonResponse`. Stream responses need one little 
+change to be fully streamable - you have to change their `callback` to a `\Generator` and replace all `echo` with `yield`. Look at the example:
 
 ```php
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
-class MyController
+#[Route("/stream")]
+class MyStreamController
 {
-    #[Route("/stream")]
-    public function myStreamResponse() 
+    public function __invoke() 
     {
         return new StreamedResponse(
-            function () {
+            function (): \Generator {
                 // replace all 'echo' or any outputs with 'yield'
                 // echo "data";
                 yield "data";
@@ -177,9 +175,25 @@ class MyController
 }
 ```
 
+## Early Hints (103)
+
+Symfony's `sendEarlyHints()` works out of the box by adding `headers_send()` polyfill that Franken SAPI exposes.
+
+More info at [Symfony docs](https://symfony.com/doc/current/web_link.html#early-hints)
+
 ## Sentry
 
 Built in support for [Sentry](https://packagist.org/packages/sentry/sentry-symfony). Just install & configure it as you normally do.
+
+```shell
+composer require sentry/sentry-symfony
+```
+
+## Monolog
+
+If possible, [do not use fingers_crossed](https://symfony.com/doc/current/logging.html#logging-handler-fingers_crossed) handler. It is made to [leak memory by design](https://symfony.com/doc/current/messenger.html#stateless-worker).
+Nevertheless, this bundle is still somewhat compatible with it due to calling `ServiceResetter` after each response. If you encounter hard error,
+your logs might be missing though. Nothing to be done there.
 
 ```shell
 composer require sentry/sentry-symfony
@@ -241,6 +255,104 @@ readonly class ChatListener
 ```
 
 Be aware that if you do not set any response, bundle will send `DisconnectResponse` back by default.
+
+### Channel and RPC routing
+
+Instead of writing a single listener and manually handle each event, you can use the dedicated routing attributes.
+
+#### `#[AsCentrifugoChannelListener]`
+
+Routes `PublishEvent`, `SubscribeEvent`, `SubRefreshEvent`, and `ConnectEvent` to specific methods based on the channel name. Supports `*` as a wildcard.
+
+```php
+<?php
+
+namespace App\EventListener;
+
+use FluffyDiscord\RoadRunnerBundle\Attribute\AsCentrifugoChannelListener;
+use FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\PublishEvent;
+use FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\SubscribeEvent;
+
+class ChatListener
+{
+    // Event is inferred from the method's type hint.
+    // Only called for PublishEvent on channel "news".
+    #[AsCentrifugoChannelListener(channel: 'news')]
+    public function onNewsPublish(PublishEvent $event): void
+    {
+        // handle publish to the "news" channel
+    }
+
+    // Wildcard: matches "chat:general", "chat:room-42", etc.
+    #[AsCentrifugoChannelListener(channel: 'chat:*', priority: 10)]
+    public function onChatSubscribe(SubscribeEvent $event): void
+    {
+        $channel = $event->getRequest()->channel;
+        // handle subscription to any "chat:*" channel
+    }
+}
+```
+
+When placed on the **class**, you must also specify `event` and `method`:
+
+```php
+#[AsCentrifugoChannelListener(channel: 'private:*', event: PublishEvent::class, method: 'handle')]
+class PrivateChannelHandler
+{
+    public function handle(PublishEvent $event): void { ... }
+}
+```
+
+**Parameters:**
+
+| Parameter  | Type      | Default      | Description |
+|------------|-----------|--------------|-------------|
+| `channel`  | `string`  | *(required)* | Exact channel name or pattern with `*` wildcard (e.g. `chat:*`) |
+| `event`    | `?string` | `null`       | Event class FQCN. Optional on methods — inferred from the first parameter type hint |
+| `priority` | `int`     | `0`          | Higher = called first (within matched handlers for this channel) |
+| `method`   | `?string` | `null`       | Method to call. Auto-detected when placed on a method |
+
+#### `#[AsCentrifugoRpcListener]`
+
+Routes `RPCEvent` to a specific method based on the RPC method name.
+
+```php
+<?php
+
+namespace App\EventListener;
+
+use FluffyDiscord\RoadRunnerBundle\Attribute\AsCentrifugoRpcListener;
+use FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\RPCEvent;
+use RoadRunner\Centrifugo\Payload\RPCResponse;
+
+class RpcHandler
+{
+    #[AsCentrifugoRpcListener(rpcMethod: 'ping')]
+    public function onPing(RPCEvent $event): void
+    {
+        $event->setResponse(new RPCResponse(data: ['pong' => true]));
+    }
+
+    #[AsCentrifugoRpcListener(rpcMethod: 'getUserInfo')]
+    public function onGetUserInfo(RPCEvent $event): void
+    {
+        $data = $event->getRequest()->getData();
+        // ...
+    }
+}
+```
+
+**Parameters:**
+
+| Parameter   | Type      | Default      | Description |
+|-------------|-----------|--------------|-------------|
+| `rpcMethod` | `string`  | *(required)* | Exact RPC method name (matched against `RPCEvent::getRequest()->method`) |
+| `priority`  | `int`     | `0`          | Higher = called first |
+| `method`    | `?string` | `null`       | Method to call. Auto-detected when placed on a method |
+
+#### How it works
+
+The routing table is built **at container compile time** — there is no runtime overhead beyond a single hash-map lookup per request. Handlers are dispatched in priority order and respect `stopPropagation()`. The routing listeners fire at priority `-100`, after any plain `#[AsEventListener]` handlers at default priority `0`.
 
 ## Developing with Symfony and RoadRunner
 

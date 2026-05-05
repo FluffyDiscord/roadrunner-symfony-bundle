@@ -1,0 +1,89 @@
+{% extends '@WebProfiler/Profiler/layout.html.twig' %}
+
+{% block toolbar %}
+    {% if collector.hasData %}
+        {% set status_color = collector.success ? '' : 'red' %}
+        {% set icon %}
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"/>
+                <line x1="12" y1="8" x2="12" y2="12"/>
+                <line x1="12" y1="16" x2="12.01" y2="16"/>
+            </svg>
+        {% endset %}
+        {% set text %}
+            <div class="sf-toolbar-info-piece">
+                <b>Centrifugo</b>
+                <span class="sf-toolbar-status {{ status_color }}">{{ collector.eventType }}</span>
+            </div>
+            <div class="sf-toolbar-info-piece">
+                <b>Duration</b>
+                <span>{{ collector.durationMs }} ms</span>
+            </div>
+            <div class="sf-toolbar-info-piece">
+                <b>Status</b>
+                <span class="sf-toolbar-status {{ status_color }}">
+                    {{ collector.success ? 'OK' : 'Failed' }}
+                </span>
+            </div>
+        {% endset %}
+        {{ include('@WebProfiler/Profiler/toolbar_item.html.twig', { link: profiler_url }) }}
+    {% endif %}
+{% endblock %}
+
+{% block menu %}
+    <span class="label {{ collector.hasData and not collector.success ? 'label-status-error' : '' }}">
+        <span class="icon">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"/>
+                <line x1="12" y1="8" x2="12" y2="12"/>
+                <line x1="12" y1="16" x2="12.01" y2="16"/>
+            </svg>
+        </span>
+        <strong>Centrifugo</strong>
+        {% if collector.hasData and not collector.success %}
+            <span class="count">
+                <span>!</span>
+            </span>
+        {% endif %}
+    </span>
+{% endblock %}
+
+{% block panel %}
+    <h2>Centrifugo Event</h2>
+
+    {% if not collector.hasData %}
+        <div class="empty">
+            <p>No Centrifugo event was processed during this request.</p>
+        </div>
+    {% else %}
+        <div class="metrics">
+            <div class="metric">
+                <span class="value">{{ collector.eventType }}</span>
+                <span class="label">Event Type</span>
+            </div>
+            <div class="metric">
+                <span class="value">{{ collector.durationMs }} <span class="unit">ms</span></span>
+                <span class="label">Total Duration</span>
+            </div>
+            <div class="metric">
+                <span class="value {{ collector.success ? 'value-good' : 'value-bad' }}">
+                    {{ collector.success ? 'OK' : 'Failed' }}
+                </span>
+                <span class="label">Status</span>
+            </div>
+            {% if collector.startedAt > 0 %}
+                <div class="metric">
+                    <span class="value">{{ collector.startedAt|date('H:i:s') }}</span>
+                    <span class="label">Started At</span>
+                </div>
+            {% endif %}
+        </div>
+
+        {% if not collector.success and collector.error %}
+            <h3>Error</h3>
+            <div class="sf-reset">
+                <pre class="sf-code-block">{{ collector.error }}</pre>
+            </div>
+        {% endif %}
+    {% endif %}
+{% endblock %}

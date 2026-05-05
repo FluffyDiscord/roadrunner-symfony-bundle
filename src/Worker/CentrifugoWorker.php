@@ -10,13 +10,11 @@ use FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\RefreshEvent;
 use FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\RPCEvent;
 use FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\SubRefreshEvent;
 use FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\SubscribeEvent;
-use FluffyDiscord\RoadRunnerBundle\Event\Worker\Centrifugo\AfterRespondEvent;
 use FluffyDiscord\RoadRunnerBundle\Event\Worker\WorkerBootingEvent;
 use FluffyDiscord\RoadRunnerBundle\Event\Worker\WorkerRequestReceivedEvent;
 use FluffyDiscord\RoadRunnerBundle\Event\Worker\WorkerResponseSentEvent;
 use FluffyDiscord\RoadRunnerBundle\Exception\NoCentrifugoResponseProvidedException;
 use FluffyDiscord\RoadRunnerBundle\Exception\UnsupportedCentrifugoRequestTypeException;
-use GuzzleHttp\Promise\PromiseInterface; // Sentry v4 compatibility
 use RoadRunner\Centrifugo\CentrifugoWorker as RoadRunnerCentrifugoWorker;
 use RoadRunner\Centrifugo\Payload\ConnectResponse;
 use RoadRunner\Centrifugo\Payload\PublishResponse;
@@ -26,17 +24,23 @@ use RoadRunner\Centrifugo\Payload\SubRefreshResponse;
 use RoadRunner\Centrifugo\Payload\SubscribeResponse;
 use RoadRunner\Centrifugo\Request;
 use Sentry\State\HubInterface as SentryHubInterface;
+use Spiral\RoadRunner\Environment\Mode;
 use Symfony\Component\EventDispatcher\EventDispatcherInterface;
+use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\HttpKernel\DependencyInjection\ServicesResetterInterface;
 use Symfony\Component\HttpKernel\KernelInterface;
+use Symfony\Component\HttpKernel\RebootableInterface;
 
-class CentrifugoWorker implements WorkerInterface
+readonly class CentrifugoWorker implements WorkerInterface
 {
     public function __construct(
-        private readonly bool                       $lazyBoot,
-        private readonly KernelInterface            $kernel,
-        private readonly RoadRunnerCentrifugoWorker $worker,
-        private readonly EventDispatcherInterface   $eventDispatcher,
-        private readonly ?SentryHubInterface        $sentryHubInterface = null,
+        private bool                       $lazyBoot,
+        private bool                       $debug,
+        private KernelInterface            $kernel,
+        private RoadRunnerCentrifugoWorker $worker,
+        private EventDispatcherInterface   $eventDispatcher,
+        private ?ServicesResetterInterface $servicesResetter,
+        private ?SentryHubInterface        $sentryHubInterface = null,
     )
     {
     }
@@ -50,9 +54,12 @@ class CentrifugoWorker implements WorkerInterface
         $this->eventDispatcher->dispatch(new WorkerBootingEvent());
 
         while ($request = $this->worker->waitRequest()) {
-            $this->sentryHubInterface?->pushScope();
+            $event = null;
+            $hadException = false;
 
             try {
+                $this->sentryHubInterface?->pushScope();
+
                 $this->eventDispatcher->dispatch(new WorkerRequestReceivedEvent());
 
                 $this->kernel->boot();
@@ -68,37 +75,65 @@ class CentrifugoWorker implements WorkerInterface
                     default => throw new UnsupportedCentrifugoRequestTypeException(sprintf('Unsupported $request type: %s', $request::class)),
                 };
 
+                /** @var CentrifugoEventInterface $processedEvent */
                 $processedEvent = $this->eventDispatcher->dispatch($event);
-                assert($processedEvent instanceof CentrifugoEventInterface);
 
                 if(!$event instanceof InvalidEvent) {
-                    $response = $processedEvent->getResponse() ?? match (true) {
-                        $event instanceof ConnectEvent => new ConnectResponse(),
-                        $event instanceof PublishEvent => new PublishResponse(),
-                        $event instanceof RefreshEvent => new RefreshResponse(),
-                        $event instanceof SubRefreshEvent => new SubRefreshResponse(),
-                        $event instanceof SubscribeEvent => new SubscribeResponse(),
-                        $event instanceof RPCEvent => new RPCResponse(),
+                    $response = $processedEvent->getResponse() ?? match ($event::class) {
+                        ConnectEvent::class => new ConnectResponse(),
+                        PublishEvent::class => new PublishResponse(),
+                        RefreshEvent::class => new RefreshResponse(),
+                        SubRefreshEvent::class => new SubRefreshResponse(),
+                        SubscribeEvent::class => new SubscribeResponse(),
+                        RPCEvent::class => new RPCResponse(),
                         default => throw new NoCentrifugoResponseProvidedException(sprintf('No supported default response found for request type: %s', $request::class)),
                     };
 
                     $request->respond($response);
                 }
 
-                $this->eventDispatcher->dispatch(new AfterRespondEvent());
-                $this->eventDispatcher->dispatch(new WorkerResponseSentEvent());
-
+                $this->eventDispatcher->dispatch(new WorkerResponseSentEvent(Mode::MODE_CENTRIFUGE));
             } catch (\Throwable $throwable) {
-                $this->sentryHubInterface?->captureException($throwable);
-                $request->error(500, (string)$throwable);
-            } finally {
-                $result = $this->sentryHubInterface?->getClient()?->flush();
+                $hadException = true;
 
-                // sentry v4 compatibility
-                if($result instanceof PromiseInterface) {
-                    $result->wait(false);
+                try {
+                    $this->sentryHubInterface?->captureException($throwable);
+                } catch (\Throwable) {}
+
+                try {
+                    $reason = $this->debug ? (string)$throwable : 'Unexpected system error';
+                    $request->disconnect(Response::HTTP_INTERNAL_SERVER_ERROR, $reason, true);
+                } catch (\Throwable) {}
+
+                $this->worker->getWorker()->error((string)$throwable);
+
+                if ($throwable instanceof \Error) {
+                    $this->worker->getWorker()->stop();
+                    continue;
                 }
-                $this->sentryHubInterface?->popScope();
+            } finally {
+                try {
+                    if ($hadException && $this->kernel instanceof RebootableInterface) {
+                        $this->kernel->reboot(null);
+                    }
+                } catch (\Throwable $cleanupThrowable) {
+                    $this->worker->getWorker()->error("Fatal worker cleanup error: " . $cleanupThrowable);
+                    $this->worker->getWorker()->stop();
+                } finally {
+                    try {
+                        $this->servicesResetter?->reset();
+                    } catch (\Throwable $throwable) {
+                        $this->worker->getWorker()->error((string)$throwable);
+                        $this->worker->getWorker()->stop();
+                    }
+                }
+
+                try {
+                    $this->sentryHubInterface?->getClient()?->flush();
+                } catch (\Throwable) {}
+                try {
+                    $this->sentryHubInterface?->popScope();
+                } catch (\Throwable) {}
             }
         }
     }

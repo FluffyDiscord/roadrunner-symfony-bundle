@@ -29,6 +29,9 @@ class PublishEvent extends Event implements CentrifugoEventInterface
 
     public function setResponse(PublishResponse|ResponseInterface|null $response): self
     {
+        if ($response !== null && !$response instanceof PublishResponse) {
+            throw new \InvalidArgumentException(sprintf('Expected %s, got %s', PublishResponse::class, $response::class));
+        }
         $this->response = $response;
         return $this;
     }

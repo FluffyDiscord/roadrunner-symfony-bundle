@@ -29,6 +29,9 @@ class RPCEvent extends Event implements CentrifugoEventInterface
 
     public function setResponse(RPCResponse|ResponseInterface|null $response): self
     {
+        if ($response !== null && !$response instanceof RPCResponse) {
+            throw new \InvalidArgumentException(sprintf('Expected %s, got %s', RPCResponse::class, $response::class));
+        }
         $this->response = $response;
         return $this;
     }

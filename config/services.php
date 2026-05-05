@@ -2,7 +2,12 @@
 
 namespace Symfony\Component\DependencyInjection\Loader\Configurator;
 
-use FluffyDiscord\RoadRunnerBundle\EventListener\WorkerResponseSendEventListener;
+use FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\ConnectEvent;
+use FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\PublishEvent;
+use FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\RPCEvent;
+use FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\SubRefreshEvent;
+use FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\SubscribeEvent;
+use FluffyDiscord\RoadRunnerBundle\EventListener\CentrifugoEventRouter;
 use FluffyDiscord\RoadRunnerBundle\Factory\RPCFactory;
 use FluffyDiscord\RoadRunnerBundle\Worker\CentrifugoWorker;
 use FluffyDiscord\RoadRunnerBundle\Worker\HttpWorker as BundleHttpWorker;
@@ -63,16 +68,6 @@ return static function (ContainerConfigurator $container) {
     ;
 
     $services
-        ->set(WorkerResponseSendEventListener::class)
-        ->public()
-        ->args([
-            service("services_resetter"),
-            param("kernel.debug"),
-        ])
-        ->tag("kernel.event_listener", ["priority" => -256])
-    ;
-
-    $services
         ->set(BundleHttpWorker::class)
         ->public()
         ->args([
@@ -80,7 +75,8 @@ return static function (ContainerConfigurator $container) {
             false,
             service(KernelInterface::class),
             service(EventDispatcherInterface::class),
-            expr('env("APP_ENV") == "prod"'),
+            param('kernel.debug'),
+            service("services_resetter")->nullOnInvalid(),
             service(SentryHubInterface::class)->nullOnInvalid(),
             service(HttpFoundationFactoryInterface::class)->nullOnInvalid(),
         ])
@@ -124,9 +120,11 @@ return static function (ContainerConfigurator $container) {
             ->public()
             ->args([
                 false,
+                param('kernel.debug'),
                 service(KernelInterface::class),
                 service(CentrifugoWorkerInterface::class),
                 service(EventDispatcherInterface::class),
+                service("services_resetter")->nullOnInvalid(),
                 service(SentryHubInterface::class)->nullOnInvalid(),
             ])
         ;
@@ -137,6 +135,19 @@ return static function (ContainerConfigurator $container) {
                 Environment\Mode::MODE_CENTRIFUGE,
                 service(CentrifugoWorker::class),
             ])
+        ;
+
+        $services
+            ->set(CentrifugoEventRouter::class)
+            ->args([
+                abstract_arg('ServiceLocator — set by CentrifugoRouterPass'),
+                abstract_arg('routing table — set by CentrifugoRouterPass'),
+            ])
+            ->tag('kernel.event_listener', ['event' => ConnectEvent::class,    'method' => 'onConnect',    'priority' => -100])
+            ->tag('kernel.event_listener', ['event' => PublishEvent::class,    'method' => 'onPublish',    'priority' => -100])
+            ->tag('kernel.event_listener', ['event' => SubscribeEvent::class,  'method' => 'onSubscribe',  'priority' => -100])
+            ->tag('kernel.event_listener', ['event' => SubRefreshEvent::class, 'method' => 'onSubRefresh', 'priority' => -100])
+            ->tag('kernel.event_listener', ['event' => RPCEvent::class,        'method' => 'onRpc',        'priority' => -100])
         ;
     }
 };

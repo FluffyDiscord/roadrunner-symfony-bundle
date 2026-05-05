@@ -10,6 +10,6 @@ class DefaultResponseWrapper
     {
         ob_start();
         $response->sendContent();
-        return ob_get_clean();
+        return (string)ob_get_clean();
     }
 }

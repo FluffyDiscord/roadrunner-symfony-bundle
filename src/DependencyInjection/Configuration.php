@@ -5,7 +5,6 @@ namespace FluffyDiscord\RoadRunnerBundle\DependencyInjection;
 use FluffyDiscord\RoadRunnerBundle\Worker\HttpWorker;
 use Symfony\Component\Config\Definition\Builder\TreeBuilder;
 use Symfony\Component\Config\Definition\ConfigurationInterface;
-use Symfony\Component\HttpKernel\DependencyInjection\ServicesResetter;
 
 class Configuration implements ConfigurationInterface
 {
@@ -140,6 +139,7 @@ class Configuration implements ConfigurationInterface
         return $builder;
     }
 
+    /** @param array<string> $lines */
     private function toInfo(array $lines): string
     {
         if(!$this->isDumpingDefaultConfiguration()) {
@@ -167,11 +167,10 @@ TEXT);
 
     private function isDumpingDefaultConfiguration(): bool
     {
-        if(!isset($_SERVER["PHP_SELF"])) {
+        if(!isset($_SERVER["PHP_SELF"]) || !is_string($_SERVER["PHP_SELF"])) {
             return false;
         }
 
-        // assuming people won't wrap or rename this
         if(!str_contains($_SERVER["PHP_SELF"], "console")) {
             return false;
         }
@@ -180,6 +179,8 @@ TEXT);
             return false;
         }
 
-        return in_array("config:dump-reference", $_SERVER["argv"]);
+        /** @var array<string> $argv */
+        $argv = $_SERVER["argv"];
+        return in_array("config:dump-reference", $argv);
     }
 }
