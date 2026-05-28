@@ -27,6 +27,9 @@
     "minimum-stability" : "dev",
     "prefer-stable" : true,
     "autoload" : {
+        "files" : [
+            "src/Resources/services_resetter_polyfill.php"
+        ],
         "psr-4" : {
             "FluffyDiscord\\RoadRunnerBundle\\" : "src/"
         }
