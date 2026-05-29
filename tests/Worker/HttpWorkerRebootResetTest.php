@@ -97,13 +97,16 @@ class HttpWorkerRebootResetTest extends AbstractHttpWorkerTestCase
         ;
         $this->httpFoundationFactory->method('createRequest')->willReturn(new Request());
 
-        $this->rrWorker
-            ->expects($this->once())
-            ->method('error')
-            ->with($this->stringContains('Fatal worker cleanup error'))
-        ;
+        // Cleanup failures are logged to STDERR (logError), not emitted as a second relay frame.
+        $this->rrWorker->expects($this->never())->method('error');
         $this->rrWorker->expects($this->once())->method('stop');
 
-        $this->makeWorker(kernel: $kernel)->start();
+        $worker = $this->makeWorker(kernel: $kernel);
+        $worker->start();
+
+        $this->assertNotEmpty(
+            array_filter($worker->loggedErrors, static fn(string $m): bool => str_contains($m, 'Fatal worker cleanup error')),
+            'cleanup failure should be logged to STDERR',
+        );
     }
 }

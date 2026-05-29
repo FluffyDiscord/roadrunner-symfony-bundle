@@ -29,6 +29,15 @@ class TestableHttpWorker extends HttpWorker
 {
     private PSR7Worker $injectedWorker;
 
+    /** @var list<string> messages captured from logError() */
+    public array $loggedErrors = [];
+    /** number of times the shutdown handler was registered */
+    public int $shutdownRegistrations = 0;
+    /** the captured shutdown closure (not actually registered, to keep PHPUnit's process clean) */
+    public ?\Closure $registeredShutdown = null;
+    /** when true, renderHtmlError() throws, to exercise the MinimalErrorPage fallback */
+    public bool $failHtmlRenderer = false;
+
     public function injectPsr7Worker(PSR7Worker $worker): void
     {
         $this->injectedWorker = $worker;
@@ -37,6 +46,39 @@ class TestableHttpWorker extends HttpWorker
     protected function createPsr7Worker(): PSR7Worker
     {
         return $this->injectedWorker;
+    }
+
+    protected function registerShutdown(callable $handler): void
+    {
+        ++$this->shutdownRegistrations;
+        $this->registeredShutdown = \Closure::fromCallable($handler);
+        // intentionally NOT calling register_shutdown_function() in tests
+    }
+
+    protected function logError(string $message): void
+    {
+        $this->loggedErrors[] = $message;
+    }
+
+    protected function renderHtmlError(\Throwable $throwable): \Symfony\Component\ErrorHandler\Exception\FlattenException
+    {
+        if ($this->failHtmlRenderer) {
+            throw new \RuntimeException('simulated renderer failure');
+        }
+
+        return parent::renderHtmlError($throwable);
+    }
+
+    /** Invoke the protected Bucket B handler directly. */
+    public function callHandleShutdown(PSR7Worker $worker, bool $handlingRequest, bool $responseStarted, ?array $error): void
+    {
+        $this->handleShutdown($worker, $handlingRequest, $responseStarted, $error);
+    }
+
+    /** Invoke the protected Bucket A responder directly. */
+    public function callSendThrowableResponse(PSR7Worker $worker, \Throwable $throwable): void
+    {
+        $this->sendThrowableResponse($worker, $throwable);
     }
 }
 

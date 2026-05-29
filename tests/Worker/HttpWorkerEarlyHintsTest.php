@@ -179,6 +179,34 @@ class HttpWorkerEarlyHintsTest extends AbstractHttpWorkerTestCase
         $this->assertArrayNotHasKey('link', $finalResponse[2]);
     }
 
+    /**
+     * A 103 early-hint is informational and does NOT set responseStarted. If the worker then dies
+     * (die/exit/fatal) before the final response starts, the shutdown rescue still validly sends a
+     * 500 — the 103+500 sequence is the same one the catch path uses. (Contrast: a streamed FINAL
+     * response in progress sets responseStarted and IS suppressed — see HttpWorkerShutdownTest.)
+     */
+    public function testFatalAfterEarlyHintsStillSendsRescueResponse(): void
+    {
+        $respondCalls = [];
+        $this->spiralHttpWorker->method('respond')
+            ->willReturnCallback(function () use (&$respondCalls): void {
+                $respondCalls[] = func_get_args();
+            });
+
+        HttpWorker::$currentHttpWorker = $this->spiralHttpWorker;
+        $response = new Response();
+        $response->headers->set('Link', '</style.css>; rel=preload');
+        $response->sendHeaders(103); // the 103 frame goes out
+
+        // worker dies after the early hint but before the final response (responseStarted === false)
+        $worker = $this->makeWorker(debug: true);
+        $worker->callHandleShutdown($this->psr7Worker, true, false, ['message' => 'died after hints', 'file' => 'f', 'line' => 1]);
+
+        $this->assertCount(2, $respondCalls);
+        $this->assertSame(103, $respondCalls[0][0]); // informational early hint
+        $this->assertSame(500, $respondCalls[1][0]); // rescue final response after the fatal
+    }
+
     public function testHeadersSendNoOpWithoutCurrentWorker(): void
     {
         HttpWorker::$currentHttpWorker = null;

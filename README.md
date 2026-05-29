@@ -181,6 +181,36 @@ Symfony's `sendEarlyHints()` works out of the box by adding `headers_send()` pol
 
 More info at [Symfony docs](https://symfony.com/doc/current/web_link.html#early-hints)
 
+## Error handling
+
+The HTTP worker turns worker-level failures into proper HTTP responses instead of leaking a raw
+RoadRunner error to the client. Behaviour depends on `kernel.debug`:
+
+| Failure | `kernel.debug = true` (dev) | `kernel.debug = false` (prod) |
+|---------|-----------------------------|-------------------------------|
+| A normal exception thrown in your code | Symfony's standard exception page (Symfony handles it; the worker forwards the response) | Symfony's standard error page |
+| An exception that escapes Symfony's handling | Symfony's `HtmlErrorRenderer` debug page | bare `500`, empty body |
+| **`die()` / `exit()` / a fatal error** (e.g. `OutOfMemoryError`, timeout) | a small built‑in HTML error page | bare `500`, empty body |
+
+The last row is the important one: `die()`, `exit()` and fatal errors *cannot* be caught with
+`try/catch`, so without this the worker would simply vanish and the client would get RoadRunner's
+internal error. The bundle registers a shutdown handler that, on a best‑effort basis, still sends a
+response. The full throwable / fatal is always written to **STDERR** (which RoadRunner records as
+worker logs) and reported to Sentry if configured — never echoed to `stdout` (in `pipes` relay mode
+`stdout` *is* the protocol channel, which is why you must never `dump()`‑and‑`die()`).
+
+Known limits (all best‑effort, by nature of a dying process):
+
+- A genuine **out‑of‑memory** fatal may not produce the page: Symfony's own error handler can write
+  to the protocol stream first and trip RoadRunner's `stdout` CRC check. The worker is respawned and
+  the request fails — the fatal is still logged.
+- A response that has **already started streaming** (a `StreamedResponse`, or after `103` early
+  hints have begun the body) is never patched with a second frame — that would corrupt the stream.
+- `SIGKILL`, segfaults and stack overflows skip PHP shutdown entirely and cannot be handled.
+
+For the richest dev experience with `die()`/`exit()`, use a socket relay (`RR_RELAY=tcp://…`/`unix://…`)
+or keep `http.pool.debug: true` (one worker per request) in development.
+
 ## Sentry
 
 Built in support for [Sentry](https://packagist.org/packages/sentry/sentry-symfony). Just install & configure it as you normally do.
