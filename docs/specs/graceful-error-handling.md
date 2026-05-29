@@ -287,3 +287,39 @@ Run 2026-05-29 against **RoadRunner v2025.1.14** (linux/amd64) + a minimal Symfo
 | Existing exception tests (to modify) | [`tests/Worker/HttpWorkerExceptionTest.php`](../../tests/Worker/HttpWorkerExceptionTest.php) | `:30` (`error()` once) |
 | DI wiring (debug flag) | [`config/services.php`](../../config/services.php) | `:71-83`, `:78` |
 | README debugging note | [`README.md`](../../README.md) | "Debugging (recommendations)" `:465` |
+
+---
+
+## Centrifugo worker (delta)
+
+**Scope decision (user, 2026-05-29):** apply the same hardening to `Worker/CentrifugoWorker.php` — Tier 1 (one-frame + STDERR/Sentry) **and** a shutdown handler, plus an `error()`/`disconnect()` mapping per request type.
+
+**Why it's different.** Centrifugo is an RPC/proxy worker — there is **no HTML page anyone sees**. A request is answered with one Centrifugo payload (`respond()` / `error()` / `disconnect()`), and failures surface as a dropped websocket / a failed RPC that nobody watches. So the priority **inverts**: observability (STDERR + Sentry) is the payoff; a "page" is meaningless. `MinimalErrorPage` is NOT used here.
+
+**Same two issues as HTTP (verified):**
+- Double-frame: `$request->disconnect(...)` (one `worker->respond()` frame, `AbstractRequest:82-87`) **then** `$this->worker->getWorker()->error(...)` (a 2nd goridge ERROR frame) — `CentrifugoWorker.php:105+108`, ditto cleanup `:120/:126`.
+- No `register_shutdown_function`; `die`/`exit`/fatal kills the worker silently.
+- Bonus bug: debug sent `(string)$throwable` (full trace) as the client-facing disconnect reason (`:104`) — trace disclosure over the wire.
+
+**Design (mirrors HTTP, adapted):**
+- **One frame:** replace every `getWorker()->error(...)` with `logError()` (STDERR); the single response frame is `error()` or `disconnect()`. `getWorker()->error()` survives only as the can't-respond fallback.
+- **No trace to clients:** `clientMessage()` → debug = `class: message` (one line, capped, **no trace**); prod = `"Unexpected system error"`. Full detail → STDERR/Sentry.
+- **error()/disconnect() mapping** (`chooseFailureAction()`):
+
+  | Request type | Action | Rationale |
+  |---|---|---|
+  | Connect, Subscribe | `disconnect()` | connection/subscription can't be established → drop |
+  | RPC, Publish, Refresh, SubRefresh | `error()` | in-band op failed; keep the connection, return an error |
+  | Invalid | none | malformed request, has no worker to respond through |
+
+- **Shutdown handler** `handleShutdown(handlingRequest, responded, request, error)`: guard `handlingRequest && !responded && request !== null`; OOM `memory_limit=-1`; **log to STDERR + Sentry (the point)**; best-effort `respondToFailedRequest($request, 'Unexpected system error')`.
+- **`readonly class` → plain class** with `private readonly` promoted props + one mutable `private bool $shutdownRegistered`, so the once-guard and a non-readonly test subclass are possible (mirrors `HttpWorker`).
+
+**Testing reality (honest).** `RoadRunner\Centrifugo\CentrifugoWorker` and most `Request\*` classes are **`final`** (and `respond/error/disconnect` are `final`), so they can't be mocked. Tests therefore: construct **real** `Request\*` fixtures (their ctors take a mockable goridge `WorkerInterface`), drive the loop through a `waitRequest()` seam, assert `getWorker()->error()`/`stop()` on the injected goridge mock, and unit-test `chooseFailureAction()` / `clientMessage()` directly. A **live** Centrifugo validation (real Centrifugo server + websocket clients) is out of scope — the surface is invisible by nature; the worker instead inherits the HTTP design's already-proven shutdown mechanics, with the Centrifugo-specific logic unit-tested in isolation.
+
+### Centrifugo references
+| Topic | Location | Anchor |
+|-------|----------|--------|
+| Worker (to redesign) | [`src/Worker/CentrifugoWorker.php`](../../src/Worker/CentrifugoWorker.php) | `start()` |
+| Frame send (respond/error/disconnect) | [`vendor/roadrunner-php/centrifugo/src/Request/AbstractRequest.php`](../../vendor/roadrunner-php/centrifugo/src/Request/AbstractRequest.php) | `:53-87` (all `final`) |
+| DI wiring | [`config/services.php`](../../config/services.php) | `:118-130` |
