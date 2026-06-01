@@ -8,6 +8,7 @@ use FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\RPCEvent;
 use FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\SubRefreshEvent;
 use FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\SubscribeEvent;
 use Symfony\Component\DependencyInjection\ServiceLocator;
+use Symfony\Contracts\EventDispatcher\Event;
 
 /**
  * Routes centrifugo events to handlers registered via #[AsCentrifugoChannelListener]
@@ -15,20 +16,24 @@ use Symfony\Component\DependencyInjection\ServiceLocator;
  *
  * Registered at priority -100 so it fires after all default-priority listeners.
  * The routing table is built at compile time by CentrifugoRouterPass for O(1) lookup.
+ *
+ * @phpstan-type CentrifugoHandler array{0: string, 1: string, 2: int}
+ * @phpstan-type CentrifugoChannelBucket array{exact: array<string, list<CentrifugoHandler>>, wildcard: array<string, list<CentrifugoHandler>>}
+ * @phpstan-type CentrifugoRoutingTable array{channels: array<string, CentrifugoChannelBucket>, rpc: array{exact: array<string, list<CentrifugoHandler>>}}
  */
 final class CentrifugoEventRouter
 {
-    /**
-     * @param ServiceLocator $locator      Lazy service locator for all registered handler services.
-     * @param array          $routingTable Compile-time routing table produced by CentrifugoRouterPass:
-     *                                    [
-     *                                      'channels' => [EventClass => ['exact' => [channel => [[svcId, method, priority], ...]], 'wildcard' => [regex => ...]]],
-     *                                      'rpc'      => ['exact' => [rpcMethod => [[svcId, method, priority], ...]]],
-     *                                    ]
-     */
-    /** @var array<string, list<array{0: string, 1: string, 2: int}>> */
+    /** @var array<string, list<CentrifugoHandler>> */
     private array $resolvedCache = [];
 
+    /**
+     * @param ServiceLocator<object>  $locator      Lazy service locator for all registered handler services.
+     * @param CentrifugoRoutingTable  $routingTable Compile-time routing table produced by CentrifugoRouterPass:
+     *                                              [
+     *                                                'channels' => [EventClass => ['exact' => [channel => [[svcId, method, priority], ...]], 'wildcard' => [regex => ...]]],
+     *                                                'rpc'      => ['exact' => [rpcMethod => [[svcId, method, priority], ...]]],
+     *                                              ]
+     */
     public function __construct(
         private readonly ServiceLocator $locator,
         private readonly array $routingTable,
@@ -99,7 +104,7 @@ final class CentrifugoEventRouter
      * Resolves the sorted handler list for a given event class and channel name.
      * Result is cached after the first lookup — wildcards are only evaluated once per channel.
      *
-     * @return list<array{0: string, 1: string, 2: int}>
+     * @return list<CentrifugoHandler>
      */
     private function resolveChannelHandlers(string $eventClass, string $channel): array
     {
@@ -135,9 +140,9 @@ final class CentrifugoEventRouter
     /**
      * Invokes handlers in order, stopping if propagation is stopped.
      *
-     * @param list<array{0: string, 1: string, 2: int}> $handlers
+     * @param list<CentrifugoHandler> $handlers
      */
-    private function invoke(array $handlers, object $event): void
+    private function invoke(array $handlers, Event $event): void
     {
         foreach ($handlers as [$serviceId, $method]) {
             if ($event->isPropagationStopped()) {

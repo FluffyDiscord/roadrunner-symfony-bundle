@@ -34,7 +34,7 @@ class FluffyDiscordRoadRunnerExtension extends Extension
         if (class_exists(RoadRunnerCentrifugoWorker::class)) {
             $container->registerAttributeForAutoconfiguration(
                 AsCentrifugoChannelListener::class,
-                static function (ChildDefinition $definition, AsCentrifugoChannelListener $attr, \ReflectionClass|\ReflectionMethod $refl): void {
+                static function (ChildDefinition $definition, AsCentrifugoChannelListener $attr, \Reflector $refl): void {
                     $tag = [
                         'channel'  => $attr->channel,
                         'event'    => $attr->event,
@@ -56,7 +56,7 @@ class FluffyDiscordRoadRunnerExtension extends Extension
 
             $container->registerAttributeForAutoconfiguration(
                 AsCentrifugoRpcListener::class,
-                static function (ChildDefinition $definition, AsCentrifugoRpcListener $attr, \ReflectionClass|\ReflectionMethod $refl): void {
+                static function (ChildDefinition $definition, AsCentrifugoRpcListener $attr, \Reflector $refl): void {
                     $tag = [
                         'rpc_method' => $attr->rpcMethod,
                         'priority'   => $attr->priority,

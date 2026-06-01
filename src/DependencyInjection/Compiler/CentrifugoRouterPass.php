@@ -39,10 +39,14 @@ final class CentrifugoRouterPass implements CompilerPassInterface
 
         foreach ($container->findTaggedServiceIds('fluffy_discord.centrifugo_channel_listener') as $serviceId => $tags) {
             foreach ($tags as $tag) {
-                $channel  = $tag['channel']  ?? null;
-                $event    = $tag['event']    ?? null;
-                $priority = (int) ($tag['priority'] ?? 0);
-                $method   = $tag['method']   ?? null;
+                if (!is_array($tag)) {
+                    continue;
+                }
+
+                $channel  = isset($tag['channel'])  && is_string($tag['channel'])  ? $tag['channel'] : null;
+                $event    = isset($tag['event'])    && is_string($tag['event'])    ? $tag['event']   : null;
+                $priority = isset($tag['priority']) && is_numeric($tag['priority']) ? (int) $tag['priority'] : 0;
+                $method   = isset($tag['method'])   && is_string($tag['method'])   ? $tag['method']  : null;
 
                 if (empty($channel)) {
                     throw new InvalidArgumentException(sprintf(
@@ -69,9 +73,13 @@ final class CentrifugoRouterPass implements CompilerPassInterface
 
         foreach ($container->findTaggedServiceIds('fluffy_discord.centrifugo_rpc_listener') as $serviceId => $tags) {
             foreach ($tags as $tag) {
-                $rpcMethod = $tag['rpc_method'] ?? null;
-                $priority  = (int) ($tag['priority'] ?? 0);
-                $method    = $tag['method'] ?? null;
+                if (!is_array($tag)) {
+                    continue;
+                }
+
+                $rpcMethod = isset($tag['rpc_method']) && is_string($tag['rpc_method']) ? $tag['rpc_method'] : null;
+                $priority  = isset($tag['priority'])   && is_numeric($tag['priority'])  ? (int) $tag['priority'] : 0;
+                $method    = isset($tag['method'])     && is_string($tag['method'])     ? $tag['method'] : null;
 
                 if (empty($rpcMethod)) {
                     throw new InvalidArgumentException(sprintf(

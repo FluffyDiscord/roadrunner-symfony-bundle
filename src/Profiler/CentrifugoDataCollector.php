@@ -49,12 +49,16 @@ class CentrifugoDataCollector extends DataCollector
 
     public function getEventType(): string
     {
-        return $this->data['event_type'] ?? 'Unknown';
+        $value = $this->data['event_type'] ?? null;
+
+        return is_string($value) ? $value : 'Unknown';
     }
 
     public function getDurationMs(): float
     {
-        return (float) ($this->data['duration_ms'] ?? 0.0);
+        $value = $this->data['duration_ms'] ?? null;
+
+        return is_numeric($value) ? (float) $value : 0.0;
     }
 
     public function isSuccess(): bool
@@ -64,11 +68,15 @@ class CentrifugoDataCollector extends DataCollector
 
     public function getError(): ?string
     {
-        return $this->data['error'] ?? null;
+        $value = $this->data['error'] ?? null;
+
+        return is_string($value) ? $value : null;
     }
 
     public function getStartedAt(): int
     {
-        return (int) ($this->data['started_at'] ?? 0);
+        $value = $this->data['started_at'] ?? null;
+
+        return is_numeric($value) ? (int) $value : 0;
     }
 }
