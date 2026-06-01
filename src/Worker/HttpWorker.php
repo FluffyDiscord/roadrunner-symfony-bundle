@@ -5,6 +5,7 @@ namespace FluffyDiscord\RoadRunnerBundle\Worker;
 use FluffyDiscord\RoadRunnerBundle\Event\Worker\WorkerBootingEvent;
 use FluffyDiscord\RoadRunnerBundle\Event\Worker\WorkerRequestReceivedEvent;
 use FluffyDiscord\RoadRunnerBundle\Event\Worker\WorkerResponseSentEvent;
+use FluffyDiscord\RoadRunnerBundle\ErrorHandler\MinimalErrorPage;
 use FluffyDiscord\RoadRunnerBundle\Factory\BinaryFileResponseWrapper;
 use FluffyDiscord\RoadRunnerBundle\Factory\DefaultResponseWrapper;
 use FluffyDiscord\RoadRunnerBundle\Factory\StreamedJsonResponseWrapper;
@@ -15,13 +16,14 @@ use Spiral\RoadRunner;
 use Symfony\Bridge\PsrHttpMessage\Factory\HttpFoundationFactory;
 use Symfony\Bridge\PsrHttpMessage\HttpFoundationFactoryInterface;
 use Symfony\Component\ErrorHandler\ErrorRenderer\HtmlErrorRenderer;
+use Symfony\Component\ErrorHandler\Exception\FlattenException;
 use Symfony\Component\EventDispatcher\EventDispatcherInterface;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpFoundation\StreamedJsonResponse;
 use Symfony\Component\HttpFoundation\StreamedResponse;
-use Symfony\Component\HttpKernel\DependencyInjection\ServicesResetterInterface;
+use Symfony\Component\DependencyInjection\ServicesResetterInterface;
 use Symfony\Component\HttpKernel\KernelInterface;
 use Symfony\Component\HttpKernel\RebootableInterface;
 use Symfony\Component\HttpKernel\TerminableInterface;
@@ -37,6 +39,12 @@ class HttpWorker implements WorkerInterface
     public static ?\Spiral\RoadRunner\Http\HttpWorker $currentHttpWorker = null;
 
     public const string DUMMY_REQUEST_ATTRIBUTE = "rr_dummy_request";
+
+    /**
+     * Guards one-time registration of the process shutdown handler (Invariant I-3).
+     * Instance-scoped on purpose: a fresh worker per PHPUnit test => no cross-test contamination.
+     */
+    private bool $shutdownRegistered = false;
 
     public function __construct(
         private readonly bool                       $earlyRouterInitialization,
@@ -92,11 +100,27 @@ class HttpWorker implements WorkerInterface
 
         $this->eventDispatcher->dispatch(new WorkerBootingEvent());
 
+        // State the shutdown handler (Bucket B) observes. Captured by reference so the closure
+        // always sees the latest per-iteration values. See docs/specs/graceful-error-handling.md §4.1
+        $handlingRequest = false; // a real client request is in flight
+        $responseStarted = false; // we have begun writing ANY frame for it (incl. the first stream chunk)
+        $responseSent = false;    // we finished a normal response
+
+        // Register once per worker instance, after boot, so boot-time death is a natural no-op.
+        if (!$this->shutdownRegistered) {
+            $this->shutdownRegistered = true;
+            $this->registerShutdown(function () use ($worker, &$handlingRequest, &$responseStarted): void {
+                $this->handleShutdown($worker, $handlingRequest, $responseStarted, error_get_last());
+            });
+        }
+
         while (true) {
             $symfonyRequest = null;
             $symfonyResponse = null;
             $content = null;
             $hadException = false;
+            $handlingRequest = false;
+            $responseStarted = false;
             $responseSent = false;
 
             try {
@@ -108,6 +132,8 @@ class HttpWorker implements WorkerInterface
                 $worker->respond(new Psr7\Response(Response::HTTP_I_AM_A_TEAPOT));
                 continue;
             }
+
+            $handlingRequest = true;
 
             try {
                 $this->sentryHubInterface?->pushScope();
@@ -126,6 +152,11 @@ class HttpWorker implements WorkerInterface
 
                 /** @var array<array<string>> $headers */
                 $headers = $symfonyResponse->headers->all();
+
+                // Mark the response started *before* respond(): a streamed body is consumed inline
+                // (one frame per chunk), so a die()/fatal mid-stream must not make the shutdown
+                // handler append another frame on top of the partial stream (Bucket B′).
+                $responseStarted = true;
                 $worker->getHttpWorker()->respond(
                     $symfonyResponse->getStatusCode(),
                     $content,
@@ -142,24 +173,16 @@ class HttpWorker implements WorkerInterface
                 } catch (\Throwable) {
                 }
 
-                if (!$responseSent) {
-                    if ($this->debug) {
-                        try {
-                            $flattenException = new HtmlErrorRenderer(true)->render($throwable);
-                            $worker->respond(new Psr7\Response(
-                                $flattenException->getStatusCode(),
-                                $flattenException->getHeaders(),
-                                $flattenException->getAsString(),
-                            ));
-                        } catch (\Throwable) {
-                            $worker->respond(new Psr7\Response(Response::HTTP_INTERNAL_SERVER_ERROR, body: (string)$throwable));
-                        }
-                    } else {
-                        $worker->respond(new Psr7\Response(Response::HTTP_INTERNAL_SERVER_ERROR));
-                    }
+                // Only send an error response if no frame for this request has started yet.
+                // If a streamed response already began, appending a frame would corrupt it (B′).
+                if (!$responseStarted) {
+                    $responseStarted = true;
+                    $this->sendThrowableResponse($worker, $throwable);
+                    $responseSent = true;
                 }
 
-                $worker->getWorker()->error((string)$throwable);
+                // RR-side visibility goes to STDERR — never a second relay frame (one frame per request).
+                $this->logError((string)$throwable);
 
                 // hard errors stop workers
                 if ($throwable instanceof \Error) {
@@ -177,13 +200,13 @@ class HttpWorker implements WorkerInterface
                         $this->kernel->reboot(null);
                     }
                 } catch (\Throwable $cleanupThrowable) {
-                    $worker->getWorker()->error("Fatal worker cleanup error: " . $cleanupThrowable);
+                    $this->logError("Fatal worker cleanup error: " . $cleanupThrowable);
                     $worker->getWorker()->stop();
                 } finally {
                     try {
                         $this->servicesResetter?->reset();
                     } catch (\Throwable $throwable) {
-                        $worker->getWorker()->error((string)$throwable);
+                        $this->logError((string)$throwable);
                         $worker->getWorker()->stop();
                     }
                 }
@@ -197,8 +220,130 @@ class HttpWorker implements WorkerInterface
                 } catch (\Throwable) {
                 }
 
+                $handlingRequest = false;
+
                 unset($request, $symfonyRequest, $symfonyResponse, $content);
             }
         }
+    }
+
+    /**
+     * Bucket B / B′: invoked from the process shutdown function for die()/exit()/fatal that bypass
+     * the try/catch. Best-effort and relay-dependent — see docs/specs/graceful-error-handling.md §4.2 + §5.
+     *
+     * @param array{message?: string, file?: string, line?: int}|null $error result of error_get_last() (null for bare die/exit)
+     */
+    protected function handleShutdown(
+        RoadRunner\Http\PSR7Worker $worker,
+        bool                       $handlingRequest,
+        bool                       $responseStarted,
+        ?array                     $error,
+    ): void
+    {
+        // Rescue only a request that was in flight with no frame started. Excludes normal loop exit,
+        // boot/dummy-request death, already-answered and mid-stream (B′) requests.
+        if (!$handlingRequest || $responseStarted) {
+            return;
+        }
+
+        // A genuine OOM leaves almost no headroom; lift PHP's own cap so the tiny page can be built.
+        // Best-effort: in containers the cgroup/OS ceiling still applies (spec A-4).
+        if ($error !== null && isset($error['message']) && str_contains($error['message'], 'Allowed memory size')) {
+            @ini_set('memory_limit', '-1');
+        }
+
+        try {
+            if ($this->debug) {
+                $worker->getHttpWorker()->respond(
+                    Response::HTTP_INTERNAL_SERVER_ERROR,
+                    MinimalErrorPage::render(Response::HTTP_INTERNAL_SERVER_ERROR, $error),
+                    ['Content-Type' => ['text/html; charset=utf-8']],
+                    true,
+                );
+            } else {
+                $worker->getHttpWorker()->respond(Response::HTTP_INTERNAL_SERVER_ERROR, '', [], true);
+            }
+        } catch (\Throwable) {
+            // Relay write failed (e.g. STDOUT polluted in pipe mode). Last resort: an error frame.
+            try {
+                $worker->getWorker()->error($error['message'] ?? 'Worker terminated during request');
+            } catch (\Throwable) {
+            }
+        }
+
+        $this->logError(
+            $error !== null && isset($error['message'])
+                ? sprintf('fatal: %s in %s:%d', $error['message'], $error['file'] ?? '?', $error['line'] ?? 0)
+                : 'worker terminated via die/exit during request',
+        );
+
+        // The finally-block Sentry flush never runs for Bucket B, so report here (best-effort;
+        // may not fire under OOM — documented).
+        try {
+            $this->sentryHubInterface?->captureMessage('RoadRunner worker fatal: ' . ($error['message'] ?? 'die/exit during request'));
+            $this->sentryHubInterface?->getClient()?->flush();
+        } catch (\Throwable) {
+        }
+    }
+
+    /**
+     * Bucket A: send an error response for a caught throwable. One coherent response frame; error()
+     * is used only as a fallback if respond() itself throws. See docs/spec §4.3.
+     */
+    protected function sendThrowableResponse(RoadRunner\Http\PSR7Worker $worker, \Throwable $throwable): void
+    {
+        try {
+            if ($this->debug) {
+                try {
+                    $flattenException = $this->renderHtmlError($throwable);
+                    $worker->respond(new Psr7\Response(
+                        $flattenException->getStatusCode(),
+                        $flattenException->getHeaders(),
+                        $flattenException->getAsString(),
+                    ));
+                } catch (\Throwable) {
+                    $worker->respond(new Psr7\Response(
+                        Response::HTTP_INTERNAL_SERVER_ERROR,
+                        ['Content-Type' => 'text/html; charset=utf-8'],
+                        MinimalErrorPage::render(Response::HTTP_INTERNAL_SERVER_ERROR, null, (string)$throwable),
+                    ));
+                }
+            } else {
+                $worker->respond(new Psr7\Response(Response::HTTP_INTERNAL_SERVER_ERROR));
+            }
+        } catch (\Throwable) {
+            try {
+                $worker->getWorker()->error((string)$throwable);
+            } catch (\Throwable) {
+            }
+        }
+    }
+
+    /**
+     * Render a throwable into Symfony's rich debug page. Seam so tests can simulate the renderer
+     * itself failing, exercising the MinimalErrorPage fallback in {@see sendThrowableResponse()}.
+     */
+    protected function renderHtmlError(\Throwable $throwable): FlattenException
+    {
+        return new HtmlErrorRenderer(true)->render($throwable);
+    }
+
+    /**
+     * Register the process shutdown handler. Seam so tests can intercept registration instead of
+     * polluting the PHPUnit process with a real shutdown function.
+     */
+    protected function registerShutdown(callable $handler): void
+    {
+        register_shutdown_function($handler);
+    }
+
+    /**
+     * RR-side diagnostics sink. STDERR is captured by RoadRunner as worker logs and, unlike STDOUT
+     * in pipe mode, is never the goridge channel — writing here cannot corrupt the relay.
+     * Overridable seam for tests.
+     */
+    protected function logError(string $message): void
+    {
+        @fwrite(\STDERR, '[roadrunner-symfony] ' . $message . "\n");
     }
 }

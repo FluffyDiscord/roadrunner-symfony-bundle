@@ -27,9 +27,16 @@ class HttpWorkerExceptionTest extends AbstractHttpWorkerTestCase
             ))
         ;
 
-        $this->rrWorker->expects($this->once())->method('error');
+        // One frame per request: the throwable goes to STDERR (logError), NOT a second error() relay frame.
+        $this->rrWorker->expects($this->never())->method('error');
 
-        $this->makeWorker(debug: false)->start();
+        $worker = $this->makeWorker(debug: false);
+        $worker->start();
+
+        $this->assertNotEmpty(
+            array_filter($worker->loggedErrors, static fn(string $m): bool => str_contains($m, 'boom')),
+            'the throwable should be logged to STDERR',
+        );
     }
 
     public function testKernelExceptionResponds500WithBodyInDebugMode(): void
@@ -52,6 +59,9 @@ class HttpWorkerExceptionTest extends AbstractHttpWorkerTestCase
                     && str_contains((string)$r->getBody(), 'RuntimeException'),
             ))
         ;
+
+        // Even when a rich debug page is sent, no second error() frame is emitted.
+        $this->rrWorker->expects($this->never())->method('error');
 
         $this->makeWorker(debug: true)->start();
     }

@@ -33,7 +33,7 @@ final class FluffyDiscordRoadRunnerBundle extends Bundle
             default => null,
         };
 
-        if ($paramName !== null && $this->container->hasParameter($paramName)) {
+        if ($paramName !== null && $this->container !== null && $this->container->hasParameter($paramName)) {
             /** @var string $runtimeMode */
             $runtimeMode = $this->container->getParameter($paramName);
             $_SERVER['APP_RUNTIME_MODE'] = $runtimeMode;
