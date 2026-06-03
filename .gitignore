@@ -2,3 +2,4 @@
 /vendor/
 .idea
 /.claude/worktrees/
+/.claude/scheduled_tasks.lock
