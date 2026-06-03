@@ -10,7 +10,7 @@
         }
     ],
     "require" : {
-        "php" : ">=8.5",
+        "php" : ">=8.4",
         "nyholm/psr7" : "^1.8",
         "spiral/roadrunner" : "^v2025 || ^3",
         "symfony/dependency-injection" : "^7.4 || ^8",
@@ -22,7 +22,8 @@
         "symfony/expression-language" : "^7.4 || ^8",
         "spiral/roadrunner-worker" : "^v3",
         "spiral/roadrunner-http" : "^v4",
-        "spiral/roadrunner-cli" : "^v2"
+        "spiral/roadrunner-cli" : "^v2",
+        "spiral/roadrunner-jobs": "^4.7"
     },
     "minimum-stability" : "dev",
     "prefer-stable" : true,
@@ -53,8 +54,20 @@
         "symfony/mime" : "^7.4 || ^8",
         "roadrunner-php/centrifugo" : "^v2",
         "spiral/roadrunner-kv" : "^v4",
+        "temporal/sdk" : "^2.16",
+        "symfony/serializer" : "^7.4 || ^8",
+        "symfony/property-access" : "^7.4 || ^8",
+        "roadrunner-php/lock" : "^1.0",
+        "symfony/lock" : "^7.4 || ^8",
+        "roadrunner-php/symfony-lock-driver" : "^1.1",
         "phpstan/phpstan" : "^2.1",
         "phpstan/phpstan-symfony" : "^2.0",
         "phpstan/extension-installer": "^1.4"
+    },
+    "suggest" : {
+        "temporal/sdk" : "Enables the Temporal.io worker, interceptors and profiler data collector",
+        "ext-igbinary" : "Smaller, faster binary serializer for the Jobs message-bus; used automatically when present, otherwise the native serializer is used.",
+        "symfony/serializer" : "Optional JSON-based serializer for the Jobs message-bus (interoperable payloads). The default native serializer requires no extra dependencies.",
+        "roadrunner-php/symfony-lock-driver" : "Exposes RoadRunner distributed locks as a Symfony LockFactory / PersistingStoreInterface (pulls in roadrunner-php/lock + symfony/lock)."
     }
 }
