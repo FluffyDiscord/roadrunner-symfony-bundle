@@ -1,37 +1,36 @@
 #!/usr/bin/env bash
+#
 # Run the unit test suite across a matrix of PHP x Symfony versions in Docker.
 #
-# Add/remove versions by editing the two lists below — nothing else needs to change.
-#   PHP_VERSIONS     : official `php:<ver>-cli-trixie` images are used.
-#   SYMFONY_VERSIONS : passed as `^<ver>` constraints to the symfony/* packages.
+# Unlike the docker-validate-*.sh harnesses, this one needs no test app: it builds the bundle itself,
+# pins the symfony/* packages to each version, and runs `phpunit tests/`. The build context is the
+# repo root directly (no temp dir) — only the Dockerfile is generated.
 #
 # Usage:
 #   ./tests/docker-test-symfony.sh                 # full matrix (all PHP x all Symfony)
 #   ./tests/docker-test-symfony.sh "8.4"           # only PHP 8.4, all Symfony
 #   ./tests/docker-test-symfony.sh "8.4 8.5" "7.4" # narrow both axes
+#
 set -uo pipefail
 
-PHP_VERSIONS=(8.4 8.5)
-SYMFONY_VERSIONS=(7.4 8.1)
+# =============================================================================
+# Config
+# =============================================================================
+PHP_VERSIONS=(8.4 8.5)        # official php:<ver>-cli-trixie images
+SYMFONY_VERSIONS=(7.4 8.1)    # passed as ^<ver> constraints to the symfony/* packages
+IMAGE_PREFIX="rr-bundle-test"
 
-[ "${1:-}" ] && read -ra PHP_VERSIONS <<< "$1"
-[ "${2:-}" ] && read -ra SYMFONY_VERSIONS <<< "$2"
+[ "${1:-}" ] && read -ra PHP_VERSIONS <<< "$1"        # first arg narrows the PHP axis
+[ "${2:-}" ] && read -ra SYMFONY_VERSIONS <<< "$2"    # second arg narrows the Symfony axis
+cd "$(dirname "$0")/.."                                # run from the repo root, wherever we're invoked from
 
-# Build context is the repo root, regardless of where this script is invoked from.
-cd "$(dirname "$0")/.."
+# =============================================================================
+# Dockerfile — the bundle + symfony/* pinned per build-arg, then `phpunit tests/`
+# =============================================================================
+DOCKERFILE="$(mktemp)"
+trap 'rm -f "$DOCKERFILE"' EXIT
 
-FAIL=0
-for PHP_VERSION in "${PHP_VERSIONS[@]}"; do
-  for SYMFONY_VERSION in "${SYMFONY_VERSIONS[@]}"; do
-    IMAGE_TAG="rr-bundle-test-php${PHP_VERSION}-sf${SYMFONY_VERSION}"
-
-    echo ""
-    echo "=== Building test image: PHP ${PHP_VERSION} / Symfony ${SYMFONY_VERSION} ==="
-    if ! docker build \
-          --build-arg PHP_VERSION="${PHP_VERSION}" \
-          --build-arg SYMFONY_VERSION="${SYMFONY_VERSION}" \
-          -t "${IMAGE_TAG}" \
-          -f - . <<'DOCKERFILE'
+cat > "$DOCKERFILE" <<'DOCKERFILE'
 ARG PHP_VERSION
 FROM php:${PHP_VERSION}-cli-trixie
 
@@ -63,17 +62,24 @@ RUN composer config minimum-stability dev \
 
 CMD ["vendor/bin/phpunit", "tests/"]
 DOCKERFILE
-    then
-      echo "!!! BUILD FAILED: PHP ${PHP_VERSION} / Symfony ${SYMFONY_VERSION}"
-      FAIL=1
-      continue
-    fi
 
-    echo "=== Running tests: PHP ${PHP_VERSION} / Symfony ${SYMFONY_VERSION} ==="
-    docker run --rm "${IMAGE_TAG}" || FAIL=1
+# =============================================================================
+# Build & run the PHP x Symfony matrix
+# =============================================================================
+FAIL=0
+for php in "${PHP_VERSIONS[@]}"; do
+  for sf in "${SYMFONY_VERSIONS[@]}"; do
+    tag="${IMAGE_PREFIX}-php${php}-sf${sf}"
+    echo
+    echo "=== Building test image: PHP ${php} / Symfony ${sf} ==="
+    if ! docker build --build-arg PHP_VERSION="$php" --build-arg SYMFONY_VERSION="$sf" -t "$tag" -f "$DOCKERFILE" .; then
+      echo "!!! BUILD FAILED: PHP ${php} / Symfony ${sf}"; FAIL=1; continue
+    fi
+    echo "=== Running tests: PHP ${php} / Symfony ${sf} ==="
+    docker run --rm "$tag" || FAIL=1
   done
 done
 
-echo ""
+echo
 [ "$FAIL" -eq 0 ] && echo "=== ALL COMBINATIONS PASSED ===" || echo "=== SOME COMBINATIONS FAILED ==="
 exit "$FAIL"

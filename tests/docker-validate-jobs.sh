@@ -21,12 +21,51 @@
 #   ./tests/docker-validate-jobs.sh "8.4"      # only PHP 8.4
 set -euo pipefail
 
+# =============================================================================
+# Config
+# =============================================================================
 PHP_VERSIONS=(8.4 8.5)
-[ "${1:-}" ] && read -ra PHP_VERSIONS <<< "$1"
+IMAGE_PREFIX="rr-bundle-jobs-validation"
 
-# Build context is the repo root, regardless of where this script is invoked from.
-cd "$(dirname "$0")/.."
+[ "${1:-}" ] && read -ra PHP_VERSIONS <<< "$1"   # a single CLI arg narrows the version list
+cd "$(dirname "$0")/.."                           # run from the repo root, wherever we're invoked from
 
+# =============================================================================
+# Helpers (same shape across every tests/docker-validate-*.sh)
+# =============================================================================
+
+# Copy a pre-fetched `rr` server binary into the context (env RR_BIN, or `rr` on PATH) to skip the
+# GitHub download during the image build. No-op when none is available — the Dockerfile fetches it.
+prefetch_rr() {
+  local rr="${RR_BIN:-$(command -v rr 2>/dev/null || true)}"
+  if [ -n "$rr" ] && [ -f "$rr" ]; then
+    echo "Using pre-fetched rr binary: $rr"
+    cp "$rr" "$CTX/app/rr"
+  fi
+}
+
+# Build + run the image once per PHP version; aggregate failures into the exit code.
+build_and_run() {
+  local fail=0 tag php
+  for php in "${PHP_VERSIONS[@]}"; do
+    tag="${IMAGE_PREFIX}-php${php}"
+    echo
+    echo "=== Building image $tag (PHP ${php}) ==="
+    if ! docker build --build-arg PHP_VERSION="$php" -t "$tag" "$CTX"; then
+      echo "!!! BUILD FAILED: PHP ${php}"; fail=1; continue
+    fi
+    echo "=== Running validation (PHP ${php}) ==="
+    docker run --rm "$tag" || fail=1
+  done
+  echo
+  [ "$fail" -eq 0 ] && echo "=== ALL PHP VERSIONS PASSED ===" || echo "=== SOME PHP VERSIONS FAILED ==="
+  return "$fail"
+}
+
+# =============================================================================
+# 1. Build context — bundle -> /bundle (path repo); the app + the bundle's live
+#    tests (the jobs-live PHPUnit assertions) -> /app
+# =============================================================================
 CTX="$(mktemp -d)"
 trap 'rm -rf "$CTX"' EXIT
 
@@ -34,18 +73,16 @@ echo "=== Preparing build context in $CTX ==="
 cp composer.json "$CTX/composer.json"
 cp -r src "$CTX/src"
 cp -r config "$CTX/config"
-
 mkdir -p "$CTX/app/src" "$CTX/app/public" "$CTX/app/var"
 
-# The bundle's live tests + BaseTestCase run INSIDE the container as the assertion step; copy tests/
-# in and map the Tests\ namespace in the app's autoloader (below).
+# The live tests + BaseTestCase run INSIDE the container as the assertion step; copy tests/ in and
+# map the Tests\ namespace in the app's autoloader (below).
 cp -r tests "$CTX/app/bundle-tests"
 
-# Provide a pre-fetched rr server binary if available (env RR_BIN, or `rr` on PATH) to avoid a
-# GitHub download during the build; otherwise the Dockerfile fetches it via `rr get-binary`.
-RR_BIN="${RR_BIN:-$(command -v rr 2>/dev/null || true)}"
-if [ -n "${RR_BIN:-}" ] && [ -f "$RR_BIN" ]; then echo "Using pre-fetched rr binary: $RR_BIN"; cp "$RR_BIN" "$CTX/app/rr"; fi
-
+# =============================================================================
+# 2. Test app — #[AsJob] messages + handlers + a raw-task listener, plus HTTP
+#    routes to dispatch them (the http pool drives, the jobs pool consumes)
+# =============================================================================
 cat > "$CTX/app/composer.json" <<'JSON'
 {
     "require": {
@@ -241,6 +278,10 @@ require_once dirname(__DIR__) . '/vendor/autoload_runtime.php';
 return fn(array $context) => new Kernel($context['APP_ENV'], (bool) $context['APP_DEBUG']);
 PHP
 
+# =============================================================================
+# 3. RoadRunner config (http + jobs pools) + entrypoint — provision the server,
+#    then run `phpunit --group jobs-live` (the live tests hold the assertions)
+# =============================================================================
 cat > "$CTX/app/.rr.yaml" <<'YAML'
 version: "3"
 rpc:
@@ -306,6 +347,9 @@ echo ""; [ "$FAIL" -eq 0 ] && echo "=== ALL CHECKS PASSED (jobs-live) ===" || ec
 exit "$FAIL"
 BASH
 
+# =============================================================================
+# 4. Dockerfile — base (no extra PHP extensions needed for jobs) + the app
+# =============================================================================
 cat > "$CTX/Dockerfile" <<'DOCKERFILE'
 ARG PHP_VERSION
 FROM php:${PHP_VERSION}-cli-trixie
@@ -324,18 +368,8 @@ RUN composer install --no-interaction --no-progress \
 CMD ["/app/entrypoint.sh"]
 DOCKERFILE
 
-FAIL=0
-for PHP_VERSION in "${PHP_VERSIONS[@]}"; do
-  IMAGE_TAG="rr-bundle-jobs-validation-php${PHP_VERSION}"
-  echo ""
-  echo "=== Building image $IMAGE_TAG (PHP ${PHP_VERSION}) ==="
-  if ! docker build --build-arg PHP_VERSION="${PHP_VERSION}" -t "$IMAGE_TAG" "$CTX"; then
-    echo "!!! BUILD FAILED: PHP ${PHP_VERSION}"; FAIL=1; continue
-  fi
-  echo "=== Running validation (PHP ${PHP_VERSION}) ==="
-  docker run --rm "$IMAGE_TAG" || FAIL=1
-done
-
-echo ""
-[ "$FAIL" -eq 0 ] && echo "=== ALL PHP VERSIONS PASSED ===" || echo "=== SOME PHP VERSIONS FAILED ==="
-exit "$FAIL"
+# =============================================================================
+# 5. Build & run
+# =============================================================================
+prefetch_rr
+build_and_run

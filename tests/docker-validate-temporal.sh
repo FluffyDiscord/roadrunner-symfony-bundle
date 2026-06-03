@@ -26,12 +26,51 @@
 #   ./tests/docker-validate-temporal.sh "8.4"      # only PHP 8.4
 set -euo pipefail
 
+# =============================================================================
+# Config
+# =============================================================================
 PHP_VERSIONS=(8.4 8.5)
-[ "${1:-}" ] && read -ra PHP_VERSIONS <<< "$1"
+IMAGE_PREFIX="rr-bundle-temporal-validation"
 
-# Build context is the repo root, regardless of where this script is invoked from.
-cd "$(dirname "$0")/.."
+[ "${1:-}" ] && read -ra PHP_VERSIONS <<< "$1"   # a single CLI arg narrows the version list
+cd "$(dirname "$0")/.."                           # run from the repo root, wherever we're invoked from
 
+# =============================================================================
+# Helpers (same shape across every tests/docker-validate-*.sh)
+# =============================================================================
+
+# Copy a pre-fetched `rr` server binary into the context (env RR_BIN, or `rr` on PATH) to skip the
+# GitHub download during the image build. No-op when none is available — the Dockerfile fetches it.
+prefetch_rr() {
+  local rr="${RR_BIN:-$(command -v rr 2>/dev/null || true)}"
+  if [ -n "$rr" ] && [ -f "$rr" ]; then
+    echo "Using pre-fetched rr binary: $rr"
+    cp "$rr" "$CTX/app/rr"
+  fi
+}
+
+# Build + run the image once per PHP version; aggregate failures into the exit code.
+build_and_run() {
+  local fail=0 tag php
+  for php in "${PHP_VERSIONS[@]}"; do
+    tag="${IMAGE_PREFIX}-php${php}"
+    echo
+    echo "=== Building image $tag (PHP ${php}) ==="
+    if ! docker build --build-arg PHP_VERSION="$php" -t "$tag" "$CTX"; then
+      echo "!!! BUILD FAILED: PHP ${php}"; fail=1; continue
+    fi
+    echo "=== Running validation (PHP ${php}) ==="
+    docker run --rm "$tag" || fail=1
+  done
+  echo
+  [ "$fail" -eq 0 ] && echo "=== ALL PHP VERSIONS PASSED ===" || echo "=== SOME PHP VERSIONS FAILED ==="
+  return "$fail"
+}
+
+# =============================================================================
+# 1. Build context — bundle -> /bundle (path repo); the app + the bundle's live
+#    tests (for the Workflow contracts + the PHPUnit assertions) -> /app
+# =============================================================================
 CTX="$(mktemp -d)"
 trap 'rm -rf "$CTX"' EXIT
 
@@ -39,18 +78,16 @@ echo "=== Preparing build context in $CTX ==="
 cp composer.json "$CTX/composer.json"
 cp -r src "$CTX/src"
 cp -r config "$CTX/config"
-
 mkdir -p "$CTX/app/src" "$CTX/app/public"
 
-# The bundle's live test + its Workflow\* contracts + BaseTestCase run INSIDE the container as the
-# assertion step; copy tests/ in and map the Tests\ namespace in the app's autoloader (below).
+# The live test + its Workflow\* contracts + BaseTestCase run INSIDE the container as the assertion
+# step; copy tests/ in and map the Tests\ namespace in the app's autoloader (below).
 cp -r tests "$CTX/app/bundle-tests"
 
-# Provide a pre-fetched rr server binary if available (env RR_BIN, or `rr` on PATH) to avoid a
-# GitHub download during the build; otherwise the Dockerfile fetches it via `rr get-binary`.
-RR_BIN="${RR_BIN:-$(command -v rr 2>/dev/null || true)}"
-if [ -n "${RR_BIN:-}" ] && [ -f "$RR_BIN" ]; then echo "Using pre-fetched rr binary: $RR_BIN"; cp "$RR_BIN" "$CTX/app/rr"; fi
-
+# =============================================================================
+# 2. Test app — worker-side implementations of the bundle's live contracts,
+#    each assigned to the "default" task queue via #[TaskQueue]
+# =============================================================================
 cat > "$CTX/app/composer.json" <<'JSON'
 {
     "require": {
@@ -269,6 +306,10 @@ require_once dirname(__DIR__) . '/vendor/autoload_runtime.php';
 return fn(array $context) => new Kernel($context['APP_ENV'], (bool) $context['APP_DEBUG']);
 PHP
 
+# =============================================================================
+# 3. RoadRunner config + entrypoint — provision Temporal + the rr worker, then
+#    run `phpunit --group temporal-live` (the live test holds the assertions)
+# =============================================================================
 cat > "$CTX/app/.rr.yaml" <<'YAML'
 version: "3"
 rpc:
@@ -342,16 +383,25 @@ echo ""
 exit "$FAIL"
 BASH
 
+# =============================================================================
+# 4. Dockerfile — base + ext-grpc (for the Temporal client) + Temporal CLI
+# =============================================================================
 cat > "$CTX/Dockerfile" <<'DOCKERFILE'
 ARG PHP_VERSION=8.4
 FROM php:${PHP_VERSION}-cli-trixie
 # git/unzip/curl for composer + rr download; sockets for RR worker; ext-grpc is REQUIRED by the
 # Temporal PHP client (Temporal\Client\GRPC\BaseClient throws unless extension_loaded('grpc')).
-RUN apt-get update && apt-get install -y --no-install-recommends git unzip curl $PHPIZE_DEPS zlib1g-dev \
+RUN apt-get update && apt-get install -y --no-install-recommends git unzip curl binutils $PHPIZE_DEPS zlib1g-dev \
  && rm -rf /var/lib/apt/lists/* \
  && docker-php-ext-install sockets \
- && pecl install grpc \
- && docker-php-ext-enable grpc
+ # Refresh the pecl registry first — without it the build intermittently fails with
+ # "No releases available for package pecl.php.net/grpc" on a stale/partial channel cache.
+ && pecl channel-update pecl.php.net \
+ # grpc's pecl build is single-threaded by default and embeds debug symbols (~20 min, ~55 MB .so).
+ # pecl's make honors MAKEFLAGS, so parallelize it (capped at 8 to avoid OOM) + strip (grpc/grpc#23626).
+ && MAKEFLAGS="-j$(nproc | awk '{print ($1>8)?8:$1}')" pecl install grpc \
+ && docker-php-ext-enable grpc \
+ && strip --strip-debug "$(php-config --extension-dir)/grpc.so"
 # Temporal CLI (ships the in-memory dev server: `temporal server start-dev`).
 COPY --from=temporalio/temporal:latest /usr/local/bin/temporal /usr/local/bin/temporal
 COPY --from=composer:2 /usr/bin/composer /usr/local/bin/composer
@@ -366,18 +416,8 @@ RUN composer install --no-interaction --no-progress \
 CMD ["/app/entrypoint.sh"]
 DOCKERFILE
 
-FAIL=0
-for PHP_VERSION in "${PHP_VERSIONS[@]}"; do
-  IMAGE_TAG="rr-bundle-temporal-validation-php${PHP_VERSION}"
-  echo ""
-  echo "=== Building image $IMAGE_TAG (PHP ${PHP_VERSION}) ==="
-  if ! docker build --build-arg PHP_VERSION="${PHP_VERSION}" -t "$IMAGE_TAG" "$CTX"; then
-    echo "!!! BUILD FAILED: PHP ${PHP_VERSION}"; FAIL=1; continue
-  fi
-  echo "=== Running validation (PHP ${PHP_VERSION}) ==="
-  docker run --rm "$IMAGE_TAG" || FAIL=1
-done
-
-echo ""
-[ "$FAIL" -eq 0 ] && echo "=== ALL PHP VERSIONS PASSED ===" || echo "=== SOME PHP VERSIONS FAILED ==="
-exit "$FAIL"
+# =============================================================================
+# 5. Build & run
+# =============================================================================
+prefetch_rr
+build_and_run

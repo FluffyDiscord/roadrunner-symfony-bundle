@@ -1,22 +1,69 @@
 #!/usr/bin/env bash
+#
 # Real-world validation of graceful worker error handling (docs/specs/graceful-error-handling.md).
+#
 # Builds a minimal Symfony app on top of this bundle, runs it under a real RoadRunner server in
 # Docker, and asserts the client-visible behavior for catchable exceptions, die()/exit(), and prod.
 #
-# Runs the validation against each PHP version listed below — add/remove versions by editing the
-# PHP_VERSIONS list (official `php:<ver>-cli-trixie` images are used). Optionally narrow via arg:
-#
 # Usage:
-#   ./tests/docker-validate-error-pages.sh            # all PHP versions in the list
+#   ./tests/docker-validate-error-pages.sh            # every PHP version in PHP_VERSIONS
 #   ./tests/docker-validate-error-pages.sh "8.4"      # only PHP 8.4
+#
+# Structure (shared by every tests/docker-validate-*.sh):
+#   Config        — the knobs you'll usually edit (PHP versions, image name)
+#   Helpers       — prefetch_rr / build_and_run, the boilerplate
+#   1. Context    — assemble the Docker build context in a temp dir
+#   2. Test app   — the Symfony app fixtures the worker runs (PHP heredocs)
+#   3. Entrypoint — what runs inside the container (provision + assert)
+#   4. Dockerfile — the image definition
+#   5. Build+run  — loop over PHP versions
+#
 set -euo pipefail
 
+# =============================================================================
+# Config
+# =============================================================================
 PHP_VERSIONS=(8.4 8.5)
-[ "${1:-}" ] && read -ra PHP_VERSIONS <<< "$1"
+IMAGE_PREFIX="rr-bundle-error-validation"
 
-# Build context is the repo root, regardless of where this script is invoked from.
-cd "$(dirname "$0")/.."
+[ "${1:-}" ] && read -ra PHP_VERSIONS <<< "$1"   # a single CLI arg narrows the version list
+cd "$(dirname "$0")/.."                           # run from the repo root, wherever we're invoked from
 
+# =============================================================================
+# Helpers
+# =============================================================================
+
+# Copy a pre-fetched `rr` server binary into the context (env RR_BIN, or `rr` on PATH) to skip the
+# GitHub download during the image build. No-op when none is available — the Dockerfile fetches it.
+prefetch_rr() {
+  local rr="${RR_BIN:-$(command -v rr 2>/dev/null || true)}"
+  if [ -n "$rr" ] && [ -f "$rr" ]; then
+    echo "Using pre-fetched rr binary: $rr"
+    cp "$rr" "$CTX/app/rr"
+  fi
+}
+
+# Build + run the image once per PHP version; aggregate failures into the exit code.
+build_and_run() {
+  local fail=0 tag php
+  for php in "${PHP_VERSIONS[@]}"; do
+    tag="${IMAGE_PREFIX}-php${php}"
+    echo
+    echo "=== Building image $tag (PHP ${php}) ==="
+    if ! docker build --build-arg PHP_VERSION="$php" -t "$tag" "$CTX"; then
+      echo "!!! BUILD FAILED: PHP ${php}"; fail=1; continue
+    fi
+    echo "=== Running validation (PHP ${php}) ==="
+    docker run --rm "$tag" || fail=1
+  done
+  echo
+  [ "$fail" -eq 0 ] && echo "=== ALL PHP VERSIONS PASSED ===" || echo "=== SOME PHP VERSIONS FAILED ==="
+  return "$fail"
+}
+
+# =============================================================================
+# 1. Build context — the bundle itself goes to /bundle (a path repo); the app to /app
+# =============================================================================
 CTX="$(mktemp -d)"
 trap 'rm -rf "$CTX"' EXIT
 
@@ -24,14 +71,11 @@ echo "=== Preparing build context in $CTX ==="
 cp composer.json "$CTX/composer.json"
 cp -r src "$CTX/src"
 cp -r config "$CTX/config"
-
 mkdir -p "$CTX/app/src" "$CTX/app/public"
 
-# Provide a pre-fetched rr server binary if available (env RR_BIN, or `rr` on PATH) to avoid a
-# GitHub download during the build; otherwise the Dockerfile fetches it via `rr get-binary`.
-RR_BIN="${RR_BIN:-$(command -v rr 2>/dev/null || true)}"
-if [ -n "${RR_BIN:-}" ] && [ -f "$RR_BIN" ]; then echo "Using pre-fetched rr binary: $RR_BIN"; cp "$RR_BIN" "$CTX/app/rr"; fi
-
+# =============================================================================
+# 2. Test app — a micro-kernel with one route per failure mode
+# =============================================================================
 cat > "$CTX/app/composer.json" <<'JSON'
 {
     "require": {
@@ -49,6 +93,7 @@ cat > "$CTX/app/composer.json" <<'JSON'
 }
 JSON
 
+# /ok healthy · /boom catchable exception · /exit bare exit · /die die() with stray output.
 cat > "$CTX/app/src/Kernel.php" <<'PHP'
 <?php
 namespace App;
@@ -101,6 +146,9 @@ require_once dirname(__DIR__) . '/vendor/autoload_runtime.php';
 return fn(array $context) => new Kernel($context['APP_ENV'], (bool) $context['APP_DEBUG']);
 PHP
 
+# =============================================================================
+# 3. Entrypoint — drives the app twice (debug, then prod) and asserts each response
+# =============================================================================
 cat > "$CTX/app/entrypoint.sh" <<'BASH'
 #!/usr/bin/env bash
 set -uo pipefail
@@ -155,6 +203,9 @@ echo ""; [ "$FAIL" -eq 0 ] && echo "=== ALL CHECKS PASSED ===" || { echo "=== SO
 exit "$FAIL"
 BASH
 
+# =============================================================================
+# 4. Dockerfile
+# =============================================================================
 cat > "$CTX/Dockerfile" <<'DOCKERFILE'
 ARG PHP_VERSION
 FROM php:${PHP_VERSION}-cli-trixie
@@ -173,18 +224,8 @@ RUN composer install --no-interaction --no-progress \
 CMD ["/app/entrypoint.sh"]
 DOCKERFILE
 
-FAIL=0
-for PHP_VERSION in "${PHP_VERSIONS[@]}"; do
-  IMAGE_TAG="rr-bundle-error-validation-php${PHP_VERSION}"
-  echo ""
-  echo "=== Building image $IMAGE_TAG (PHP ${PHP_VERSION}) ==="
-  if ! docker build --build-arg PHP_VERSION="${PHP_VERSION}" -t "$IMAGE_TAG" "$CTX"; then
-    echo "!!! BUILD FAILED: PHP ${PHP_VERSION}"; FAIL=1; continue
-  fi
-  echo "=== Running validation (PHP ${PHP_VERSION}) ==="
-  docker run --rm "$IMAGE_TAG" || FAIL=1
-done
-
-echo ""
-[ "$FAIL" -eq 0 ] && echo "=== ALL PHP VERSIONS PASSED ===" || echo "=== SOME PHP VERSIONS FAILED ==="
-exit "$FAIL"
+# =============================================================================
+# 5. Build & run
+# =============================================================================
+prefetch_rr
+build_and_run
