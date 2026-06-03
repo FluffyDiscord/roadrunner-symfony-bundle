@@ -40,8 +40,6 @@ class CentrifugoDataCollector extends DataCollector
         $this->data = [];
     }
 
-    // ── accessors used in the Twig template ──────────────────────────────────
-
     public function hasData(): bool
     {
         return isset($this->data['event_type']);

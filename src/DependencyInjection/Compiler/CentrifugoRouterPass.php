@@ -95,7 +95,6 @@ final class CentrifugoRouterPass implements CompilerPassInterface
             }
         }
 
-        // Sort all handler lists by priority descending (compile-time, zero runtime cost)
         foreach ($channelTable as $eventClass => &$buckets) {
             foreach ($buckets['exact'] as &$handlers) {
                 usort($handlers, static fn(array $a, array $b): int => $b[2] <=> $a[2]);
@@ -146,7 +145,6 @@ final class CentrifugoRouterPass implements CompilerPassInterface
     private function resolveChannelEvent(ContainerBuilder $container, string $serviceId, string $method, ?string $event): string
     {
         if ($event === null) {
-            // Try to infer from the method's first parameter type hint
             $class      = $container->getDefinition($serviceId)->getClass() ?? $serviceId;
             $reflection = $container->getReflectionClass($class);
             if ($reflection === null) {

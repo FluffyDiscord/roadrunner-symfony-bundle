@@ -99,8 +99,6 @@ abstract class AbstractCentrifugoWorkerTestCase extends BaseTestCase
         return $worker;
     }
 
-    // --- real Request\* fixtures (final classes; constructed with a mocked goridge worker) ---
-
     protected function makeConnect(): Request\Connect
     {
         return new Request\Connect($this->goridgeWorker, 'client', 'transport', 'json', 'json', [], null, null, [], []);

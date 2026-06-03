@@ -29,10 +29,6 @@ class CentrifugoEventRouterTest extends BaseTestCase
         $this->worker = $this->createMock(WorkerInterface::class);
     }
 
-    // -------------------------------------------------------------------------
-    // Helpers
-    // -------------------------------------------------------------------------
-
     private function makeRouter(array $routingTable, array $services = []): CentrifugoEventRouter
     {
         $locator = new ServiceLocator($services);
@@ -82,10 +78,6 @@ class CentrifugoEventRouterTest extends BaseTestCase
         return new RPCEvent(new RPC($this->worker, 'c', 'ws', 'json', 'json', 'u', $method, [], [], []));
     }
 
-    // -------------------------------------------------------------------------
-    // Publish — exact channel
-    // -------------------------------------------------------------------------
-
     public function testExactChannelMatchCallsHandler(): void
     {
         $h = $this->makeHandler();
@@ -112,10 +104,6 @@ class CentrifugoEventRouterTest extends BaseTestCase
         $this->assertCount(0, $h['calls']);
     }
 
-    // -------------------------------------------------------------------------
-    // Publish — wildcard channel
-    // -------------------------------------------------------------------------
-
     public function testWildcardMatchCallsHandler(): void
     {
         $h = $this->makeHandler();
@@ -141,10 +129,6 @@ class CentrifugoEventRouterTest extends BaseTestCase
 
         $this->assertCount(0, $h['calls']);
     }
-
-    // -------------------------------------------------------------------------
-    // Priority ordering
-    // -------------------------------------------------------------------------
 
     public function testHandlersCalledInPriorityOrder(): void
     {
@@ -173,10 +157,6 @@ class CentrifugoEventRouterTest extends BaseTestCase
 
         $this->assertSame(['high', 'low'], $order);
     }
-
-    // -------------------------------------------------------------------------
-    // Stop propagation
-    // -------------------------------------------------------------------------
 
     public function testStopPropagationHaltsHandlerChain(): void
     {
@@ -209,10 +189,6 @@ class CentrifugoEventRouterTest extends BaseTestCase
         $this->assertSame(['first'], $calls);
     }
 
-    // -------------------------------------------------------------------------
-    // Subscribe / SubRefresh
-    // -------------------------------------------------------------------------
-
     public function testSubscribeEventRouted(): void
     {
         $h = $this->makeHandler();
@@ -238,10 +214,6 @@ class CentrifugoEventRouterTest extends BaseTestCase
 
         $this->assertCount(1, $h['calls']);
     }
-
-    // -------------------------------------------------------------------------
-    // ConnectEvent — channels array
-    // -------------------------------------------------------------------------
 
     public function testConnectEventRoutedByChannel(): void
     {
@@ -286,10 +258,6 @@ class CentrifugoEventRouterTest extends BaseTestCase
         $this->assertCount(0, $h['calls']);
     }
 
-    // -------------------------------------------------------------------------
-    // RPC routing
-    // -------------------------------------------------------------------------
-
     public function testRpcExactMethodCallsHandler(): void
     {
         $h = $this->makeHandler();
@@ -328,10 +296,6 @@ class CentrifugoEventRouterTest extends BaseTestCase
 
         $this->assertCount(0, $h['calls']);
     }
-
-    // -------------------------------------------------------------------------
-    // Resolved channel cache
-    // -------------------------------------------------------------------------
 
     public function testCachePreventsRepeatedWildcardEvaluation(): void
     {
@@ -372,10 +336,6 @@ class CentrifugoEventRouterTest extends BaseTestCase
 
         $this->assertCount(2, $h['calls']);
     }
-
-    // -------------------------------------------------------------------------
-    // Empty routing table
-    // -------------------------------------------------------------------------
 
     public function testNoHandlersRegisteredDoesNotThrow(): void
     {
