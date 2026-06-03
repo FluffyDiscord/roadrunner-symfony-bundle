@@ -1,15 +1,18 @@
 #!/usr/bin/env bash
-# Real-world end-to-end validation of the RoadRunner Jobs message bus (docs/specs/jobs-message-bus.md).
+# Real-world end-to-end validation of the RoadRunner Jobs message bus + queue-consumer worker
+# (docs/specs/jobs-message-bus.md, docs/specs/rr-jobs-worker.md).
 #
 # Builds a minimal Symfony app on top of this bundle, runs it under a REAL RoadRunner server in Docker
-# with BOTH an `http:` and a `jobs:` pool (memory driver) sharing ONE `server.command`, then proves that:
-#   1. an HTTP request dispatches an #[AsJob] message via JobDispatcher;
-#   2. the jobs pool consumes the enveloped task, the JobRoutingListener rehydrates it through the
-#      Native serializer path (PHP serialize/unserialize, the default — zero extra deps), and the
-#      #[AsJobHandler] runs with a real object carrying the exact token — written to
-#      /app/var/handled.json (observable proof);
-#   3. (bonus) a RAW, non-enveloped task pushed directly via the RR Jobs API is still delivered to a
-#      plain JobsRunEvent listener — proving the bus is purely additive.
+# with BOTH an `http:` and a `jobs:` pool (memory driver) sharing ONE `server.command`. The assertions
+# themselves live in the bundle's PHPUnit live tests (tests/Job/Live/*, #[Group('jobs-live')]); this
+# harness only PROVISIONS the server and then runs `phpunit --group jobs-live` inside the container,
+# so the PHPUnit live tests ARE the end-to-end check. They prove:
+#   1. an HTTP request dispatches an #[AsJob] message; the jobs pool consumes the enveloped task, the
+#      JobRoutingListener rehydrates it via the Native serializer, and the #[AsJobHandler] runs with a
+#      real object carrying the exact token (observable at /app/var/handled.json);
+#   2. a RAW, non-enveloped task pushed directly via the RR Jobs API still reaches a plain
+#      JobsRunEvent listener (the bus is additive);
+#   3. a successful task is consumed and acked EXACTLY ONCE (no erroneous redelivery).
 #
 # Runs against each PHP version below (official `php:<ver>-cli-trixie` images). Optionally narrow via arg:
 #
@@ -34,6 +37,10 @@ cp -r config "$CTX/config"
 
 mkdir -p "$CTX/app/src" "$CTX/app/public" "$CTX/app/var"
 
+# The bundle's live tests + BaseTestCase run INSIDE the container as the assertion step; copy tests/
+# in and map the Tests\ namespace in the app's autoloader (below).
+cp -r tests "$CTX/app/bundle-tests"
+
 # Provide a pre-fetched rr server binary if available (env RR_BIN, or `rr` on PATH) to avoid a
 # GitHub download during the build; otherwise the Dockerfile fetches it via `rr get-binary`.
 RR_BIN="${RR_BIN:-$(command -v rr 2>/dev/null || true)}"
@@ -48,8 +55,16 @@ cat > "$CTX/app/composer.json" <<'JSON'
         "symfony/runtime": "^7.4 || ^8",
         "symfony/yaml": "^7.4 || ^8"
     },
+    "require-dev": {
+        "phpunit/phpunit": "^13"
+    },
     "repositories": [ { "type": "path", "url": "/bundle", "options": { "symlink": false } } ],
-    "autoload": { "psr-4": { "App\\": "src/" } },
+    "autoload": {
+        "psr-4": {
+            "App\\": "src/",
+            "FluffyDiscord\\RoadRunnerBundle\\Tests\\": "bundle-tests/"
+        }
+    },
     "config": { "allow-plugins": { "symfony/runtime": true, "php-http/discovery": true } },
     "minimum-stability": "dev",
     "prefer-stable": true
@@ -86,6 +101,38 @@ final class PingHandler
             'token' => $message->token,
             'class' => get_class($message),
         ]));
+    }
+}
+PHP
+
+# --- Ack-once message + handler: counts deliveries per token so a redelivery is observable. ----------
+cat > "$CTX/app/src/CountPing.php" <<'PHP'
+<?php
+namespace App;
+
+use FluffyDiscord\RoadRunnerBundle\Job\Attribute\AsJob;
+
+#[AsJob(queue: 'default')]
+final class CountPing
+{
+    public function __construct(public string $token) {}
+}
+PHP
+
+cat > "$CTX/app/src/CountPingHandler.php" <<'PHP'
+<?php
+namespace App;
+
+use FluffyDiscord\RoadRunnerBundle\Job\Attribute\AsJobHandler;
+
+final class CountPingHandler
+{
+    #[AsJobHandler]
+    public function __invoke(CountPing $message): void
+    {
+        $file = '/app/var/count-' . $message->token . '.txt';
+        $count = is_file($file) ? (int) file_get_contents($file) : 0;
+        file_put_contents($file, (string) ($count + 1));
     }
 }
 PHP
@@ -153,6 +200,16 @@ class Kernel extends BaseKernel
         return new Response('dispatched token=' . $token);
     }
 
+    public function dispatchCount(Request $request): Response
+    {
+        $token = (string) $request->query->get('token', '');
+        /** @var JobDispatcher $dispatcher */
+        $dispatcher = $this->getContainer()->get(JobDispatcher::class);
+        $dispatcher->dispatch(new CountPing($token));
+
+        return new Response('dispatched count token=' . $token);
+    }
+
     protected function configureContainer(ContainerConfigurator $c): void
     {
         $c->extension('framework', [
@@ -164,6 +221,7 @@ class Kernel extends BaseKernel
         // Register App services with autoconfigure so #[AsJobHandler] / #[AsEventListener] are wired.
         $services = $c->services()->defaults()->autowire()->autoconfigure();
         $services->set(PingHandler::class);
+        $services->set(CountPingHandler::class);
         $services->set(RawTaskListener::class);
     }
 
@@ -171,6 +229,7 @@ class Kernel extends BaseKernel
     {
         $r->add('health', '/health')->controller([self::class, 'health']);
         $r->add('dispatch', '/dispatch')->controller([self::class, 'dispatch']);
+        $r->add('dispatch_count', '/dispatch-count')->controller([self::class, 'dispatchCount']);
     }
 }
 PHP
@@ -180,23 +239,6 @@ cat > "$CTX/app/public/index.php" <<'PHP'
 use App\Kernel;
 require_once dirname(__DIR__) . '/vendor/autoload_runtime.php';
 return fn(array $context) => new Kernel($context['APP_ENV'], (bool) $context['APP_DEBUG']);
-PHP
-
-# --- A tiny CLI producer for the RAW (non-enveloped) bonus task: pushes straight via the RR Jobs API.
-cat > "$CTX/app/push_raw.php" <<'PHP'
-<?php
-// Push a RAW task (no bundle envelope headers) onto the `default` pipeline via the RR Jobs RPC API.
-require_once __DIR__ . '/vendor/autoload.php';
-
-use Spiral\Goridge\RPC\RPC;
-use Spiral\RoadRunner\Jobs\Jobs;
-
-$rpc  = RPC::create(getenv('RR_RPC') ?: 'tcp://127.0.0.1:6001');
-$jobs = new Jobs($rpc);
-$queue = $jobs->connect('default');
-$task  = $queue->create('app.raw_ping', 'raw-payload-XYZ'); // name + raw string payload, no headers
-$queue->dispatch($task);
-echo "raw task pushed\n";
 PHP
 
 cat > "$CTX/app/.rr.yaml" <<'YAML'
@@ -234,70 +276,33 @@ cat > "$CTX/app/entrypoint.sh" <<'BASH'
 #!/usr/bin/env bash
 set -uo pipefail
 cd /app
-FAIL=0
 
-rm -f /app/var/handled.json /app/var/raw-handled.json
+rm -f /app/var/handled.json /app/var/raw-handled.json /app/var/count-*.txt
+
+# The PHPUnit live tests read these: the gate, the proof dir, the HTTP base, and the RR RPC endpoint.
+export RR_JOBS_LIVE=1
+export JOBS_VAR_DIR="/app/var"
+export JOBS_HTTP_BASE="http://127.0.0.1:8080"
+export RR_RPC="tcp://127.0.0.1:6001"
 
 echo "### Starting RoadRunner (http + jobs pools, one server.command) ###"
 ./rr serve -c /app/.rr.yaml &>/app/rr.log &
 RR=$!
 
-# Wait until the HTTP pool is serving.
+# Wait until the HTTP pool is serving (the live tests drive dispatch over HTTP).
 if ! curl -s -o /dev/null --retry 40 --retry-delay 1 --retry-connrefused --max-time 40 http://127.0.0.1:8080/health; then
-  echo "  FAIL: HTTP pool never became ready"; FAIL=1
+  echo "  FAIL: HTTP pool never became ready"; tail -n 80 /app/rr.log; exit 1
 fi
 
-TOKEN="live-$(date +%s)-$$"
-echo "### Dispatching #[AsJob] Ping via /dispatch?token=$TOKEN ###"
-DCODE=$(curl -s --max-time 20 -o /tmp/d -w '%{http_code}' "http://127.0.0.1:8080/dispatch?token=$TOKEN")
-echo "  /dispatch -> $DCODE ($(cat /tmp/d))"
-[ "$DCODE" = "200" ] && echo "  PASS: dispatch endpoint returned 200" || { echo "  FAIL: dispatch endpoint code $DCODE"; FAIL=1; }
+echo "### Running the bundle live test suite (phpunit --group jobs-live) ###"
+FAIL=0
+php vendor/bin/phpunit bundle-tests/Job/Live --group jobs-live --testdox --colors=never || FAIL=1
 
-echo "### Polling for handler proof at /app/var/handled.json ###"
-HANDLED=""
-for i in $(seq 1 30); do
-  if [ -f /app/var/handled.json ]; then HANDLED="$(cat /app/var/handled.json)"; break; fi
-  sleep 0.5
-done
-
-if [ -z "$HANDLED" ]; then
-  echo "  FAIL: handler never ran (handled.json absent after 15s)"; FAIL=1
-else
-  echo "  handled.json: $HANDLED"
-  grep -qF "\"token\":\"$TOKEN\"" <<< "$HANDLED" \
-    && echo "  PASS: handler received the exact dispatched token ($TOKEN)" \
-    || { echo "  FAIL: token mismatch (expected $TOKEN)"; FAIL=1; }
-  grep -qF '"class":"App\\Ping"' <<< "$HANDLED" \
-    && echo "  PASS: handler received a real rehydrated App\\Ping instance" \
-    || { echo "  FAIL: message class was not App\\Ping"; FAIL=1; }
-fi
-
-echo "### BONUS: raw non-enveloped task via the RR Jobs API ###"
-if php /app/push_raw.php; then
-  RAW=""
-  for i in $(seq 1 30); do
-    if [ -f /app/var/raw-handled.json ]; then RAW="$(cat /app/var/raw-handled.json)"; break; fi
-    sleep 0.5
-  done
-  if [ -z "$RAW" ]; then
-    echo "  FAIL: raw JobsRunEvent listener never ran"; FAIL=1
-  else
-    echo "  raw-handled.json: $RAW"
-    grep -qF '"payload":"raw-payload-XYZ"' <<< "$RAW" \
-      && echo "  PASS: raw (non-enveloped) task reached a plain JobsRunEvent listener — bus is additive" \
-      || { echo "  FAIL: raw task payload mismatch"; FAIL=1; }
-  fi
-else
-  echo "  FAIL: could not push raw task"; FAIL=1
-fi
+[ "$FAIL" -ne 0 ] && { echo ""; echo "----- rr.log (last 80 lines) -----"; tail -n 80 /app/rr.log; }
 
 kill "$RR" 2>/dev/null; wait "$RR" 2>/dev/null || true
 
-if [ "$FAIL" -ne 0 ]; then
-  echo ""; echo "----- rr.log (last 80 lines) -----"; tail -n 80 /app/rr.log
-fi
-
-echo ""; [ "$FAIL" -eq 0 ] && echo "=== ALL CHECKS PASSED ===" || echo "=== SOME CHECKS FAILED ==="
+echo ""; [ "$FAIL" -eq 0 ] && echo "=== ALL CHECKS PASSED (jobs-live) ===" || echo "=== SOME CHECKS FAILED ==="
 exit "$FAIL"
 BASH
 

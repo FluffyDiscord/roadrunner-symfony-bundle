@@ -1,13 +1,25 @@
 #!/usr/bin/env bash
-# Real end-to-end live validation of the Temporal.io integration (docs/specs/temporal-io-integration.md §6.2 IT-01..IT-03).
+# Real end-to-end live validation of the Temporal.io integration (docs/specs/temporal-io-integration.md §6.2 IT-01..IT-05).
 #
-# Builds a minimal Symfony app on top of this bundle that defines a GreetingWorkflow + GreetingActivity
-# (assigned to the "default" task queue via #[TaskQueue]), runs it inside a single Docker container
-# against a REAL Temporal dev server (`temporal server start-dev`) driven by a REAL RoadRunner server with
-# the `temporal` plugin, then starts the workflow from a client and asserts it returns exactly "Hello, World".
+# Builds a minimal Symfony app on top of this bundle that IMPLEMENTS the bundle's committed
+# Workflow\* live contracts (tests/Temporal/Live/Workflow/*) and assigns each impl to the "default"
+# task queue via #[TaskQueue]. It runs inside a single Docker container against a REAL Temporal dev
+# server (`temporal server start-dev`) driven by a REAL RoadRunner server with the `temporal` plugin.
 #
-# Also proves the interceptor event pipeline (IT-03): a listener on the bundle's ActivityInbound ActivityEvent
-# writes a marker file when the activity executes inside the worker; the harness asserts the marker is present.
+# The assertions themselves live in the bundle's PHPUnit live test (tests/Temporal/Live/
+# TemporalLiveTest.php, #[Group('temporal-live')]) — this harness only PROVISIONS the infrastructure
+# and then runs `phpunit --group temporal-live` inside the container, so the PHPUnit live test IS the
+# end-to-end check (single source of assertion logic):
+#
+#   Happy path:
+#     IT-01/IT-02  GreetingWorkflow -> GreetingActivity returns exactly "Hello, World".
+#     IT-03        the bundle's ActivityInbound interceptor event fires in the worker (a listener
+#                  appends to the marker file the test then observes over the shared FS).
+#     IT-04        CounterWorkflow started async, signalled twice (add 5, add 7), its getCount query
+#                  reads back 12, then a finish signal lets the run complete.
+#   Break path:
+#     IT-05        FailingWorkflow calls an activity that always throws (maxAttempts=1); the client
+#                  call MUST surface a WorkflowFailedException end-to-end, not a value or a hang.
 #
 # Runs against each PHP version below — edit PHP_VERSIONS or pass one as an arg:
 #   ./tests/docker-validate-temporal.sh            # all versions
@@ -30,6 +42,10 @@ cp -r config "$CTX/config"
 
 mkdir -p "$CTX/app/src" "$CTX/app/public"
 
+# The bundle's live test + its Workflow\* contracts + BaseTestCase run INSIDE the container as the
+# assertion step; copy tests/ in and map the Tests\ namespace in the app's autoloader (below).
+cp -r tests "$CTX/app/bundle-tests"
+
 # Provide a pre-fetched rr server binary if available (env RR_BIN, or `rr` on PATH) to avoid a
 # GitHub download during the build; otherwise the Dockerfile fetches it via `rr get-binary`.
 RR_BIN="${RR_BIN:-$(command -v rr 2>/dev/null || true)}"
@@ -45,38 +61,32 @@ cat > "$CTX/app/composer.json" <<'JSON'
         "symfony/yaml": "^7.4 || ^8",
         "temporal/sdk": "^2.16"
     },
+    "require-dev": {
+        "phpunit/phpunit": "^13"
+    },
     "repositories": [ { "type": "path", "url": "/bundle", "options": { "symlink": false } } ],
-    "autoload": { "psr-4": { "App\\": "src/" } },
+    "autoload": {
+        "psr-4": {
+            "App\\": "src/",
+            "FluffyDiscord\\RoadRunnerBundle\\Tests\\": "bundle-tests/"
+        }
+    },
     "config": { "allow-plugins": { "symfony/runtime": true, "php-http/discovery": true } },
     "minimum-stability": "dev",
     "prefer-stable": true
 }
 JSON
 
-# --- Activity (interface + impl), assigned to the "default" task queue ---------------------------
-cat > "$CTX/app/src/GreetingActivityInterface.php" <<'PHP'
-<?php
-namespace App;
-
-use Temporal\Activity\ActivityInterface;
-use Temporal\Activity\ActivityMethod;
-
-#[ActivityInterface(prefix: 'greeting.')]
-interface GreetingActivityInterface
-{
-    #[ActivityMethod]
-    public function greet(string $name): string;
-}
-PHP
-
+# --- Worker-side implementations of the bundle's live contracts (each assigned to "default") ------
+# Activities/workflows MUST carry #[TaskQueue] or the bundle throws Activity/WorkflowNotAssignedException
+# at container-compile time; the attribute is TARGET_CLASS, so it lives on the impl class.
 cat > "$CTX/app/src/GreetingActivity.php" <<'PHP'
 <?php
 namespace App;
 
 use FluffyDiscord\RoadRunnerBundle\Temporal\Attribute\TaskQueue;
+use FluffyDiscord\RoadRunnerBundle\Tests\Temporal\Live\Workflow\GreetingActivityInterface;
 
-// Activities MUST carry #[TaskQueue] or the bundle throws ActivityNotAssignedException
-// at container-compile time. The attribute is TARGET_CLASS, so it lives on the impl class.
 #[TaskQueue('default')]
 class GreetingActivity implements GreetingActivityInterface
 {
@@ -87,27 +97,13 @@ class GreetingActivity implements GreetingActivityInterface
 }
 PHP
 
-# --- Workflow (interface + impl), assigned to the "default" task queue ---------------------------
-cat > "$CTX/app/src/GreetingWorkflowInterface.php" <<'PHP'
-<?php
-namespace App;
-
-use Temporal\Workflow\WorkflowInterface;
-use Temporal\Workflow\WorkflowMethod;
-
-#[WorkflowInterface]
-interface GreetingWorkflowInterface
-{
-    #[WorkflowMethod(name: 'GreetingWorkflow')]
-    public function greet(string $name): \Generator;
-}
-PHP
-
 cat > "$CTX/app/src/GreetingWorkflow.php" <<'PHP'
 <?php
 namespace App;
 
 use FluffyDiscord\RoadRunnerBundle\Temporal\Attribute\TaskQueue;
+use FluffyDiscord\RoadRunnerBundle\Tests\Temporal\Live\Workflow\GreetingActivityInterface;
+use FluffyDiscord\RoadRunnerBundle\Tests\Temporal\Live\Workflow\GreetingWorkflowInterface;
 use Temporal\Activity\ActivityOptions;
 use Temporal\Common\RetryOptions;
 use Temporal\Workflow;
@@ -129,7 +125,92 @@ class GreetingWorkflow implements GreetingWorkflowInterface
 }
 PHP
 
-# --- Interceptor-event listener (IT-03): writes a marker when the activity runs in the worker -----
+cat > "$CTX/app/src/CounterWorkflow.php" <<'PHP'
+<?php
+namespace App;
+
+use FluffyDiscord\RoadRunnerBundle\Temporal\Attribute\TaskQueue;
+use FluffyDiscord\RoadRunnerBundle\Tests\Temporal\Live\Workflow\CounterWorkflowInterface;
+use Temporal\Workflow;
+
+#[TaskQueue('default')]
+class CounterWorkflow implements CounterWorkflowInterface
+{
+    private int $count = 0;
+    private bool $done = false;
+
+    public function run(): \Generator
+    {
+        yield Workflow::await(fn (): bool => $this->done);
+
+        return $this->count;
+    }
+
+    public function add(int $n): void
+    {
+        $this->count += $n;
+    }
+
+    public function finish(): void
+    {
+        $this->done = true;
+    }
+
+    public function getCount(): int
+    {
+        return $this->count;
+    }
+}
+PHP
+
+cat > "$CTX/app/src/FailingActivity.php" <<'PHP'
+<?php
+namespace App;
+
+use FluffyDiscord\RoadRunnerBundle\Temporal\Attribute\TaskQueue;
+use FluffyDiscord\RoadRunnerBundle\Tests\Temporal\Live\Workflow\FailingActivityInterface;
+
+#[TaskQueue('default')]
+class FailingActivity implements FailingActivityInterface
+{
+    public function boom(): string
+    {
+        throw new \RuntimeException('boom from activity');
+    }
+}
+PHP
+
+cat > "$CTX/app/src/FailingWorkflow.php" <<'PHP'
+<?php
+namespace App;
+
+use FluffyDiscord\RoadRunnerBundle\Temporal\Attribute\TaskQueue;
+use FluffyDiscord\RoadRunnerBundle\Tests\Temporal\Live\Workflow\FailingActivityInterface;
+use FluffyDiscord\RoadRunnerBundle\Tests\Temporal\Live\Workflow\FailingWorkflowInterface;
+use Temporal\Activity\ActivityOptions;
+use Temporal\Common\RetryOptions;
+use Temporal\Workflow;
+
+#[TaskQueue('default')]
+class FailingWorkflow implements FailingWorkflowInterface
+{
+    public function run(): \Generator
+    {
+        // maxAttempts(1): the activity fails once and is NOT retried, so the failure
+        // propagates to the client immediately instead of looping until the timeout.
+        $activity = Workflow::newActivityStub(
+            FailingActivityInterface::class,
+            ActivityOptions::new()
+                ->withStartToCloseTimeout(10)
+                ->withRetryOptions(RetryOptions::new()->withMaximumAttempts(1)),
+        );
+
+        return yield $activity->boom();
+    }
+}
+PHP
+
+# --- IT-03: a listener on the bundle's ActivityInbound event marks that it fired in the worker -----
 cat > "$CTX/app/src/ActivityMarkerListener.php" <<'PHP'
 <?php
 namespace App;
@@ -142,7 +223,8 @@ class ActivityMarkerListener
     #[AsEventListener(event: ActivityEvent::class)]
     public function onActivity(ActivityEvent $event): void
     {
-        @file_put_contents('/app/interceptor-marker', "fired\n", FILE_APPEND);
+        $marker = getenv('TEMPORAL_INTERCEPTOR_MARKER') ?: '/app/interceptor-marker';
+        @file_put_contents($marker, "fired\n", FILE_APPEND);
     }
 }
 PHP
@@ -171,9 +253,9 @@ class Kernel extends BaseKernel
             'php_errors' => ['log' => true],
         ]);
 
-        // Register App\ classes as autowired/autoconfigured services so the bundle's
-        // compile-time #[TaskQueue] scan sees the workflow + activity, and so the
-        // #[AsEventListener] marker listener is wired into the dispatcher.
+        // Register App\ classes as autowired/autoconfigured services so the bundle's compile-time
+        // #[TaskQueue] scan sees the workflow + activity impls (which implement the bundle's
+        // Workflow\* contracts), and so the #[AsEventListener] marker listener is wired.
         $services = $c->services()->defaults()->autowire()->autoconfigure();
         $services->load('App\\', '../src/');
     }
@@ -187,31 +269,6 @@ require_once dirname(__DIR__) . '/vendor/autoload_runtime.php';
 return fn(array $context) => new Kernel($context['APP_ENV'], (bool) $context['APP_DEBUG']);
 PHP
 
-# --- Client: starts the workflow and prints the result -------------------------------------------
-cat > "$CTX/app/client.php" <<'PHP'
-<?php
-require_once __DIR__ . '/vendor/autoload.php';
-
-use App\GreetingWorkflowInterface;
-use Temporal\Client\GRPC\ServiceClient;
-use Temporal\Client\WorkflowClient;
-use Temporal\Client\WorkflowOptions;
-
-$serviceClient = ServiceClient::create('127.0.0.1:7233');
-$workflowClient = WorkflowClient::create($serviceClient);
-
-$workflow = $workflowClient->newWorkflowStub(
-    GreetingWorkflowInterface::class,
-    WorkflowOptions::new()
-        ->withTaskQueue('default')
-        ->withWorkflowExecutionTimeout(30),
-);
-
-$result = $workflow->greet('World');
-
-echo $result . "\n";
-PHP
-
 cat > "$CTX/app/.rr.yaml" <<'YAML'
 version: "3"
 rpc:
@@ -223,6 +280,7 @@ server:
         APP_ENV: "prod"
         APP_DEBUG: "0"
         APP_SECRET: "validation-secret"
+        TEMPORAL_INTERCEPTOR_MARKER: "/app/interceptor-marker"
 temporal:
     address: "127.0.0.1:7233"
     activities:
@@ -236,7 +294,12 @@ cat > "$CTX/app/entrypoint.sh" <<'BASH'
 #!/usr/bin/env bash
 set -uo pipefail
 cd /app
-FAIL=0
+
+# The PHPUnit live test reads these: the gate, the frontend address, and the interceptor marker file
+# the worker's listener appends to (shared FS, asserted by IT-03).
+export TEMPORAL_LIVE=1
+export TEMPORAL_ADDRESS="127.0.0.1:7233"
+export TEMPORAL_INTERCEPTOR_MARKER="/app/interceptor-marker"
 
 dump_logs() {
   echo "----- temporal server log -----"; tail -n 60 /app/temporal.log 2>/dev/null || true
@@ -260,32 +323,14 @@ echo "### Starting RoadRunner (temporal worker) ###"
 ./rr serve -c /app/.rr.yaml >/app/rr.log 2>&1 &
 RR_PID=$!
 
-# Wait for the RR temporal worker to register with the dev server. We retry the client until the
-# workflow can actually run (worker polling the "default" task queue), or we time out.
-echo "### Running workflow client (assert 'Hello, World') ###"
-RESULT=""
-for i in $(seq 1 40); do
-  if ! kill -0 "$RR_PID" 2>/dev/null; then echo "rr serve exited early"; dump_logs; exit 1; fi
-  RESULT="$(php /app/client.php 2>/app/client.err)"
-  if [ "$RESULT" = "Hello, World" ]; then break; fi
-  sleep 1
-done
+# Give rr a moment to boot; fail fast if it died (config error), otherwise the live test's
+# worker-readiness poll handles the registration delay.
+sleep 2
+if ! kill -0 "$RR_PID" 2>/dev/null; then echo "  FAIL: rr serve exited early"; dump_logs; exit 1; fi
 
-echo "  client result: '${RESULT}'"
-if [ -s /app/client.err ]; then echo "  (client stderr tail:)"; tail -n 5 /app/client.err; fi
-
-if [ "$RESULT" = "Hello, World" ]; then
-  echo "  PASS: workflow returned exactly 'Hello, World'"
-else
-  echo "  FAIL: workflow did not return 'Hello, World' (got: '${RESULT}')"; FAIL=1
-fi
-
-# IT-03: the interceptor-event listener must have fired during the real run.
-if [ -s /app/interceptor-marker ]; then
-  echo "  PASS: interceptor ActivityEvent listener fired ($(wc -l < /app/interceptor-marker | tr -d ' ') time(s))"
-else
-  echo "  FAIL: interceptor ActivityEvent listener never fired (IT-03)"; FAIL=1
-fi
+echo "### Running the bundle live test suite (phpunit --group temporal-live) ###"
+FAIL=0
+php vendor/bin/phpunit bundle-tests/Temporal/Live --group temporal-live --testdox --colors=never || FAIL=1
 
 [ "$FAIL" -ne 0 ] && dump_logs
 
@@ -293,7 +338,7 @@ kill "$RR_PID" 2>/dev/null; wait "$RR_PID" 2>/dev/null || true
 kill "$TEMPORAL_PID" 2>/dev/null; wait "$TEMPORAL_PID" 2>/dev/null || true
 
 echo ""
-[ "$FAIL" -eq 0 ] && echo "=== ALL CHECKS PASSED (Hello, World) ===" || echo "=== SOME CHECKS FAILED ==="
+[ "$FAIL" -eq 0 ] && echo "=== ALL CHECKS PASSED (temporal-live) ===" || echo "=== SOME CHECKS FAILED ==="
 exit "$FAIL"
 BASH
 
