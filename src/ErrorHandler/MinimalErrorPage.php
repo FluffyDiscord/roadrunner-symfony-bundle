@@ -5,25 +5,20 @@ namespace FluffyDiscord\RoadRunnerBundle\ErrorHandler;
 /**
  * Dependency-free HTML error page for the worker's last-resort error paths.
  *
- * It must render correctly even when the Symfony kernel/container is half-destroyed
- * (after die()/exit()/fatal) and must never itself trigger a fatal — so it touches no
- * services, allocates only a bounded string, and escapes every dynamic value.
+ * It must render correctly even when the kernel/container is half-destroyed (after die()/exit()/fatal)
+ * and must never itself trigger a fatal — so it touches no services, allocates only a bounded string,
+ * and escapes every dynamic value.
  *
  * @see \FluffyDiscord\RoadRunnerBundle\Worker\HttpWorker::handleShutdown()
- * @see docs/specs/graceful-error-handling.md §4.5
  */
 final class MinimalErrorPage
 {
-    /**
-     * Upper bound on the rendered message length. Keeps the page small enough to
-     * allocate even in the OOM shutdown path and bounds the work htmlspecialchars does.
-     */
+    /** Upper bound on the rendered message length, so the page stays allocatable in the OOM path. */
     public const int MESSAGE_MAX = 2048;
 
     /**
      * @param array<array-key, mixed>|null $error result of error_get_last() (expected keys: message, file, line), or
-     *        null for bare die()/exit(). Values are treated defensively (scalar-coerced) — this renderer must never
-     *        throw, even on a malformed array (Invariant I-4).
+     *        null for bare die()/exit(). Values are scalar-coerced defensively — this renderer must never throw.
      * @param string|null $detail an explicit detail string (e.g. a stringified throwable) when $error is unavailable
      */
     public static function render(int $statusCode, ?array $error, ?string $detail = null): string
@@ -36,8 +31,7 @@ final class MinimalErrorPage
         $message = null;
         $location = null;
 
-        // Defensive scalar coercion: this method must never itself throw (Invariant I-4), even if a
-        // caller hands a malformed error array. error_get_last() always yields a string message.
+        // Scalar-coerce defensively so a malformed error array cannot make this renderer throw.
         if ($error !== null && isset($error['message']) && \is_scalar($error['message'])) {
             $message = (string) $error['message'];
             if (isset($error['file'], $error['line']) && \is_scalar($error['file']) && \is_scalar($error['line'])) {

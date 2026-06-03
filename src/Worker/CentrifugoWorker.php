@@ -32,16 +32,11 @@ use Symfony\Component\HttpKernel\KernelInterface;
 use Symfony\Component\HttpKernel\RebootableInterface;
 
 /**
- * Centrifugo (RPC/proxy) worker. Unlike the HTTP worker there is no human-visible error page — a
- * failure surfaces as a dropped websocket or a failed RPC that nobody watches — so graceful error
- * handling here is primarily about *observability* (STDERR + Sentry), plus a clean single response
- * frame and a controlled client signal.
- *
- * @see docs/specs/graceful-error-handling.md "Centrifugo worker (delta)"
+ * Centrifugo (RPC/proxy) worker: one response frame per request, STDERR/Sentry logging and a
+ * controlled client signal on failure.
  */
 class CentrifugoWorker implements WorkerInterface
 {
-    /** Guards one-time registration of the shutdown handler (instance-scoped: fresh worker per test). */
     private bool $shutdownRegistered = false;
 
     public function __construct(
@@ -64,8 +59,7 @@ class CentrifugoWorker implements WorkerInterface
 
         $this->eventDispatcher->dispatch(new WorkerBootingEvent());
 
-        // State the shutdown handler observes (Bucket B). Captured by reference so the closure
-        // always sees the latest per-iteration values.
+        // Captured by reference so the shutdown closure always sees the latest per-iteration values.
         $handlingRequest = false;
         $responded = false;
         $currentRequest = null;
@@ -128,14 +122,11 @@ class CentrifugoWorker implements WorkerInterface
                     $this->sentryHubInterface?->captureException($throwable);
                 } catch (\Throwable) {}
 
-                // Single response frame: signal the client via error()/disconnect() (per request type),
-                // only if we have not already answered.
                 if (!$responded) {
                     $responded = true;
                     $this->sendThrowableResponse($request, $throwable);
                 }
 
-                // RR-side visibility goes to STDERR — never a second goridge error() frame.
                 $this->logError((string)$throwable);
 
                 if ($throwable instanceof \Error) {
@@ -173,8 +164,8 @@ class CentrifugoWorker implements WorkerInterface
     }
 
     /**
-     * Bucket B: invoked from the shutdown function for die()/exit()/fatal that bypass the try/catch.
-     * The point here is *logging* an otherwise-invisible failure; the client signal is best-effort.
+     * Invoked from the shutdown function for die()/exit()/fatal that bypass the try/catch: logs the
+     * otherwise-invisible failure and best-effort signals the client.
      *
      * @param array{message?: string, file?: string, line?: int}|null $error result of error_get_last()
      */
@@ -188,7 +179,6 @@ class CentrifugoWorker implements WorkerInterface
             @ini_set('memory_limit', '-1');
         }
 
-        // Best-effort: give the client a clean signal instead of an abrupt drop.
         try {
             $this->respondToFailedRequest($request, 'Unexpected system error');
         } catch (\Throwable) {}
@@ -206,8 +196,8 @@ class CentrifugoWorker implements WorkerInterface
     }
 
     /**
-     * Bucket A: answer a failed request with a single Centrifugo response frame. error() is used only
-     * as a fallback if sending that frame itself throws.
+     * Answer a failed request with a single Centrifugo response frame; error() is a fallback only if
+     * sending that frame throws.
      */
     protected function sendThrowableResponse(Request\RequestInterface $request, \Throwable $throwable): void
     {
@@ -248,7 +238,7 @@ class CentrifugoWorker implements WorkerInterface
 
     /**
      * Client-facing message. In debug a one-line hint (class + message, capped) — never the stack
-     * trace, which would travel to the client. The full detail is logged to STDERR / Sentry instead.
+     * trace, which would travel to the client.
      */
     protected function clientMessage(\Throwable $throwable): string
     {
@@ -264,27 +254,18 @@ class CentrifugoWorker implements WorkerInterface
         return sprintf('%s: %s', $throwable::class, $message);
     }
 
-    /**
-     * Wait for the next request. Seam so tests can feed request fixtures (the real
-     * {@see RoadRunnerCentrifugoWorker} is final and cannot be mocked).
-     */
     protected function waitRequest(): ?Request\RequestInterface
     {
         return $this->worker->waitRequest();
     }
 
-    /**
-     * Register the process shutdown handler. Seam so tests can intercept registration instead of
-     * polluting the PHPUnit process with a real shutdown function.
-     */
     protected function registerShutdown(callable $handler): void
     {
         register_shutdown_function($handler);
     }
 
     /**
-     * RR-side diagnostics sink. STDERR is captured by RoadRunner as worker logs and is never the
-     * goridge protocol channel, so writing here cannot corrupt the relay. Overridable seam for tests.
+     * STDERR is the worker-log channel, never the goridge relay — writing here cannot corrupt it.
      */
     protected function logError(string $message): void
     {
