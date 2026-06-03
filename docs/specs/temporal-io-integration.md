@@ -173,12 +173,26 @@ transitively in TC-03/TC-05; no dedicated tests (recorded reason: no logic to te
 
 Marked `#[Group('temporal-live')]`, skipped unless provisioned (§7).
 
-| Test ID | Flow | Setup | Verification | Teardown |
-|---------|------|-------|--------------|----------|
-| IT-01 | Workflow execution | running Temporal server + RR `temporal` worker started against the test kernel; a `GreetingWorkflow` registered on the default queue | client starts the workflow, gets the expected result | terminate workflow, stop worker |
-| IT-02 | Activity invocation | as IT-01 with a `GreetingActivity` | the workflow's activity call returns the activity's output | — |
-| IT-03 | Interceptor event firing live | as IT-01 with a listener counting `ExecuteActivityEvent` | the listener observed ≥1 event during a real run | — |
-| IT-04 | Signal / query | a workflow exposing a signal + query | sending the signal mutates state observable via the query | — |
+| Test ID | Path | Flow | Setup | Verification | Teardown |
+|---------|------|------|-------|--------------|----------|
+| IT-01 | happy | Workflow execution | running Temporal server + RR `temporal` worker started against the test kernel; a `GreetingWorkflow` registered on the default queue | client starts the workflow, gets the expected result (`"Hello, World"`) | terminate workflow, stop worker |
+| IT-02 | happy | Activity invocation | as IT-01 with a `GreetingActivity` | the workflow's activity call returns the activity's output | — |
+| IT-03 | happy | Interceptor event firing live | as IT-01 with a listener on the bundle's `ActivityInbound\ActivityEvent` | the listener observed ≥1 event during a real run (marker file present) | — |
+| IT-04 | happy | Signal / query | a `CounterWorkflow` with an `add(int)` signal, a `finish()` signal and a `getCount(): int` query, registered on the default queue | client starts it async, sends `add(5)` + `add(7)`, the `getCount` query returns `12`; `finish()` lets the run complete | run completes |
+| IT-05 | breaking | Activity-failure propagation | a `FailingWorkflow` calling a `FailingActivity` that always throws, with `RetryOptions::withMaximumAttempts(1)` | the **client call throws** a `WorkflowFailedException` (the failure surfaces end-to-end) — it never returns a value and never hangs past the execution timeout | — |
+
+**What runs where.** The assertions for IT-01..IT-05 live in the `temporal-live` PHPUnit cases
+(`tests/Temporal/Live/TemporalLiveTest.php`, real `assertSame`/`expectException`), gated on
+`TEMPORAL_LIVE=1` + a reachable worker so the standard `phpunit tests` run skips them. The Docker
+harness `tests/docker-validate-temporal.sh` is the **provisioner**: it stands up a real
+`temporal server start-dev` + a real RoadRunner `temporal` worker (which registers the worker-side
+implementations of the committed `tests/Temporal/Live/Workflow/*` contracts) and then runs
+`phpunit --group temporal-live` inside the container — so the PHPUnit live test *is* the end-to-end
+check (single source of assertion logic). The *compile-time* assignment guards
+(`Workflow/ActivityNotAssignedException` when `#[TaskQueue]` is missing) are an
+`InvalidConfiguration`-style build failure, not a runtime path, so they are covered by unit TC-03's
+edge cases — not duplicated as an e2e breaking case (a missing-`#[TaskQueue]` class would fail the
+whole kernel boot, not a single scenario).
 
 ---
 
