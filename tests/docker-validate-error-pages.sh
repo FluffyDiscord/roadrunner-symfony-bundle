@@ -3,10 +3,20 @@
 # Builds a minimal Symfony app on top of this bundle, runs it under a real RoadRunner server in
 # Docker, and asserts the client-visible behavior for catchable exceptions, die()/exit(), and prod.
 #
-# Usage: ./docker-validate-error-pages.sh
+# Runs the validation against each PHP version listed below — add/remove versions by editing the
+# PHP_VERSIONS list (official `php:<ver>-cli-trixie` images are used). Optionally narrow via arg:
+#
+# Usage:
+#   ./tests/docker-validate-error-pages.sh            # all PHP versions in the list
+#   ./tests/docker-validate-error-pages.sh "8.4"      # only PHP 8.4
 set -euo pipefail
 
-IMAGE_TAG="rr-bundle-error-validation"
+PHP_VERSIONS=(8.4 8.5)
+[ "${1:-}" ] && read -ra PHP_VERSIONS <<< "$1"
+
+# Build context is the repo root, regardless of where this script is invoked from.
+cd "$(dirname "$0")/.."
+
 CTX="$(mktemp -d)"
 trap 'rm -rf "$CTX"' EXIT
 
@@ -25,7 +35,7 @@ if [ -n "${RR_BIN:-}" ] && [ -f "$RR_BIN" ]; then echo "Using pre-fetched rr bin
 cat > "$CTX/app/composer.json" <<'JSON'
 {
     "require": {
-        "php": ">=8.5",
+        "php": ">=8.4",
         "fluffydiscord/roadrunner-symfony-bundle": "*",
         "symfony/framework-bundle": "^7.4 || ^8",
         "symfony/runtime": "^7.4 || ^8",
@@ -146,11 +156,12 @@ exit "$FAIL"
 BASH
 
 cat > "$CTX/Dockerfile" <<'DOCKERFILE'
-FROM php:8.5-cli-trixie
+ARG PHP_VERSION
+FROM php:${PHP_VERSION}-cli-trixie
 RUN apt-get update && apt-get install -y --no-install-recommends git unzip curl \
  && rm -rf /var/lib/apt/lists/* \
- && docker-php-ext-install sockets \
- && curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
+ && docker-php-ext-install sockets
+COPY --from=composer:2 /usr/bin/composer /usr/local/bin/composer
 COPY composer.json /bundle/composer.json
 COPY src/ /bundle/src/
 COPY config/ /bundle/config/
@@ -162,8 +173,18 @@ RUN composer install --no-interaction --no-progress \
 CMD ["/app/entrypoint.sh"]
 DOCKERFILE
 
-echo "=== Building image $IMAGE_TAG ==="
-docker build -t "$IMAGE_TAG" "$CTX"
+FAIL=0
+for PHP_VERSION in "${PHP_VERSIONS[@]}"; do
+  IMAGE_TAG="rr-bundle-error-validation-php${PHP_VERSION}"
+  echo ""
+  echo "=== Building image $IMAGE_TAG (PHP ${PHP_VERSION}) ==="
+  if ! docker build --build-arg PHP_VERSION="${PHP_VERSION}" -t "$IMAGE_TAG" "$CTX"; then
+    echo "!!! BUILD FAILED: PHP ${PHP_VERSION}"; FAIL=1; continue
+  fi
+  echo "=== Running validation (PHP ${PHP_VERSION}) ==="
+  docker run --rm "$IMAGE_TAG" || FAIL=1
+done
 
-echo "=== Running validation ==="
-docker run --rm "$IMAGE_TAG"
+echo ""
+[ "$FAIL" -eq 0 ] && echo "=== ALL PHP VERSIONS PASSED ===" || echo "=== SOME PHP VERSIONS FAILED ==="
+exit "$FAIL"
