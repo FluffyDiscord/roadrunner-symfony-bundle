@@ -190,8 +190,6 @@ class Configuration implements ConfigurationInterface
             ->end()
         ;
 
-        // Only define the Temporal node when "temporal/sdk" is installed, because the
-        // default_worker_options validator reflects over Temporal\Worker\WorkerOptions.
         if (class_exists(WorkerOptions::class)) {
             $this->addTemporalNode($builder->getRootNode());
         }
@@ -280,9 +278,6 @@ class Configuration implements ConfigurationInterface
     }
 
     /**
-     * Rejects any worker-option key that is not a public property of {@see WorkerOptions},
-     * shared by `default_worker_options` and per-queue `worker_options`.
-     *
      * @return \Closure(mixed): mixed
      */
     private function workerOptionsValidator(): \Closure

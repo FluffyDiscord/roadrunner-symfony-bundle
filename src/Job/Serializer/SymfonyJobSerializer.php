@@ -6,10 +6,6 @@ use FluffyDiscord\RoadRunnerBundle\Job\Exception\JobSerializationException;
 use Symfony\Component\Serializer\Exception\ExceptionInterface as SerializerException;
 use Symfony\Component\Serializer\SerializerInterface;
 
-/**
- * Optional JSON-based serializer using the Symfony Serializer component. Produces interoperable
- * payloads at the cost of requiring symfony/serializer and proper normalizer configuration.
- */
 final class SymfonyJobSerializer implements JobSerializerInterface
 {
     public function __construct(

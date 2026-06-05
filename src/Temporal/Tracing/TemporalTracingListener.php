@@ -10,13 +10,6 @@ use Sentry\Breadcrumb;
 use Sentry\State\HubInterface as SentryHubInterface;
 use Symfony\Component\HttpFoundation\RequestStack;
 
-/**
- * Opt-in tracing (enabled via `fluffy_discord_road_runner.temporal.tracing: true`). Logs
- * selected interceptor events on the "temporal" Monolog channel, adds Sentry breadcrumbs
- * when Sentry is present, and propagates a correlation id into started workflows so a run
- * can be tied back to the request that started it. Wired to events by the bundle extension
- * (kernel.event_listener tags) only when tracing is on, so there is zero cost otherwise.
- */
 final class TemporalTracingListener
 {
     public const CORRELATION_HEADER = 'x-correlation-id';
@@ -39,7 +32,6 @@ final class TemporalTracingListener
                 header: $input->header->withValue(self::CORRELATION_HEADER, $correlationId),
             ));
         } catch (\Throwable $throwable) {
-            // Never break a workflow start because tracing failed: leave the input as-is.
             $this->logger?->warning('Temporal: failed to propagate correlation id into the workflow header', [
                 'exception' => $throwable,
             ]);

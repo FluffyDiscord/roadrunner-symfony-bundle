@@ -173,7 +173,6 @@ class TemporalWorkerInitializer
                 continue;
             }
 
-            // A custom worker replaces the bundle-provided (DefaultTemporalWorker) one.
             if ($newIsCustom) {
                 $chosen[$taskQueue] = $config;
             }

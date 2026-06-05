@@ -7,10 +7,6 @@ use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\RequestStack;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
-/**
- * Basically a copy of BinaryFileResponse->sendContent()
- * but yielding to behave like a generator
- */
 class StreamedResponseWrapper
 {
     public static function wrap(StreamedResponse $response): \Generator
@@ -24,7 +20,6 @@ class StreamedResponseWrapper
         $kernelCallbackRef = new \ReflectionFunction($kernelCallback);
         $closureVars = $kernelCallbackRef->getClosureUsedVariables();
 
-        // was not wrapped in Kernel
         if (!isset($closureVars["callback"])) {
             $closureVars["callback"] = $kernelCallback;
         }
@@ -47,7 +42,6 @@ class StreamedResponseWrapper
         $requestStack = $closureVars["requestStack"] ?? null;
         assert($requestStack === null || $requestStack instanceof RequestStack);
 
-        // simulate Kernel wrap
         try {
             if ($request !== null) {
                 $requestStack?->push($request);

@@ -39,8 +39,7 @@ class TemporalWorker implements WorkerInterface
         }
 
         try {
-            // WorkerFactoryInterface::run() declares no parameters; the host connection can only be
-            // passed to the concrete WorkerFactory.
+            // WorkerFactoryInterface::run() declares no parameters; only the concrete WorkerFactory accepts the host connection.
             if ($workerFactory instanceof WorkerFactory) {
                 $workerFactory->run($this->hostConnection);
             } else {

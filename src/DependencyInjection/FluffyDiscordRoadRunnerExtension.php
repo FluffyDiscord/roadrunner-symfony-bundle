@@ -178,7 +178,7 @@ class FluffyDiscordRoadRunnerExtension extends Extension implements CompilerPass
                     ->register("cache.adapter.rr_kv.{$name}", KVCacheAdapter::class)
                     ->setFactory([KVCacheAdapter::class, "create"])
                     ->setArguments([
-                        "", // namespace, dummy
+                        "",
                         $container->getDefinition(RPCInterface::class),
                         $name,
                         $container->getParameter("kernel.project_dir"),
@@ -215,11 +215,6 @@ class FluffyDiscordRoadRunnerExtension extends Extension implements CompilerPass
     }
 
     /**
-     * Returns the live RoadRunner config via RPC, falling back to the YAML file when RoadRunner
-     * is unreachable — whether because it is not running (RelayException) or because RR_RPC is
-     * not in the environment at all (InvalidRPCConfigurationException), e.g. a cache:warmup in a
-     * Docker image build. Throws with a clear message only when neither source is available.
-     *
      * @param array{rr_config_path: ?string} $config
      * @return array<string, mixed>
      */
@@ -255,12 +250,6 @@ class FluffyDiscordRoadRunnerExtension extends Extension implements CompilerPass
         }
     }
 
-    /**
-     * Compile-time scan: tags every TemporalWorkerInterface service as a worker, and every
-     * #[WorkflowInterface] / #[ActivityInterface] class as a workflow/activity assigned to the
-     * task queues declared by its #[TaskQueue] attributes. Records addWorkflow/addActivity
-     * calls on the TemporalWorkerInitializer.
-     */
     private function registerTemporal(ContainerBuilder $container): void
     {
         if (!$container->hasDefinition(TemporalWorkerInitializer::class)) {
@@ -272,7 +261,7 @@ class FluffyDiscordRoadRunnerExtension extends Extension implements CompilerPass
         /** @var array<string, true> $allTaskQueues */
         $allTaskQueues = [];
 
-        /** @var array<string, true> $coveredQueues queues a user-defined worker already serves */
+        /** @var array<string, true> $coveredQueues */
         $coveredQueues = [];
 
         foreach ($container->getDefinitions() as $definition) {
@@ -287,9 +276,6 @@ class FluffyDiscordRoadRunnerExtension extends Extension implements CompilerPass
             if (in_array(TemporalWorkerInterface::class, $interfaces, true)) {
                 $definition->addTag('fluffydiscord.roadrunner.temporal.worker');
 
-                // A user worker declares its queue via #[TaskQueue] so we can skip registering a
-                // bundle default for that queue (DefaultTemporalWorker carries no attribute, so it
-                // covers nothing here — the default queue is handled separately).
                 foreach ($this->collectTaskQueues($reflectionClass, $interfaces) as $taskQueue) {
                     $coveredQueues[$taskQueue] = true;
                 }

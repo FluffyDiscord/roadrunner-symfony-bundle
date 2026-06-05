@@ -35,10 +35,8 @@ class CentrifugoProfilerSubscriber implements EventSubscriberInterface, ResetInt
     public static function getSubscribedEvents(): array
     {
         return [
-            // Start timing as early as possible.
             WorkerRequestReceivedEvent::class => ['onRequestReceived', PHP_INT_MAX],
 
-            // Record event type before any user listener runs.
             ConnectEvent::class               => ['onCentrifugoEvent', PHP_INT_MAX],
             PublishEvent::class               => ['onCentrifugoEvent', PHP_INT_MAX],
             RefreshEvent::class               => ['onCentrifugoEvent', PHP_INT_MAX],
@@ -47,15 +45,10 @@ class CentrifugoProfilerSubscriber implements EventSubscriberInterface, ResetInt
             RPCEvent::class                   => ['onCentrifugoEvent', PHP_INT_MAX],
             InvalidEvent::class               => ['onCentrifugoEvent', PHP_INT_MAX],
 
-            // Finalise after the response has been sent.
             WorkerResponseSentEvent::class    => ['onResponseSent', PHP_INT_MIN],
         ];
     }
 
-    /**
-     * Fires at the start of every worker loop iteration.
-     * Acts as a fallback failure-detector when services_resetter is null.
-     */
     public function onRequestReceived(): void
     {
         if ($this->pendingRequest && $this->isCentrifugoRequest && !$this->responseSent) {
@@ -110,8 +103,6 @@ class CentrifugoProfilerSubscriber implements EventSubscriberInterface, ResetInt
             ? round((hrtime(true) / 1e9 - $this->requestStartTime) * 1000.0, 2)
             : 0.0;
 
-        // Populate the data collector from our own state right before serialisation.
-        // The data collector may already be reset — that's fine, we overwrite it here.
         $this->dataCollector->populate(
             $this->currentEventType,
             $durationMs,

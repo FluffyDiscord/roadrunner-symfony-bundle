@@ -31,10 +31,6 @@ use Symfony\Component\DependencyInjection\ServicesResetterInterface;
 use Symfony\Component\HttpKernel\KernelInterface;
 use Symfony\Component\HttpKernel\RebootableInterface;
 
-/**
- * Centrifugo (RPC/proxy) worker: one response frame per request, STDERR/Sentry logging and a
- * controlled client signal on failure.
- */
 class CentrifugoWorker implements WorkerInterface
 {
     private bool $shutdownRegistered = false;
@@ -59,7 +55,6 @@ class CentrifugoWorker implements WorkerInterface
 
         $this->eventDispatcher->dispatch(new WorkerBootingEvent());
 
-        // Captured by reference so the shutdown closure always sees the latest per-iteration values.
         $handlingRequest = false;
         $responded = false;
         $currentRequest = null;
@@ -164,10 +159,7 @@ class CentrifugoWorker implements WorkerInterface
     }
 
     /**
-     * Invoked from the shutdown function for die()/exit()/fatal that bypass the try/catch: logs the
-     * otherwise-invisible failure and best-effort signals the client.
-     *
-     * @param array{message?: string, file?: string, line?: int}|null $error result of error_get_last()
+     * @param array{message?: string, file?: string, line?: int}|null $error
      */
     protected function handleShutdown(bool $handlingRequest, bool $responded, ?Request\RequestInterface $request, ?array $error): void
     {
@@ -195,10 +187,6 @@ class CentrifugoWorker implements WorkerInterface
         } catch (\Throwable) {}
     }
 
-    /**
-     * Answer a failed request with a single Centrifugo response frame; error() is a fallback only if
-     * sending that frame throws.
-     */
     protected function sendThrowableResponse(Request\RequestInterface $request, \Throwable $throwable): void
     {
         try {
@@ -210,16 +198,12 @@ class CentrifugoWorker implements WorkerInterface
         }
     }
 
-    /**
-     * Map a failed request to the right Centrifugo signal: drop the connection for lifecycle requests,
-     * return a soft error for in-band operations, stay silent for malformed ones.
-     */
     protected function respondToFailedRequest(Request\RequestInterface $request, string $clientMessage): void
     {
         match ($this->chooseFailureAction($request)) {
             'disconnect' => $request->disconnect(Response::HTTP_INTERNAL_SERVER_ERROR, $clientMessage),
             'error'      => $request->error(Response::HTTP_INTERNAL_SERVER_ERROR, $clientMessage, true),
-            default      => null, // 'none' — Invalid has no worker to respond through
+            default      => null,
         };
     }
 
@@ -232,14 +216,10 @@ class CentrifugoWorker implements WorkerInterface
             $request instanceof Request\Connect,
             $request instanceof Request\Subscribe => 'disconnect',
             $request instanceof Request\Invalid   => 'none',
-            default                               => 'error', // RPC, Publish, Refresh, SubRefresh
+            default                               => 'error',
         };
     }
 
-    /**
-     * Client-facing message. In debug a one-line hint (class + message, capped) — never the stack
-     * trace, which would travel to the client.
-     */
     protected function clientMessage(\Throwable $throwable): string
     {
         if (!$this->debug) {
@@ -264,9 +244,6 @@ class CentrifugoWorker implements WorkerInterface
         register_shutdown_function($handler);
     }
 
-    /**
-     * STDERR is the worker-log channel, never the goridge relay — writing here cannot corrupt it.
-     */
     protected function logError(string $message): void
     {
         @fwrite(\STDERR, '[roadrunner-symfony] ' . $message . "\n");

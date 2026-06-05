@@ -2,24 +2,13 @@
 
 namespace FluffyDiscord\RoadRunnerBundle\ErrorHandler;
 
-/**
- * Dependency-free HTML error page for the worker's last-resort error paths.
- *
- * It must render correctly even when the kernel/container is half-destroyed (after die()/exit()/fatal)
- * and must never itself trigger a fatal — so it touches no services, allocates only a bounded string,
- * and escapes every dynamic value.
- *
- * @see \FluffyDiscord\RoadRunnerBundle\Worker\HttpWorker::handleShutdown()
- */
 final class MinimalErrorPage
 {
-    /** Upper bound on the rendered message length, so the page stays allocatable in the OOM path. */
     public const int MESSAGE_MAX = 2048;
 
     /**
-     * @param array<array-key, mixed>|null $error result of error_get_last() (expected keys: message, file, line), or
-     *        null for bare die()/exit(). Values are scalar-coerced defensively — this renderer must never throw.
-     * @param string|null $detail an explicit detail string (e.g. a stringified throwable) when $error is unavailable
+     * @param array<array-key, mixed>|null $error
+     * @param string|null $detail
      */
     public static function render(int $statusCode, ?array $error, ?string $detail = null): string
     {
@@ -31,7 +20,6 @@ final class MinimalErrorPage
         $message = null;
         $location = null;
 
-        // Scalar-coerce defensively so a malformed error array cannot make this renderer throw.
         if ($error !== null && isset($error['message']) && \is_scalar($error['message'])) {
             $message = (string) $error['message'];
             if (isset($error['file'], $error['line']) && \is_scalar($error['file']) && \is_scalar($error['line'])) {

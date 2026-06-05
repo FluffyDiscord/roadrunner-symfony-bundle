@@ -6,10 +6,6 @@ use Spiral\RoadRunner\Http\Exception\StreamStoppedException;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\Request;
 
-/**
- * Basically a copy of BinaryFileResponse->sendContent()
- * but yielding to behave like a generator
- */
 class BinaryFileResponseWrapper
 {
     public static function wrap(BinaryFileResponse $response, Request $request): \Generator

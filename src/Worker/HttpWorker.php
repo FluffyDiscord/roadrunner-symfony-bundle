@@ -33,9 +33,6 @@ class HttpWorker implements WorkerInterface
     private HttpFoundationFactoryInterface $httpFoundationFactory;
     private Psr7\Factory\Psr17Factory $psrFactory;
 
-    /**
-     * to support early hints
-     */
     public static ?\Spiral\RoadRunner\Http\HttpWorker $currentHttpWorker = null;
 
     public const string DUMMY_REQUEST_ATTRIBUTE = "rr_dummy_request";
@@ -74,7 +71,6 @@ class HttpWorker implements WorkerInterface
         $worker = $this->createPsr7Worker();
         self::$currentHttpWorker = $worker->getHttpWorker();
 
-        // support for early hints
         if (!\function_exists('headers_send')) {
             require_once __DIR__ . '/../Resources/headers_send_polyfill.php';
         }
@@ -82,13 +78,10 @@ class HttpWorker implements WorkerInterface
         if (!$this->lazyBoot) {
             $this->kernel->boot();
 
-            // Initialize routing and other lazy services that Symfony has.
-            // Reduces first real request response time more than 50%, YMMW
             if ($this->earlyRouterInitialization) {
                 $this->kernel->handle(new Request(attributes: [self::DUMMY_REQUEST_ATTRIBUTE => true]));
             }
 
-            // Preload reflections, up to 2ms savings for each, YMMW
             new \ReflectionClass(StreamedJsonResponse::class);
             new \ReflectionClass(StreamedResponse::class);
             new \ReflectionClass(BinaryFileResponse::class);
@@ -96,12 +89,10 @@ class HttpWorker implements WorkerInterface
 
         $this->eventDispatcher->dispatch(new WorkerBootingEvent());
 
-        // Captured by reference so the shutdown closure always sees the latest per-iteration values.
-        $handlingRequest = false; // a real client request is in flight
-        $responseStarted = false; // any frame has begun (incl. the first stream chunk)
-        $responseSent = false;    // a normal response finished
+        $handlingRequest = false;
+        $responseStarted = false;
+        $responseSent = false;
 
-        // Register after boot so boot-time death is a natural no-op.
         if (!$this->shutdownRegistered) {
             $this->shutdownRegistered = true;
             $this->registerShutdown(function () use ($worker, &$handlingRequest, &$responseStarted): void {
@@ -148,8 +139,6 @@ class HttpWorker implements WorkerInterface
                 /** @var array<array<string>> $headers */
                 $headers = $symfonyResponse->headers->all();
 
-                // Mark the response started before respond() so a mid-stream fatal does not make the
-                // shutdown handler append another frame on top of a partial stream.
                 $responseStarted = true;
                 $worker->getHttpWorker()->respond(
                     $symfonyResponse->getStatusCode(),
@@ -167,7 +156,6 @@ class HttpWorker implements WorkerInterface
                 } catch (\Throwable) {
                 }
 
-                // Only send an error response if no frame has started; appending to a stream corrupts it.
                 if (!$responseStarted) {
                     $responseStarted = true;
                     $this->sendThrowableResponse($worker, $throwable);
@@ -219,10 +207,7 @@ class HttpWorker implements WorkerInterface
     }
 
     /**
-     * Invoked from the process shutdown function for die()/exit()/fatal that bypass the try/catch.
-     * Best-effort and relay-dependent.
-     *
-     * @param array{message?: string, file?: string, line?: int}|null $error result of error_get_last() (null for bare die/exit)
+     * @param array{message?: string, file?: string, line?: int}|null $error
      */
     protected function handleShutdown(
         RoadRunner\Http\PSR7Worker $worker,
@@ -231,12 +216,10 @@ class HttpWorker implements WorkerInterface
         ?array                     $error,
     ): void
     {
-        // Rescue only an in-flight request with no frame started.
         if (!$handlingRequest || $responseStarted) {
             return;
         }
 
-        // OOM leaves almost no headroom; lift PHP's cap so the tiny page can be built (cgroup may still cap).
         if ($error !== null && isset($error['message']) && str_contains($error['message'], 'Allowed memory size')) {
             @ini_set('memory_limit', '-1');
         }
@@ -265,7 +248,6 @@ class HttpWorker implements WorkerInterface
                 : 'worker terminated via die/exit during request',
         );
 
-        // The finally-block Sentry flush never runs on shutdown, so report here (best-effort).
         try {
             $this->sentryHubInterface?->captureMessage('RoadRunner worker fatal: ' . ($error['message'] ?? 'die/exit during request'));
             $this->sentryHubInterface?->getClient()?->flush();
@@ -273,9 +255,6 @@ class HttpWorker implements WorkerInterface
         }
     }
 
-    /**
-     * Send an error response for a caught throwable; error() is a fallback only if respond() throws.
-     */
     protected function sendThrowableResponse(RoadRunner\Http\PSR7Worker $worker, \Throwable $throwable): void
     {
         try {
@@ -315,10 +294,6 @@ class HttpWorker implements WorkerInterface
         register_shutdown_function($handler);
     }
 
-    /**
-     * STDERR is the worker-log channel, not the goridge relay (unlike STDOUT in pipe mode) — writing
-     * here cannot corrupt it.
-     */
     protected function logError(string $message): void
     {
         @fwrite(\STDERR, '[roadrunner-symfony] ' . $message . "\n");

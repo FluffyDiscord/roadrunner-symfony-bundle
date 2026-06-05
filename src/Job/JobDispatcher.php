@@ -8,10 +8,6 @@ use Spiral\RoadRunner\Jobs\JobsInterface;
 use Spiral\RoadRunner\Jobs\Options;
 use Spiral\RoadRunner\Jobs\Task\PreparedTask;
 
-/**
- * Serializes a plain PHP object into a bundle envelope and pushes it onto an RoadRunner Jobs queue.
- * Routing options resolve as explicit argument > #[AsJob] attribute > dispatcher default.
- */
 final class JobDispatcher
 {
     /**
@@ -25,8 +21,8 @@ final class JobDispatcher
     }
 
     /**
-     * @param int<0, max>|null $delay    Delay in seconds; null → #[AsJob] default, else none.
-     * @param int<0, max>|null $priority RR priority; null → #[AsJob] default, else queue default.
+     * @param int<0, max>|null $delay
+     * @param int<0, max>|null $priority
      */
     public function dispatch(object $message, ?string $queue = null, ?int $delay = null, ?int $priority = null): void
     {
@@ -52,7 +48,6 @@ final class JobDispatcher
             $this->serializer->serialize($message),
         );
 
-        // PreparedTask is built directly so explicit options override queue defaults.
         $options = new Options($delay ?? Options::DEFAULT_DELAY, $priority ?? Options::DEFAULT_PRIORITY);
         $task = new PreparedTask($message::class, $envelope->payload, $options, $envelope->toHeaders());
 

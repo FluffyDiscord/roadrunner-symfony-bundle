@@ -4,8 +4,6 @@ namespace FluffyDiscord\RoadRunnerBundle\Factory;
 
 use Symfony\Component\HttpFoundation\StreamedJsonResponse;
 
-// Basically copy of Symfony\Component\HttpFoundation\StreamedJsonResponse
-// but adds `yield`ing, instead of `echo`s
 class StreamedJsonResponseWrapper
 {
     public static function wrap(StreamedJsonResponse $response): \Generator
@@ -59,18 +57,13 @@ class StreamedJsonResponseWrapper
 
         array_walk_recursive($data, function (&$item, $key) use (&$generators, $placeholder) {
             if ($placeholder === $key) {
-                // if the placeholder is already in the structure it should be replaced with a new one that explode
-                // works like expected for the structure
                 $generators[] = $key;
             }
 
-            // generators should be used but for better DX all kind of Traversable and objects are supported
             if (\is_object($item)) {
                 $generators[] = $item;
                 $item = $placeholder;
             } elseif ($placeholder === $item) {
-                // if the placeholder is already in the structure it should be replaced with a new one that explode
-                // works like expected for the structure
                 $generators[] = $item;
             }
         });
@@ -78,7 +71,6 @@ class StreamedJsonResponseWrapper
         $jsonParts = explode('"' . $placeholder . '"', (string)json_encode($data, $jsonEncodingOptions));
 
         foreach ($generators as $index => $generator) {
-            // send first and between parts of the structure
             yield $jsonParts[$index];
 
             foreach (self::streamData($generator, $jsonEncodingOptions, $keyEncodingOptions, $placeholder) as $child) {
@@ -86,7 +78,6 @@ class StreamedJsonResponseWrapper
             }
         }
 
-        // send last part of the structure
         yield $jsonParts[array_key_last($jsonParts)];
     }
 
@@ -99,16 +90,12 @@ class StreamedJsonResponseWrapper
         foreach ($iterable as $key => $item) {
             if ($isFirstItem) {
                 $isFirstItem = false;
-                // depending on the first elements key the generator is detected as a list or map
-                // we can not check for a whole list or map because that would hurt the performance
-                // of the streamed response which is the main goal of this response class
                 if (0 !== $key) {
                     $startTag = '{';
                 }
 
                 yield $startTag;
             } else {
-                // if not first element of the generic, a separator is required between the elements
                 yield ',';
             }
 
@@ -122,7 +109,7 @@ class StreamedJsonResponseWrapper
             }
         }
 
-        if ($isFirstItem) { // indicates that the generator was empty
+        if ($isFirstItem) {
             yield '[';
         }
 

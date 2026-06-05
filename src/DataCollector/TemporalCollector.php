@@ -11,11 +11,6 @@ use Temporal\Internal\Declaration\Reader\ActivityReader;
 use Temporal\Internal\Declaration\Reader\WorkflowReader;
 
 /**
- * Reads the compile-time registration map off {@see TemporalWorkerInitializer}, then
- * resolves each class's Temporal type id(s) with the SDK readers. It does NOT create a
- * WorkerFactory or open an RPC connection — the ids come from attribute reflection — so
- * profiling a web request stays cheap and never depends on a reachable RoadRunner.
- *
  * @phpstan-type CollectorEntry array{class: string, ids: list<string>, taskQueues: list<string>}
  * @phpstan-type CollectorTypeRow array{class: string, id: string}
  * @phpstan-type CollectorWorker array{class: string, id: string, workflows: list<CollectorTypeRow>, activities: list<CollectorTypeRow>}
@@ -95,8 +90,6 @@ final class TemporalCollector extends AbstractDataCollector
     }
 
     /**
-     * Invert the queue => classes map into class => {class, ids, taskQueues}.
-     *
      * @param array<string, list<class-string>> $byQueue
      * @param array<class-string, list<string>> $idsByClass
      * @return array<class-string, CollectorEntry>

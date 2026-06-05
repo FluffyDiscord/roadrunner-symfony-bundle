@@ -4,9 +4,6 @@ namespace FluffyDiscord\RoadRunnerBundle\Job\Serializer;
 
 use FluffyDiscord\RoadRunnerBundle\Job\Exception\JobSerializationException;
 
-/**
- * Selected automatically when the extension is loaded; falls back to native otherwise.
- */
 final class IgbinaryJobSerializer implements JobSerializerInterface
 {
     public function name(): string

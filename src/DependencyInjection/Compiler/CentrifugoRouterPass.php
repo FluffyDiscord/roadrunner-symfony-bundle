@@ -13,11 +13,6 @@ use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\Exception\InvalidArgumentException;
 use Symfony\Component\DependencyInjection\Reference;
 
-/**
- * Collects services tagged with fluffy_discord.centrifugo_channel_listener and
- * fluffy_discord.centrifugo_rpc_listener, builds a compile-time routing table,
- * and injects it along with a ServiceLocator into CentrifugoEventRouter.
- */
 final class CentrifugoRouterPass implements CompilerPassInterface
 {
     private const ALLOWED_CHANNEL_EVENTS = [

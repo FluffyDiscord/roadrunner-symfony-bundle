@@ -26,8 +26,7 @@ class CentrifugoDataCollector extends DataCollector
 
     public function collect(Request $request, Response $response, ?\Throwable $exception = null): void
     {
-        // Data is set via populate(). This no-op prevents the profiler from
-        // overwriting $this->data when processing unrelated HTTP profiles.
+        // Symfony calls collect() on unrelated HTTP profiles; data is populated out-of-band, so collecting here would clobber it.
     }
 
     public function getName(): string

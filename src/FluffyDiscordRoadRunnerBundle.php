@@ -21,7 +21,6 @@ final class FluffyDiscordRoadRunnerBundle extends Bundle
             $container->addCompilerPass(new CentrifugoRouterPass(), PassConfig::TYPE_BEFORE_REMOVING);
         }
 
-        // The extension doubles as a compiler pass that scans for Temporal workflows/activities.
         $extension = parent::getContainerExtension();
         if (class_exists(WorkflowInterface::class) && $extension instanceof CompilerPassInterface) {
             $container->addCompilerPass($extension, PassConfig::TYPE_BEFORE_OPTIMIZATION);
@@ -30,11 +29,7 @@ final class FluffyDiscordRoadRunnerBundle extends Bundle
 
     public function boot(): void
     {
-        // Symfony resolves APP_RUNTIME_MODE to choose HtmlErrorRenderer vs
-        // CliErrorRenderer (and to configure profiling, dump collection, etc.).
-        // RoadRunner runs as PHP CLI so the default resolves to "cli".  We must
-        // set the correct value before any service reads kernel.runtime_mode.*,
-        // and Bundle::boot() runs before any lazy service is instantiated.
+        // RoadRunner runs as PHP CLI; set APP_RUNTIME_MODE before any service reads kernel.runtime_mode.
         $mode = $_SERVER['RR_MODE'] ?? null;
         $paramName = match ($mode) {
             'http' => 'fluffy_discord.runtime_mode.http',

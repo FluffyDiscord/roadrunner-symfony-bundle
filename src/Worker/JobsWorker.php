@@ -16,10 +16,6 @@ use Symfony\Component\EventDispatcher\EventDispatcherInterface;
 use Symfony\Component\HttpKernel\KernelInterface;
 use Symfony\Component\HttpKernel\RebootableInterface;
 
-/**
- * RoadRunner Jobs (queue consumer) worker: one ack/nack frame per task, with STDERR/Sentry logging
- * and a best-effort requeue on unexpected death.
- */
 class JobsWorker implements WorkerInterface
 {
     private bool $shutdownRegistered = false;
@@ -44,7 +40,6 @@ class JobsWorker implements WorkerInterface
 
         $this->eventDispatcher->dispatch(new WorkerBootingEvent());
 
-        // Captured by reference so the shutdown closure always sees the latest per-iteration values.
         $handlingTask = false;
         $responded = false;
         $currentTask = null;
@@ -71,7 +66,6 @@ class JobsWorker implements WorkerInterface
 
                 $this->eventDispatcher->dispatch(new JobsRunEvent($task));
 
-                // A listener may have already completed the task; respect it.
                 if (!$task->isCompleted()) {
                     $task->ack();
                 }
@@ -130,10 +124,7 @@ class JobsWorker implements WorkerInterface
     }
 
     /**
-     * Invoked from the shutdown function for die()/exit()/fatal that bypass the try/catch: logs the
-     * otherwise-invisible failure and best-effort requeues the task.
-     *
-     * @param array{message?: string, file?: string, line?: int}|null $error result of error_get_last()
+     * @param array{message?: string, file?: string, line?: int}|null $error
      */
     protected function handleShutdown(bool $handlingTask, bool $responded, ?ReceivedTaskInterface $task, ?array $error): void
     {
@@ -165,9 +156,6 @@ class JobsWorker implements WorkerInterface
         }
     }
 
-    /**
-     * Fail a task with a single nack frame (requeue); error() is a fallback only if the nack throws.
-     */
     protected function sendThrowableResponse(ReceivedTaskInterface $task, \Throwable $throwable): void
     {
         try {
@@ -190,9 +178,6 @@ class JobsWorker implements WorkerInterface
         register_shutdown_function($handler);
     }
 
-    /**
-     * STDERR is the worker-log channel, never the goridge relay — writing here cannot corrupt it.
-     */
     protected function logError(string $message): void
     {
         @fwrite(\STDERR, '[roadrunner-symfony] ' . $message . "\n");

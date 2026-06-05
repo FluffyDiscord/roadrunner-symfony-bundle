@@ -4,11 +4,6 @@ namespace FluffyDiscord\RoadRunnerBundle\Job;
 
 use FluffyDiscord\RoadRunnerBundle\Job\Exception\JobSerializationException;
 
-/**
- * Wire contract for an enveloped job task: a serialized payload plus the x-job-class and
- * x-job-serializer task headers. A task missing the x-job-class header is left for raw
- * JobsRunEvent listeners.
- */
 final class JobEnvelope
 {
     public const HEADER_CLASS = 'x-job-class';
@@ -26,8 +21,6 @@ final class JobEnvelope
     }
 
     /**
-     * RoadRunner task headers (each value is a single-element list, per the header type contract).
-     *
      * @return array<non-empty-string, list<non-empty-string>>
      */
     public function toHeaders(): array
@@ -39,12 +32,8 @@ final class JobEnvelope
     }
 
     /**
-     * Reconstructs an envelope from a consumed task's payload + headers.
-     *
      * @param array<non-empty-string, array<string>> $headers
-     * @return self|null null when the task carries no x-job-class header — i.e. it is NOT a bundle
-     *                   envelope and must be left untouched for raw JobsRunEvent listeners.
-     * @throws JobSerializationException when the task is enveloped but its message class is unloadable.
+     * @throws JobSerializationException
      */
     public static function fromTask(string $payload, array $headers): ?self
     {
