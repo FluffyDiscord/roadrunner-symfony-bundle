@@ -174,6 +174,16 @@ class Configuration implements ConfigurationInterface
                             ->cannotBeEmpty()
                             ->defaultValue("default")
                         ->end()
+                        ->scalarNode("bus")
+                            ->info($this->toInfo([
+                                'Service id of the Symfony Messenger bus the Jobs',
+                                'consumer dispatches into. Null (default) uses the',
+                                'application default bus (MessageBusInterface).',
+                                'Only relevant with symfony/messenger installed and',
+                                'multiple buses defined.',
+                            ]))
+                            ->defaultNull()
+                        ->end()
                     ->end()
                     ->addDefaultsIfNotSet()
                 ->end()

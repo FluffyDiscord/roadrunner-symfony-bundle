@@ -3,35 +3,41 @@
 namespace FluffyDiscord\RoadRunnerBundle\Job\EventListener;
 
 use FluffyDiscord\RoadRunnerBundle\Event\Worker\Jobs\JobsRunEvent;
-use FluffyDiscord\RoadRunnerBundle\Job\Exception\JobHandlerException;
 use FluffyDiscord\RoadRunnerBundle\Job\Exception\JobSerializationException;
 use FluffyDiscord\RoadRunnerBundle\Job\JobEnvelope;
 use FluffyDiscord\RoadRunnerBundle\Job\Serializer\JobSerializerInterface;
-use Symfony\Component\DependencyInjection\ServiceLocator;
+use Psr\Log\LoggerInterface;
+use Symfony\Component\Messenger\Exception\NoHandlerForMessageException;
+use Symfony\Component\Messenger\MessageBusInterface;
+use Symfony\Component\Messenger\Stamp\HandlerArgumentsStamp;
+use Symfony\Component\Messenger\Stamp\ReceivedStamp;
 
 /**
  * Listens to JobsRunEvent at priority -100 (after default-priority raw listeners). Detects bundle
  * envelopes by their x-job-class header, rehydrates the message with the strategy named in
- * x-job-serializer, and invokes every #[AsJobHandler] registered for that message class.
+ * x-job-serializer, and dispatches it into the Symfony Messenger bus so #[AsMessageHandler] handlers
+ * run it. The raw ReceivedTaskInterface is passed to handlers as a second argument.
  *
  * A non-enveloped task (no x-job-class) is left untouched so raw JobsRunEvent listeners still own it.
  * The listener never acks/nacks: a thrown exception makes the worker nack-with-requeue; returning
- * normally lets the worker ack.
- *
- * @phpstan-type JobHandler array{0: string, 1: string, 2: int}
- * @phpstan-type JobRoutingTable array<class-string, list<JobHandler>>
+ * normally lets the worker ack. A valid envelope no handler matches is acked as a no-op.
  */
 final class JobRoutingListener
 {
     /**
-     * @param ServiceLocator<object>                              $locator      Lazy locator of handler services.
-     * @param JobRoutingTable                                     $routingTable Compile-time message→handler map.
-     * @param array<non-empty-string, JobSerializerInterface>     $serializers  Strategy registry keyed by name().
+     * Transport name stamped on every RoadRunner-consumed message. Scope a handler to RR jobs with
+     * #[AsMessageHandler(fromTransport: JobRoutingListener::TRANSPORT_NAME)]; a different fromTransport
+     * value will not match an RR job.
+     */
+    public const TRANSPORT_NAME = 'roadrunner';
+
+    /**
+     * @param array<non-empty-string, JobSerializerInterface> $serializers Strategy registry keyed by name().
      */
     public function __construct(
-        private readonly ServiceLocator $locator,
-        private readonly array $routingTable,
+        private readonly MessageBusInterface $bus,
         private readonly array $serializers,
+        private readonly ?LoggerInterface $logger = null,
     ) {
     }
 
@@ -54,19 +60,17 @@ final class JobRoutingListener
 
         $message = $serializer->deserialize($envelope->payload, $envelope->messageClass);
 
-        foreach ($this->routingTable[$envelope->messageClass] ?? [] as [$serviceId, $method]) {
-            try {
-                $this->locator->get($serviceId)->$method($message);
-            } catch (\Throwable $e) {
-                throw new JobHandlerException(\sprintf(
-                    'Handler "%s::%s" failed for job "%s": %s',
-                    $serviceId,
-                    $method,
-                    $envelope->messageClass,
-                    $e->getMessage(),
-                ), 0, $e);
-            }
+        try {
+            $this->bus->dispatch($message, [
+                new ReceivedStamp(self::TRANSPORT_NAME),
+                new HandlerArgumentsStamp([$event->getTask()]),
+            ]);
+        } catch (NoHandlerForMessageException $noHandler) {
+            // A valid envelope nobody handles is acked as a no-op, never nack-looped.
+            $this->logger?->warning('No handler for job message "{class}"; acking as no-op.', [
+                'class' => $envelope->messageClass,
+                'exception' => $noHandler,
+            ]);
         }
-        // No registered handler → no-op; the worker acks the task as a normal success.
     }
 }

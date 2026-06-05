@@ -10,7 +10,7 @@ use FluffyDiscord\RoadRunnerBundle\Exception\CacheAutoRegisterException;
 use FluffyDiscord\RoadRunnerBundle\Exception\InvalidRPCConfigurationException;
 use FluffyDiscord\RoadRunnerBundle\Exception\TemporalAddressException;
 use FluffyDiscord\RoadRunnerBundle\Exception\WorkflowNotAssignedException;
-use FluffyDiscord\RoadRunnerBundle\Job\Attribute\AsJobHandler;
+use FluffyDiscord\RoadRunnerBundle\Job\EventListener\JobRoutingListener;
 use FluffyDiscord\RoadRunnerBundle\Job\JobDispatcher;
 use FluffyDiscord\RoadRunnerBundle\Job\Serializer\IgbinaryJobSerializer;
 use FluffyDiscord\RoadRunnerBundle\Job\Serializer\JobSerializerInterface;
@@ -30,7 +30,6 @@ use FluffyDiscord\RoadRunnerBundle\Worker\JobsWorker;
 use RoadRunner\Centrifugo\CentrifugoWorker as RoadRunnerCentrifugoWorker;
 use Spiral\Goridge\Exception\RelayException;
 use Spiral\Goridge\RPC\RPCInterface;
-use Spiral\RoadRunner\Jobs\Consumer;
 use Spiral\RoadRunner\KeyValue\Cache;
 use Symfony\Component\Config\FileLocator;
 use Symfony\Component\DependencyInjection\ChildDefinition;
@@ -120,31 +119,8 @@ class FluffyDiscordRoadRunnerExtension extends Extension implements CompilerPass
             );
         }
 
-        if (class_exists(Consumer::class)) {
-            $container->registerAttributeForAutoconfiguration(
-                AsJobHandler::class,
-                static function (ChildDefinition $definition, AsJobHandler $attr, \Reflector $refl): void {
-                    $tag = [
-                        'message'  => $attr->message,
-                        'priority' => $attr->priority,
-                        'method'   => $attr->method,
-                    ];
-                    if ($refl instanceof \ReflectionMethod) {
-                        $tag['method'] = $refl->getName();
-                        if ($tag['message'] === null) {
-                            $params = $refl->getParameters();
-                            if ($params !== [] && ($type = $params[0]->getType()) instanceof \ReflectionNamedType) {
-                                $tag['message'] = $type->getName();
-                            }
-                        }
-                    }
-                    $definition->addTag('fluffy_discord.job_handler', $tag);
-                },
-            );
-        }
-
         $configuration = $this->getConfiguration([], $container);
-        /** @var array{http: array{early_router_initialization: bool, lazy_boot: bool}, centrifugo: array{lazy_boot: bool}, jobs: array{lazy_boot: bool, serializer: 'native'|'igbinary'|'symfony'|null, default_queue: non-empty-string}, kv: array{auto_register: bool, serializer: ?string, keypair_path: ?string}, rr_config_path: ?string, temporal?: array{namespace?: string, tracing?: bool, api_key?: ?string, retryable_errors?: list<string>, default_worker_options?: array<string, mixed>, worker_options?: array<string, array<string, mixed>>}} $config */
+        /** @var array{http: array{early_router_initialization: bool, lazy_boot: bool}, centrifugo: array{lazy_boot: bool}, jobs: array{lazy_boot: bool, serializer: 'native'|'igbinary'|'symfony'|null, default_queue: non-empty-string, bus: ?string}, kv: array{auto_register: bool, serializer: ?string, keypair_path: ?string}, rr_config_path: ?string, temporal?: array{namespace?: string, tracing?: bool, api_key?: ?string, retryable_errors?: list<string>, default_worker_options?: array<string, mixed>, worker_options?: array<string, array<string, mixed>>}} $config */
         $config = $this->processConfiguration($configuration, $configs);
 
         if ($container->hasDefinition(HttpWorker::class)) {
@@ -166,6 +142,12 @@ class FluffyDiscordRoadRunnerExtension extends Extension implements CompilerPass
         if ($container->hasDefinition(JobDispatcher::class)) {
             $container->getDefinition(JobDispatcher::class)
                 ->replaceArgument(2, $config["jobs"]["default_queue"]);
+        }
+
+        $bus = $config["jobs"]["bus"];
+        if (is_string($bus) && $bus !== '' && $container->hasDefinition(JobRoutingListener::class)) {
+            $container->getDefinition(JobRoutingListener::class)
+                ->replaceArgument(0, new Reference($bus));
         }
 
         if ($container->hasAlias(JobSerializerInterface::class)) {

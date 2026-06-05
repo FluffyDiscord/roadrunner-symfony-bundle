@@ -4,9 +4,7 @@ namespace FluffyDiscord\RoadRunnerBundle;
 
 use FluffyDiscord\RoadRunnerBundle\DependencyInjection\Compiler\CentrifugoRouterPass;
 use FluffyDiscord\RoadRunnerBundle\DependencyInjection\FluffyDiscordRoadRunnerExtension;
-use FluffyDiscord\RoadRunnerBundle\Job\DependencyInjection\Compiler\JobHandlerPass;
 use RoadRunner\Centrifugo\CentrifugoWorker as RoadRunnerCentrifugoWorker;
-use Spiral\RoadRunner\Jobs\Consumer;
 use Symfony\Component\DependencyInjection\Compiler\CompilerPassInterface;
 use Symfony\Component\DependencyInjection\Compiler\PassConfig;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
@@ -21,10 +19,6 @@ final class FluffyDiscordRoadRunnerBundle extends Bundle
 
         if (class_exists(RoadRunnerCentrifugoWorker::class)) {
             $container->addCompilerPass(new CentrifugoRouterPass(), PassConfig::TYPE_BEFORE_REMOVING);
-        }
-
-        if (class_exists(Consumer::class)) {
-            $container->addCompilerPass(new JobHandlerPass(), PassConfig::TYPE_BEFORE_REMOVING);
         }
 
         // The extension doubles as a compiler pass that scans for Temporal workflows/activities.

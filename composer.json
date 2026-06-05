@@ -22,8 +22,7 @@
         "symfony/expression-language" : "^7.4 || ^8",
         "spiral/roadrunner-worker" : "^v3",
         "spiral/roadrunner-http" : "^v4",
-        "spiral/roadrunner-cli" : "^v2",
-        "spiral/roadrunner-jobs": "^4.7"
+        "spiral/roadrunner-cli" : "^v2"
     },
     "minimum-stability" : "dev",
     "prefer-stable" : true,
@@ -62,10 +61,14 @@
         "roadrunner-php/symfony-lock-driver" : "^1.1",
         "phpstan/phpstan" : "^2.1",
         "phpstan/phpstan-symfony" : "^2.0",
-        "phpstan/extension-installer": "^1.4"
+        "phpstan/extension-installer": "^1.4",
+        "symfony/messenger": "^7.4 || ^8",
+        "spiral/roadrunner-jobs": "^4.7"
     },
     "suggest" : {
+        "spiral/roadrunner-jobs" : "Enables the RoadRunner Jobs (queue consumer) worker, the raw JobsRunEvent and the typed Jobs message bus. Without it only the HTTP/Centrifugo/Temporal workers are available.",
         "temporal/sdk" : "Enables the Temporal.io worker, interceptors and profiler data collector",
+        "symfony/messenger" : "Enables the typed Jobs message bus: dispatch a #[AsJob] object and handle it with a standard #[AsMessageHandler]. Without it, only the raw JobsRunEvent is available.",
         "ext-igbinary" : "Smaller, faster binary serializer for the Jobs message-bus; used automatically when present, otherwise the native serializer is used.",
         "symfony/serializer" : "Optional JSON-based serializer for the Jobs message-bus (interoperable payloads). The default native serializer requires no extra dependencies.",
         "roadrunner-php/symfony-lock-driver" : "Exposes RoadRunner distributed locks as a Symfony LockFactory / PersistingStoreInterface (pulls in roadrunner-php/lock + symfony/lock)."
