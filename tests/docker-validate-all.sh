@@ -259,11 +259,11 @@ cat > "$CTX/app/app-src/PingHandler.php" <<'PHP'
 <?php
 namespace App;
 
-use FluffyDiscord\RoadRunnerBundle\Job\Attribute\AsJobHandler;
+use Symfony\Component\Messenger\Attribute\AsMessageHandler;
 
 final class PingHandler
 {
-    #[AsJobHandler]
+    #[AsMessageHandler]
     public function __invoke(Ping $message): void
     {
         file_put_contents('/app/var/handled.json', json_encode([
@@ -291,11 +291,11 @@ cat > "$CTX/app/app-src/CountPingHandler.php" <<'PHP'
 <?php
 namespace App;
 
-use FluffyDiscord\RoadRunnerBundle\Job\Attribute\AsJobHandler;
+use Symfony\Component\Messenger\Attribute\AsMessageHandler;
 
 final class CountPingHandler
 {
-    #[AsJobHandler]
+    #[AsMessageHandler]
     public function __invoke(CountPing $message): void
     {
         $file = '/app/var/count-' . $message->token . '.txt';
@@ -381,7 +381,7 @@ class Kernel extends BaseKernel
             'php_errors' => ['log' => true],
         ]);
 
-        // Autoconfigure so #[TaskQueue] workflows/activities, #[AsJobHandler] and #[AsEventListener]
+        // Autoconfigure so #[TaskQueue] workflows/activities, #[AsMessageHandler] and #[AsEventListener]
         // are all picked up by the bundle's compile-time scans.
         $services = $c->services()->defaults()->autowire()->autoconfigure();
         $services->load('App\\', '../app-src/');

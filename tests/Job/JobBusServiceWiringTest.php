@@ -2,21 +2,22 @@
 
 namespace FluffyDiscord\RoadRunnerBundle\Tests\Job;
 
+use FluffyDiscord\RoadRunnerBundle\DependencyInjection\FluffyDiscordRoadRunnerExtension;
 use FluffyDiscord\RoadRunnerBundle\Event\Worker\Jobs\JobsRunEvent;
-use FluffyDiscord\RoadRunnerBundle\Job\DependencyInjection\Compiler\JobHandlerPass;
 use FluffyDiscord\RoadRunnerBundle\Job\EventListener\JobRoutingListener;
 use FluffyDiscord\RoadRunnerBundle\Job\JobDispatcher;
-use FluffyDiscord\RoadRunnerBundle\Job\Serializer\JobSerializerInterface;
 use FluffyDiscord\RoadRunnerBundle\Tests\BaseTestCase;
-use FluffyDiscord\RoadRunnerBundle\Tests\Job\Fixtures\SendWelcomeEmail;
-use FluffyDiscord\RoadRunnerBundle\Tests\Job\Fixtures\SendWelcomeEmailHandler;
+use Spiral\RoadRunner\Jobs\JobsInterface;
 use Symfony\Component\Config\FileLocator;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\Loader\PhpFileLoader;
+use Symfony\Component\DependencyInjection\Reference;
+use Symfony\Component\Messenger\MessageBusInterface;
 
 /**
- * IT-04 — the Jobs message-bus services are wired by config/services.php, the JobHandlerPass builds a
- * routing table from a tagged handler, and the JobsRunEvent listener is registered.
+ * IT-B1/IT-B2 — the Jobs message bus is wired onto Symfony Messenger by config/services.php (the typed
+ * bus is registered because symfony/messenger is installed in the dev env), JobsInterface stays
+ * ungated, and jobs.bus repoints the consumer at a named bus.
  */
 class JobBusServiceWiringTest extends BaseTestCase
 {
@@ -34,10 +35,20 @@ class JobBusServiceWiringTest extends BaseTestCase
     {
         $container = $this->loadServices();
 
+        self::assertTrue($container->hasDefinition(JobsInterface::class), 'JobsInterface must stay ungated');
         self::assertTrue($container->hasDefinition(JobDispatcher::class));
         self::assertTrue($container->getDefinition(JobDispatcher::class)->isPublic());
-        self::assertTrue($container->hasAlias(JobSerializerInterface::class));
         self::assertTrue($container->hasDefinition(JobRoutingListener::class));
+    }
+
+    public function testRoutingListenerDispatchesIntoDefaultBus(): void
+    {
+        $container = $this->loadServices();
+
+        $arg0 = $container->getDefinition(JobRoutingListener::class)->getArgument(0);
+
+        self::assertInstanceOf(Reference::class, $arg0);
+        self::assertSame(MessageBusInterface::class, (string) $arg0);
     }
 
     public function testRoutingListenerIsTaggedOnJobsRunEvent(): void
@@ -57,20 +68,26 @@ class JobBusServiceWiringTest extends BaseTestCase
         self::assertTrue($found, 'JobRoutingListener must listen to JobsRunEvent::onJobsRun');
     }
 
-    public function testHandlerPassBuildsRoutingTable(): void
+    public function testJobsBusConfigRepointsTheListener(): void
     {
-        $container = $this->loadServices();
+        $container = new ContainerBuilder();
+        $container->setParameter('kernel.debug', false);
+        // temporal/sdk is installed in the test env, so load() resolves the Temporal frontend
+        // address; point it at the bundled .rr.yaml fixture so the build succeeds.
+        $container->setParameter('kernel.project_dir', __DIR__ . '/../Temporal/Fixtures');
 
-        $container->register(SendWelcomeEmailHandler::class, SendWelcomeEmailHandler::class)
-            ->setPublic(true)
-            ->addTag('fluffy_discord.job_handler', ['message' => SendWelcomeEmail::class, 'priority' => 0, 'method' => '__invoke']);
+        (new FluffyDiscordRoadRunnerExtension())->load(
+            [[
+                'rr_config_path' => 'temporal.rr.yaml',
+                'kv' => ['auto_register' => false],
+                'jobs' => ['bus' => 'app.custom_bus'],
+            ]],
+            $container,
+        );
 
-        (new JobHandlerPass())->process($container);
+        $arg0 = $container->getDefinition(JobRoutingListener::class)->getArgument(0);
 
-        /** @var array<class-string, list<array{0: string, 1: string, 2: int}>> $table */
-        $table = $container->getDefinition(JobRoutingListener::class)->getArgument(1);
-
-        self::assertArrayHasKey(SendWelcomeEmail::class, $table);
-        self::assertSame([[SendWelcomeEmailHandler::class, '__invoke', 0]], $table[SendWelcomeEmail::class]);
+        self::assertInstanceOf(Reference::class, $arg0);
+        self::assertSame('app.custom_bus', (string) $arg0);
     }
 }

@@ -8,8 +8,9 @@
 # harness only PROVISIONS the server and then runs `phpunit --group jobs-live` inside the container,
 # so the PHPUnit live tests ARE the end-to-end check. They prove:
 #   1. an HTTP request dispatches an #[AsJob] message; the jobs pool consumes the enveloped task, the
-#      JobRoutingListener rehydrates it via the Native serializer, and the #[AsJobHandler] runs with a
-#      real object carrying the exact token (observable at /app/var/handled.json);
+#      JobRoutingListener rehydrates it via the Native serializer and dispatches it into Symfony
+#      Messenger, and the #[AsMessageHandler] runs with a real object carrying the exact token
+#      (observable at /app/var/handled.json);
 #   2. a RAW, non-enveloped task pushed directly via the RR Jobs API still reaches a plain
 #      JobsRunEvent listener (the bus is additive);
 #   3. a successful task is consumed and acked EXACTLY ONCE (no erroneous redelivery).
@@ -89,6 +90,7 @@ cat > "$CTX/app/composer.json" <<'JSON'
         "php": ">=8.4",
         "fluffydiscord/roadrunner-symfony-bundle": "*",
         "symfony/framework-bundle": "^7.4 || ^8",
+        "symfony/messenger": "^7.4 || ^8",
         "symfony/runtime": "^7.4 || ^8",
         "symfony/yaml": "^7.4 || ^8"
     },
@@ -127,11 +129,11 @@ cat > "$CTX/app/src/PingHandler.php" <<'PHP'
 <?php
 namespace App;
 
-use FluffyDiscord\RoadRunnerBundle\Job\Attribute\AsJobHandler;
+use Symfony\Component\Messenger\Attribute\AsMessageHandler;
 
 final class PingHandler
 {
-    #[AsJobHandler]
+    #[AsMessageHandler]
     public function __invoke(Ping $message): void
     {
         file_put_contents('/app/var/handled.json', json_encode([
@@ -160,11 +162,11 @@ cat > "$CTX/app/src/CountPingHandler.php" <<'PHP'
 <?php
 namespace App;
 
-use FluffyDiscord\RoadRunnerBundle\Job\Attribute\AsJobHandler;
+use Symfony\Component\Messenger\Attribute\AsMessageHandler;
 
 final class CountPingHandler
 {
-    #[AsJobHandler]
+    #[AsMessageHandler]
     public function __invoke(CountPing $message): void
     {
         $file = '/app/var/count-' . $message->token . '.txt';
@@ -255,7 +257,7 @@ class Kernel extends BaseKernel
             'php_errors' => ['log' => true],
         ]);
 
-        // Register App services with autoconfigure so #[AsJobHandler] / #[AsEventListener] are wired.
+        // Register App services with autoconfigure so #[AsMessageHandler] / #[AsEventListener] are wired.
         $services = $c->services()->defaults()->autowire()->autoconfigure();
         $services->set(PingHandler::class);
         $services->set(CountPingHandler::class);

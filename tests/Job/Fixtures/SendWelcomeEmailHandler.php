@@ -2,12 +2,12 @@
 
 namespace FluffyDiscord\RoadRunnerBundle\Tests\Job\Fixtures;
 
-use FluffyDiscord\RoadRunnerBundle\Job\Attribute\AsJobHandler;
+use Symfony\Component\Messenger\Attribute\AsMessageHandler;
 
 /**
- * Invokable handler whose message type is inferred from the __invoke first parameter.
+ * Standard Symfony Messenger handler; the Jobs message bus routes #[AsJob] messages to it.
  */
-#[AsJobHandler]
+#[AsMessageHandler]
 final class SendWelcomeEmailHandler
 {
     /** @var list<SendWelcomeEmail> */

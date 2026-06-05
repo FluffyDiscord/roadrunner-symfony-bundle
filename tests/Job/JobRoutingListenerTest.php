@@ -4,9 +4,9 @@ namespace FluffyDiscord\RoadRunnerBundle\Tests\Job;
 
 use FluffyDiscord\RoadRunnerBundle\Event\Worker\Jobs\JobsRunEvent;
 use FluffyDiscord\RoadRunnerBundle\Job\EventListener\JobRoutingListener;
-use FluffyDiscord\RoadRunnerBundle\Job\Exception\JobHandlerException;
 use FluffyDiscord\RoadRunnerBundle\Job\Exception\JobSerializationException;
 use FluffyDiscord\RoadRunnerBundle\Job\JobEnvelope;
+use FluffyDiscord\RoadRunnerBundle\Job\Serializer\IgbinaryJobSerializer;
 use FluffyDiscord\RoadRunnerBundle\Job\Serializer\JobSerializerInterface;
 use FluffyDiscord\RoadRunnerBundle\Job\Serializer\NativeJobSerializer;
 use FluffyDiscord\RoadRunnerBundle\Job\Serializer\SymfonyJobSerializer;
@@ -15,29 +15,26 @@ use FluffyDiscord\RoadRunnerBundle\Tests\Job\Fixtures\Address;
 use FluffyDiscord\RoadRunnerBundle\Tests\Job\Fixtures\EnvelopeTask;
 use FluffyDiscord\RoadRunnerBundle\Tests\Job\Fixtures\SendWelcomeEmail;
 use FluffyDiscord\RoadRunnerBundle\Tests\Job\Fixtures\SendWelcomeEmailHandler;
+use Psr\Log\AbstractLogger;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Spiral\RoadRunner\Jobs\Task\ReceivedTaskInterface;
-use Symfony\Component\DependencyInjection\ServiceLocator;
+use Symfony\Component\Messenger\Envelope;
+use Symfony\Component\Messenger\Exception\HandlerFailedException;
+use Symfony\Component\Messenger\Handler\HandlerDescriptor;
+use Symfony\Component\Messenger\Handler\HandlersLocator;
+use Symfony\Component\Messenger\MessageBus;
+use Symfony\Component\Messenger\MessageBusInterface;
+use Symfony\Component\Messenger\Middleware\HandleMessageMiddleware;
+use Symfony\Component\Messenger\Middleware\SendMessageMiddleware;
+use Symfony\Component\Messenger\Stamp\ReceivedStamp;
+use Symfony\Component\Messenger\Transport\Sender\SenderInterface;
+use Symfony\Component\Messenger\Transport\Sender\SendersLocatorInterface;
 use Symfony\Component\Serializer\Encoder\JsonEncoder;
 use Symfony\Component\Serializer\Normalizer\PropertyNormalizer;
 use Symfony\Component\Serializer\Serializer;
 
 class JobRoutingListenerTest extends BaseTestCase
 {
-    /**
-     * @param array<class-string, list<array{0: string, 1: string, 2: int}>> $table
-     * @param array<string, object>                                          $services
-     * @param array<non-empty-string, JobSerializerInterface>                $serializers
-     */
-    private function listener(array $table, array $services, array $serializers): JobRoutingListener
-    {
-        $locator = new ServiceLocator(array_map(
-            static fn (object $svc): \Closure => static fn (): object => $svc,
-            $services,
-        ));
-
-        return new JobRoutingListener($locator, $table, $serializers);
-    }
-
     private function native(): JobSerializerInterface
     {
         return new NativeJobSerializer();
@@ -49,118 +46,40 @@ class JobRoutingListenerTest extends BaseTestCase
     }
 
     /**
-     * @param array<non-empty-string, array<string>> $extraHeaders
+     * @return array<non-empty-string, JobSerializerInterface>
      */
-    private function task(string $payload, array $extraHeaders): ReceivedTaskInterface
+    private function serializers(): array
     {
-        return new EnvelopeTask(
-            name: SendWelcomeEmail::class,
-            payload: $payload,
-            headers: $extraHeaders,
-        );
+        return [
+            'native' => $this->native(),
+            'igbinary' => new IgbinaryJobSerializer(),
+            'symfony' => $this->symfony(),
+        ];
     }
 
-    public function testEnvelopedTaskInvokesHandlerWithRehydratedMessage(): void
+    /**
+     * @param array<class-string, list<HandlerDescriptor>> $handlers
+     */
+    private function bus(array $handlers): MessageBusInterface
     {
-        $serializer = $this->native();
-        $handler = new SendWelcomeEmailHandler();
-        $message = new SendWelcomeEmail(email: 'a@b.test', attempts: 4, tags: ['x'], address: new Address('Brno', '60200'));
-
-        $envelope = new JobEnvelope(SendWelcomeEmail::class, $serializer->name(), $serializer->serialize($message));
-        $task = $this->task($envelope->payload, $envelope->toHeaders());
-
-        $listener = $this->listener(
-            [SendWelcomeEmail::class => [[SendWelcomeEmailHandler::class, '__invoke', 0]]],
-            [SendWelcomeEmailHandler::class => $handler],
-            ['native' => $serializer],
-        );
-
-        $listener->onJobsRun(new JobsRunEvent($task));
-
-        self::assertCount(1, $handler->received);
-        self::assertSame('a@b.test', $handler->received[0]->email);
-        self::assertSame(4, $handler->received[0]->getAttempts());
-        self::assertInstanceOf(Address::class, $handler->received[0]->address);
-        self::assertSame('60200', $handler->received[0]->address->getZip());
-        self::assertFalse($task->isCompleted(), 'listener must not ack/nack the task');
-    }
-
-    public function testNonEnvelopedTaskIsIgnored(): void
-    {
-        $handler = new SendWelcomeEmailHandler();
-        $task = $this->task('raw-payload', []);
-
-        $listener = $this->listener(
-            [SendWelcomeEmail::class => [[SendWelcomeEmailHandler::class, '__invoke', 0]]],
-            [SendWelcomeEmailHandler::class => $handler],
-            ['native' => new NativeJobSerializer()],
-        );
-
-        $listener->onJobsRun(new JobsRunEvent($task));
-
-        self::assertSame([], $handler->received);
-        self::assertFalse($task->isCompleted());
-    }
-
-    public function testUnknownSerializerThrows(): void
-    {
-        $task = $this->task('payload', [
-            JobEnvelope::HEADER_CLASS => [SendWelcomeEmail::class],
-            JobEnvelope::HEADER_SERIALIZER => ['nonexistent'],
+        return new MessageBus([
+            new HandleMessageMiddleware(new HandlersLocator($handlers)),
         ]);
-
-        $listener = $this->listener([], [], []);
-
-        $this->expectException(JobSerializationException::class);
-        $listener->onJobsRun(new JobsRunEvent($task));
     }
 
-    public function testValidEnvelopeWithoutHandlerIsNoOp(): void
+    /**
+     * @param array<non-empty-string, array<string>> $headers
+     */
+    private function task(string $payload, array $headers): ReceivedTaskInterface
     {
-        $serializer = $this->native();
-        $envelope = new JobEnvelope(SendWelcomeEmail::class, 'native', $serializer->serialize(new SendWelcomeEmail()));
-        $task = $this->task($envelope->payload, $envelope->toHeaders());
-
-        $listener = $this->listener([], [], ['native' => $serializer]);
-
-        $listener->onJobsRun(new JobsRunEvent($task));
-
-        self::assertFalse($task->isCompleted());
-        $this->addToAssertionCount(1);
+        return new EnvelopeTask(name: SendWelcomeEmail::class, payload: $payload, headers: $headers);
     }
 
-    public function testHandlerFailureIsWrappedInJobHandlerExceptionWithOriginalAsPrevious(): void
+    private function enveloped(SendWelcomeEmail $message, JobSerializerInterface $serializer): ReceivedTaskInterface
     {
-        $serializer = $this->native();
-        $original = new \RuntimeException('boom from handler');
-        $handler = new class($original) {
-            public function __construct(private readonly \Throwable $toThrow)
-            {
-            }
+        $envelope = new JobEnvelope(SendWelcomeEmail::class, $serializer->name(), $serializer->serialize($message));
 
-            public function __invoke(SendWelcomeEmail $message): void
-            {
-                throw $this->toThrow;
-            }
-        };
-
-        $envelope = new JobEnvelope(SendWelcomeEmail::class, $serializer->name(), $serializer->serialize(new SendWelcomeEmail()));
-        $task = $this->task($envelope->payload, $envelope->toHeaders());
-
-        $listener = $this->listener(
-            [SendWelcomeEmail::class => [['throwing_handler', '__invoke', 0]]],
-            ['throwing_handler' => $handler],
-            ['native' => $serializer],
-        );
-
-        try {
-            $listener->onJobsRun(new JobsRunEvent($task));
-            self::fail('Expected JobHandlerException.');
-        } catch (JobHandlerException $e) {
-            self::assertSame($original, $e->getPrevious());
-            self::assertStringContainsString('throwing_handler::__invoke', $e->getMessage());
-            self::assertStringContainsString(SendWelcomeEmail::class, $e->getMessage());
-        }
+        return $this->task($envelope->payload, $envelope->toHeaders());
     }
 
     /**
@@ -175,27 +94,171 @@ class JobRoutingListenerTest extends BaseTestCase
     /**
      * @param 'native'|'symfony' $strategy
      */
-    #[\PHPUnit\Framework\Attributes\DataProvider('serializerProvider')]
-    public function testRoundTripThroughBothStrategies(string $strategy): void
+    #[DataProvider('serializerProvider')]
+    public function testEnvelopedTaskIsDispatchedToHandler(string $strategy): void
     {
         $serializer = $strategy === 'native' ? $this->native() : $this->symfony();
         $handler = new SendWelcomeEmailHandler();
-        $message = new SendWelcomeEmail(email: 'round@trip.test', attempts: 7, tags: ['a', 'b']);
+        $message = new SendWelcomeEmail(email: 'a@b.test', attempts: 4, tags: ['x'], address: new Address('Brno', '60200'));
 
-        $envelope = new JobEnvelope(SendWelcomeEmail::class, $serializer->name(), $serializer->serialize($message));
-        $task = $this->task($envelope->payload, $envelope->toHeaders());
+        $task = $this->enveloped($message, $serializer);
+        $bus = $this->bus([SendWelcomeEmail::class => [new HandlerDescriptor($handler)]]);
 
-        $listener = $this->listener(
-            [SendWelcomeEmail::class => [[SendWelcomeEmailHandler::class, '__invoke', 0]]],
-            [SendWelcomeEmailHandler::class => $handler],
-            ['native' => new NativeJobSerializer(), 'symfony' => $this->symfony()],
-        );
-
-        $listener->onJobsRun(new JobsRunEvent($task));
+        (new JobRoutingListener($bus, $this->serializers()))->onJobsRun(new JobsRunEvent($task));
 
         self::assertCount(1, $handler->received);
-        self::assertSame('round@trip.test', $handler->received[0]->email);
-        self::assertSame(7, $handler->received[0]->getAttempts());
-        self::assertSame(['a', 'b'], $handler->received[0]->tags);
+        self::assertSame('a@b.test', $handler->received[0]->email);
+        self::assertSame(4, $handler->received[0]->getAttempts());
+        self::assertInstanceOf(Address::class, $handler->received[0]->address);
+        self::assertSame('60200', $handler->received[0]->address->getZip());
+        self::assertFalse($task->isCompleted(), 'listener must not ack/nack the task');
+    }
+
+    public function testNonEnvelopedTaskIsIgnored(): void
+    {
+        $handler = new SendWelcomeEmailHandler();
+        $task = $this->task('raw-payload', []);
+        $bus = $this->bus([SendWelcomeEmail::class => [new HandlerDescriptor($handler)]]);
+
+        (new JobRoutingListener($bus, $this->serializers()))->onJobsRun(new JobsRunEvent($task));
+
+        self::assertSame([], $handler->received);
+        self::assertFalse($task->isCompleted());
+    }
+
+    public function testNoHandlerIsAckedAsNoOpAndWarned(): void
+    {
+        $task = $this->enveloped(new SendWelcomeEmail(), $this->native());
+        $bus = $this->bus([]); // empty HandlersLocator → NoHandlerForMessageException
+
+        $logger = new class extends AbstractLogger {
+            /** @var list<string> */
+            public array $warnings = [];
+
+            public function log($level, string|\Stringable $message, array $context = []): void
+            {
+                if ($level === 'warning') {
+                    $this->warnings[] = (string) $message;
+                }
+            }
+        };
+
+        (new JobRoutingListener($bus, $this->serializers(), $logger))->onJobsRun(new JobsRunEvent($task));
+
+        self::assertCount(1, $logger->warnings);
+        self::assertFalse($task->isCompleted(), 'no-handler must not nack the task');
+
+        // logger null → still no throw
+        (new JobRoutingListener($bus, $this->serializers()))->onJobsRun(new JobsRunEvent($task));
+        $this->addToAssertionCount(1);
+    }
+
+    public function testHandlerFailurePropagatesAsHandlerFailedException(): void
+    {
+        $original = new \RuntimeException('boom from handler');
+        $handler = static function (SendWelcomeEmail $message) use ($original): void {
+            throw $original;
+        };
+
+        $task = $this->enveloped(new SendWelcomeEmail(), $this->native());
+        $bus = $this->bus([SendWelcomeEmail::class => [new HandlerDescriptor($handler)]]);
+
+        try {
+            (new JobRoutingListener($bus, $this->serializers()))->onJobsRun(new JobsRunEvent($task));
+            self::fail('Expected HandlerFailedException.');
+        } catch (HandlerFailedException $e) {
+            self::assertSame($original, $e->getPrevious());
+            self::assertFalse($task->isCompleted(), 'listener must not ack a failed task');
+        }
+    }
+
+    public function testUnknownSerializerThrows(): void
+    {
+        $task = $this->task('payload', [
+            JobEnvelope::HEADER_CLASS => [SendWelcomeEmail::class],
+            JobEnvelope::HEADER_SERIALIZER => ['nonexistent'],
+        ]);
+
+        $this->expectException(JobSerializationException::class);
+        (new JobRoutingListener($this->bus([]), $this->serializers()))->onJobsRun(new JobsRunEvent($task));
+    }
+
+    public function testRegistryKeysMatchSerializerNames(): void
+    {
+        foreach ($this->serializers() as $key => $serializer) {
+            self::assertSame($serializer->name(), $key, 'registry key must equal serializer name()');
+        }
+    }
+
+    public function testHandlerReceivesRawTaskAndFromTransportScoping(): void
+    {
+        $received = [];
+        $handler = static function (SendWelcomeEmail $message, ReceivedTaskInterface $task) use (&$received): void {
+            $received[] = $task;
+        };
+
+        // Matching from_transport → handler runs and gets the task.
+        $task = $this->enveloped(new SendWelcomeEmail(), $this->native());
+        $matching = $this->bus([
+            SendWelcomeEmail::class => [new HandlerDescriptor($handler, ['from_transport' => JobRoutingListener::TRANSPORT_NAME])],
+        ]);
+        (new JobRoutingListener($matching, $this->serializers()))->onJobsRun(new JobsRunEvent($task));
+
+        self::assertCount(1, $received);
+        self::assertSame($task, $received[0], 'handler must receive the current ReceivedTaskInterface');
+
+        // Mismatching from_transport → no handler matches → no-op (no throw, task not completed).
+        $received = [];
+        $other = $this->bus([
+            SendWelcomeEmail::class => [new HandlerDescriptor($handler, ['from_transport' => 'something-else'])],
+        ]);
+        $task2 = $this->enveloped(new SendWelcomeEmail(), $this->native());
+        (new JobRoutingListener($other, $this->serializers()))->onJobsRun(new JobsRunEvent($task2));
+
+        self::assertSame([], $received, 'a mismatched from_transport handler must not run');
+        self::assertFalse($task2->isCompleted());
+    }
+
+    public function testReceivedStampPreventsReSendToTransport(): void
+    {
+        $handler = new SendWelcomeEmailHandler();
+
+        $spySender = new class implements SenderInterface {
+            public int $sent = 0;
+
+            public function send(Envelope $envelope): Envelope
+            {
+                ++$this->sent;
+
+                return $envelope;
+            }
+        };
+
+        $sendersLocator = new class ($spySender) implements SendersLocatorInterface {
+            public function __construct(private readonly SenderInterface $sender)
+            {
+            }
+
+            public function getSenders(Envelope $envelope): iterable
+            {
+                // Would route every message to the spy sender — unless a ReceivedStamp is present.
+                if ($envelope->last(ReceivedStamp::class) !== null) {
+                    return [];
+                }
+
+                yield 'spy' => $this->sender;
+            }
+        };
+
+        $bus = new MessageBus([
+            new SendMessageMiddleware($sendersLocator),
+            new HandleMessageMiddleware(new HandlersLocator([SendWelcomeEmail::class => [new HandlerDescriptor($handler)]])),
+        ]);
+
+        $task = $this->enveloped(new SendWelcomeEmail(email: 'stamp@test'), $this->native());
+        (new JobRoutingListener($bus, $this->serializers()))->onJobsRun(new JobsRunEvent($task));
+
+        self::assertSame(0, $spySender->sent, 'ReceivedStamp must prevent re-sending to a transport');
+        self::assertCount(1, $handler->received, 'the message must be handled locally instead');
     }
 }
