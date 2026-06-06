@@ -24,7 +24,7 @@ use Temporal\Exception\Client\WorkflowFailedException;
  * worker-side implementations of this namespace's Workflow\* contracts) and then invokes
  * `phpunit --group temporal-live` inside the container — so these assertions ARE the live check.
  *
- * Required environment (see docs/specs/temporal-io-integration.md §7):
+ * Required environment:
  *   1. A reachable Temporal server on 127.0.0.1:7233 (TEMPORAL_ADDRESS overrides the host:port).
  *   2. A RoadRunner `temporal` worker polling the "default" task queue with this namespace's
  *      Workflow\* contracts implemented + assigned via #[TaskQueue('default')].
@@ -51,7 +51,7 @@ class TemporalLiveTest extends BaseTestCase
         parent::setUp();
 
         if (!self::liveEnabled()) {
-            $this->markTestSkipped('Live Temporal tests require TEMPORAL_LIVE=1 and a provisioned Temporal server + RoadRunner temporal worker. See docs/specs/temporal-io-integration.md §7.');
+            $this->markTestSkipped('Live Temporal tests require TEMPORAL_LIVE=1 and a provisioned Temporal server + RoadRunner temporal worker. See tests/docker-validate-temporal.sh.');
         }
 
         if (!class_exists(WorkflowClient::class)) {

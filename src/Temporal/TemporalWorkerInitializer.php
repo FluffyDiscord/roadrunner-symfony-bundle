@@ -33,7 +33,7 @@ class TemporalWorkerInitializer
         #[Autowire(service: 'services_resetter')]
         private readonly ServicesResetterInterface     $servicesResetter,
 
-        #[AutowireIterator('fluffydiscord.roadrunner.temporal.worker')]
+        #[AutowireIterator('fluffy_discord.roadrunner.temporal.worker')]
         private readonly iterable                      $workers,
 
         private readonly ExceptionInterceptorInterface $exceptionInterceptor,

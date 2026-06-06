@@ -2,7 +2,7 @@
 
 > Temporal support is in **beta** — the DX is still being explored and the API may change until it settles.
 
-Developer guide for using [Temporal](https://learn.temporal.io/getting_started/php/) with this bundle: defining activities and workflows, assigning them to workers, configuring the integration, starting workflows, and reacting to interceptor events. For the integration internals and the live-test setup, see [`specs/temporal-io-integration.md`](specs/temporal-io-integration.md).
+Developer guide for using [Temporal](https://learn.temporal.io/getting_started/php/) with this bundle: defining activities and workflows, assigning them to workers, configuring the integration, starting workflows, and reacting to interceptor events.
 
 ## 1. Install
 
@@ -219,7 +219,7 @@ Set `temporal.tracing: true` to register the bundle's `TemporalTracingListener` 
 - adds Sentry breadcrumbs when Sentry is installed, and
 - propagates a correlation id (the request's `X-Request-Id`, else a generated one) into every started workflow's header under `x-correlation-id`, so a workflow run can be tied back to the request that started it.
 
-It is built on the interceptor events (§8), so you can write your own listener instead for full control.
+It is built on the interceptor events (§8), so you can write your own listener instead — or replace the bundle's by overriding the `TemporalTracingListener` service id — for full control.
 
 ## 10. Profiler
 
@@ -317,5 +317,7 @@ The bundle adds two commands that read the compile-time registration map (no Tem
 
 - `temporal:debug` — registered workflows/activities per task queue, with each workflow's declared stubs and their resolved options.
 - `temporal:diagram` — a Mermaid `flowchart` of workflow → activity edges (`--output <file>` to write it).
+
+Both commands and the profiler collector (§10) read that map through `TemporalIntrospectorInterface` — decorate or replace that service to change what they report.
 
 Misconfigured stubs (a typed property, a missing/unparseable timeout, an unknown activity, or a workflow with `#[ActivityStub]`s but no `AbstractWorkflow`/`HasActivityStubs`) fail the **container build** with a clear message — no separate validation command is needed.

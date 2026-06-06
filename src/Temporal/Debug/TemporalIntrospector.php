@@ -13,9 +13,9 @@ use Temporal\Internal\Declaration\Reader\WorkflowReader;
  * Compile-time view of the registered Temporal workflows/activities and their declared stubs.
  * Reads the registration map and reflection only — it never opens a Temporal connection.
  *
- * @phpstan-type StubRow array{property: string, typed: bool, activity: string, activityShort: string, resolvedQueue: string, startToClose: string, hasCloseTimeout: bool, retry: string, stub: ActivityStub}
+ * @phpstan-import-type StubRow from TemporalIntrospectorInterface
  */
-final class TemporalIntrospector
+final class TemporalIntrospector implements TemporalIntrospectorInterface
 {
     private ?WorkflowReader $workflowReader = null;
     private ?ActivityReader $activityReader = null;
@@ -109,6 +109,12 @@ final class TemporalIntrospector
         } catch (\Throwable) {
             return [];
         }
+    }
+
+    /** @return list<array{class: class-string, taskQueue: string}> */
+    public function workerSummaries(): array
+    {
+        return $this->initializer->getWorkerSummaries();
     }
 
     public static function shortName(string $fqcn): string

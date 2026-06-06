@@ -2,7 +2,7 @@
 
 namespace FluffyDiscord\RoadRunnerBundle\Tests\Temporal;
 
-use FluffyDiscord\RoadRunnerBundle\DependencyInjection\FluffyDiscordRoadRunnerExtension;
+use FluffyDiscord\RoadRunnerBundle\DependencyInjection\Compiler\TemporalWorkerPass;
 use FluffyDiscord\RoadRunnerBundle\Exception\InvalidActivityStubException;
 use FluffyDiscord\RoadRunnerBundle\Temporal\TemporalWorkerInitializer;
 use FluffyDiscord\RoadRunnerBundle\Tests\BaseTestCase;
@@ -22,7 +22,7 @@ class ActivityStubValidationTest extends BaseTestCase
         $container->setDefinition(TemporalWorkerInitializer::class, new Definition(TemporalWorkerInitializer::class));
         $container->setDefinition($workflowClass, new Definition($workflowClass));
 
-        (new FluffyDiscordRoadRunnerExtension())->process($container);
+        (new TemporalWorkerPass())->process($container);
 
         return $container;
     }
@@ -31,7 +31,7 @@ class ActivityStubValidationTest extends BaseTestCase
     {
         $container = $this->process(StubGoodWorkflow::class);
 
-        self::assertTrue($container->getDefinition(StubGoodWorkflow::class)->hasTag('fluffydiscord.roadrunner.temporal.workflow'));
+        self::assertTrue($container->getDefinition(StubGoodWorkflow::class)->hasTag('fluffy_discord.roadrunner.temporal.workflow'));
     }
 
     public function testTypedStubPropertyFails(): void

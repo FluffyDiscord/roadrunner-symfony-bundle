@@ -3,6 +3,7 @@
 namespace FluffyDiscord\RoadRunnerBundle\Command;
 
 use FluffyDiscord\RoadRunnerBundle\Temporal\Debug\TemporalIntrospector;
+use FluffyDiscord\RoadRunnerBundle\Temporal\Debug\TemporalIntrospectorInterface;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -14,7 +15,7 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 final class TemporalDiagramCommand extends Command
 {
     public function __construct(
-        private readonly TemporalIntrospector $introspector,
+        private readonly TemporalIntrospectorInterface $introspector,
     )
     {
         parent::__construct();

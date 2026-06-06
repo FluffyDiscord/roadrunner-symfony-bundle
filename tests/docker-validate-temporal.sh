@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Real end-to-end live validation of the Temporal.io integration (docs/specs/temporal-io-integration.md §6.2 IT-01..IT-05).
+# Real end-to-end live validation of the Temporal.io integration (workflow + activity, interceptors, failure propagation).
 #
 # Builds a minimal Symfony app on top of this bundle that IMPLEMENTS the bundle's committed
 # Workflow\* live contracts (tests/Temporal/Live/Workflow/*) and assigns each impl to the "default"

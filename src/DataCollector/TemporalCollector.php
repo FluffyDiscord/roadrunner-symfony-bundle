@@ -2,13 +2,10 @@
 
 namespace FluffyDiscord\RoadRunnerBundle\DataCollector;
 
-use FluffyDiscord\RoadRunnerBundle\Temporal\TemporalWorkerInitializer;
-use Spiral\Attributes\AttributeReader;
+use FluffyDiscord\RoadRunnerBundle\Temporal\Debug\TemporalIntrospectorInterface;
 use Symfony\Bundle\FrameworkBundle\DataCollector\AbstractDataCollector;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
-use Temporal\Internal\Declaration\Reader\ActivityReader;
-use Temporal\Internal\Declaration\Reader\WorkflowReader;
 
 /**
  * @phpstan-type CollectorEntry array{class: string, ids: list<string>, taskQueues: list<string>}
@@ -18,25 +15,25 @@ use Temporal\Internal\Declaration\Reader\WorkflowReader;
 final class TemporalCollector extends AbstractDataCollector
 {
     public function __construct(
-        private readonly TemporalWorkerInitializer $temporalWorkerInitializer,
+        private readonly TemporalIntrospectorInterface $introspector,
     )
     {
     }
 
     public function collect(Request $request, Response $response, ?\Throwable $exception = null): void
     {
-        $workflowsByQueue = $this->temporalWorkerInitializer->getRegisteredWorkflows();
-        $activitiesByQueue = $this->temporalWorkerInitializer->getRegisteredActivities();
-
-        $reader = new AttributeReader();
-        $workflowReader = new WorkflowReader($reader);
-        $activityReader = new ActivityReader($reader);
+        $workflowsByQueue = $this->introspector->workflowsByQueue();
+        $activitiesByQueue = $this->introspector->activitiesByQueue();
 
         /** @var array<class-string, list<string>> $workflowIds */
         $workflowIds = [];
         foreach ($workflowsByQueue as $classes) {
             foreach ($classes as $class) {
-                $workflowIds[$class] ??= $this->workflowIds($workflowReader, $class);
+                if (isset($workflowIds[$class])) {
+                    continue;
+                }
+                $id = $this->introspector->workflowId($class);
+                $workflowIds[$class] = $id === null ? [] : [$id];
             }
         }
 
@@ -44,13 +41,13 @@ final class TemporalCollector extends AbstractDataCollector
         $activityIds = [];
         foreach ($activitiesByQueue as $classes) {
             foreach ($classes as $class) {
-                $activityIds[$class] ??= $this->activityIds($activityReader, $class);
+                $activityIds[$class] ??= $this->introspector->activityIds($class);
             }
         }
 
         /** @var list<CollectorWorker> $workers */
         $workers = [];
-        foreach ($this->temporalWorkerInitializer->getWorkerSummaries() as $summary) {
+        foreach ($this->introspector->workerSummaries() as $summary) {
             $taskQueue = $summary['taskQueue'];
             $workers[] = [
                 'class'      => $summary['class'],
@@ -109,35 +106,6 @@ final class TemporalCollector extends AbstractDataCollector
         }
 
         return $result;
-    }
-
-    /**
-     * @param class-string $class
-     * @return list<string>
-     */
-    private function workflowIds(WorkflowReader $reader, string $class): array
-    {
-        try {
-            return [$reader->fromClass($class)->getID()];
-        } catch (\Throwable) {
-            return [];
-        }
-    }
-
-    /**
-     * @param class-string $class
-     * @return list<string>
-     */
-    private function activityIds(ActivityReader $reader, string $class): array
-    {
-        try {
-            return array_values(array_map(
-                static fn ($prototype) => $prototype->getID(),
-                $reader->fromClass($class),
-            ));
-        } catch (\Throwable) {
-            return [];
-        }
     }
 
     /**
