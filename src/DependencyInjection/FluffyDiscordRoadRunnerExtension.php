@@ -7,6 +7,7 @@ use FluffyDiscord\RoadRunnerBundle\Attribute\AsCentrifugoRpcListener;
 use FluffyDiscord\RoadRunnerBundle\Cache\KVCacheAdapter;
 use FluffyDiscord\RoadRunnerBundle\Exception\ActivityNotAssignedException;
 use FluffyDiscord\RoadRunnerBundle\Exception\CacheAutoRegisterException;
+use FluffyDiscord\RoadRunnerBundle\Exception\InvalidActivityStubException;
 use FluffyDiscord\RoadRunnerBundle\Exception\InvalidRPCConfigurationException;
 use FluffyDiscord\RoadRunnerBundle\Exception\TemporalAddressException;
 use FluffyDiscord\RoadRunnerBundle\Exception\WorkflowNotAssignedException;
@@ -24,6 +25,9 @@ use FluffyDiscord\RoadRunnerBundle\Temporal\Interceptor\Event\WorkflowOutboundCa
 use FluffyDiscord\RoadRunnerBundle\Temporal\TemporalWorkerInitializer;
 use FluffyDiscord\RoadRunnerBundle\Temporal\TemporalWorkerInterface;
 use FluffyDiscord\RoadRunnerBundle\Temporal\Tracing\TemporalTracingListener;
+use FluffyDiscord\RoadRunnerBundle\Temporal\Workflow\AbstractWorkflow;
+use FluffyDiscord\RoadRunnerBundle\Temporal\Workflow\ActivityStubReader;
+use FluffyDiscord\RoadRunnerBundle\Temporal\Workflow\HasActivityStubs;
 use FluffyDiscord\RoadRunnerBundle\Worker\CentrifugoWorker;
 use FluffyDiscord\RoadRunnerBundle\Worker\HttpWorker;
 use FluffyDiscord\RoadRunnerBundle\Worker\JobsWorker;
@@ -47,6 +51,7 @@ use Temporal\Activity\ActivityInterface;
 use Temporal\Client\ClientOptions;
 use Temporal\Client\GRPC\ServiceClientInterface;
 use Temporal\Exception\ExceptionInterceptor;
+use Temporal\Internal\Support\DateInterval;
 use Temporal\Worker\ServiceCredentials;
 use Temporal\Worker\WorkerFactoryInterface;
 use Temporal\Workflow\WorkflowInterface;
@@ -311,6 +316,8 @@ class FluffyDiscordRoadRunnerExtension extends Extension implements CompilerPass
                 $workerInitializer->addMethodCall('addWorkflow', [$class, $taskQueues]);
 
                 $definition->addTag('fluffydiscord.roadrunner.temporal.workflow', ['taskQueues' => $taskQueues]);
+
+                $this->validateActivityStubs($class, $reflectionClass);
             }
 
             foreach ($taskQueues as $taskQueue) {
@@ -319,6 +326,56 @@ class FluffyDiscordRoadRunnerExtension extends Extension implements CompilerPass
         }
 
         $this->registerAutoWorkers($container, array_keys($allTaskQueues), $coveredQueues);
+    }
+
+    /**
+     * @param class-string             $class
+     * @param \ReflectionClass<object> $reflectionClass
+     */
+    private function validateActivityStubs(string $class, \ReflectionClass $reflectionClass): void
+    {
+        $pairs = ActivityStubReader::pairs($reflectionClass);
+        if ($pairs === []) {
+            return;
+        }
+
+        if (!is_subclass_of($class, AbstractWorkflow::class) && !method_exists($class, 'initActivityStubs')) {
+            throw new InvalidActivityStubException(sprintf(
+                'Workflow "%s" has #[ActivityStub] properties but neither extends %s nor uses the %s trait, so its stubs are never hydrated.',
+                $class, AbstractWorkflow::class, HasActivityStubs::class,
+            ));
+        }
+
+        foreach ($pairs as [$property, $stub]) {
+            $where = sprintf('%s::$%s', $class, $property->getName());
+
+            if ($property->hasType()) {
+                throw new InvalidActivityStubException(sprintf(
+                    'Activity stub property %s must be untyped (the SDK ActivityProxy does not implement %s); use a "/** @var %s */" docblock for the IDE instead.',
+                    $where, $stub->activity, $stub->activity,
+                ));
+            }
+
+            if ($stub->startToClose === null && $stub->scheduleToClose === null) {
+                throw new InvalidActivityStubException(sprintf('Activity stub %s must set startToClose or scheduleToClose.', $where));
+            }
+
+            if (!class_exists($stub->activity) && !interface_exists($stub->activity)) {
+                throw new InvalidActivityStubException(sprintf('Activity stub %s references unknown activity "%s".', $where, $stub->activity));
+            }
+
+            foreach ([$stub->startToClose, $stub->scheduleToClose, $stub->scheduleToStart, $stub->heartbeat, $stub->retryInitialInterval, $stub->retryMaxInterval] as $duration) {
+                if (!is_string($duration)) {
+                    continue;
+                }
+
+                try {
+                    DateInterval::parse($duration, DateInterval::FORMAT_SECONDS);
+                } catch (\Throwable $throwable) {
+                    throw new InvalidActivityStubException(sprintf('Activity stub %s has an unparseable duration "%s": %s', $where, $duration, $throwable->getMessage()));
+                }
+            }
+        }
     }
 
     /**

@@ -2,7 +2,12 @@
 
 namespace Symfony\Component\DependencyInjection\Loader\Configurator;
 
+use FluffyDiscord\RoadRunnerBundle\Command\TemporalDebugCommand;
+use FluffyDiscord\RoadRunnerBundle\Command\TemporalDiagramCommand;
 use FluffyDiscord\RoadRunnerBundle\DataCollector\TemporalCollector;
+use FluffyDiscord\RoadRunnerBundle\Temporal\Client\WorkflowLauncher;
+use FluffyDiscord\RoadRunnerBundle\Temporal\Client\WorkflowLauncherInterface;
+use FluffyDiscord\RoadRunnerBundle\Temporal\Debug\TemporalIntrospector;
 use FluffyDiscord\RoadRunnerBundle\Factory\RPCConnectionFactory;
 use FluffyDiscord\RoadRunnerBundle\Temporal\Client\TemporalClientFactory;
 use FluffyDiscord\RoadRunnerBundle\Temporal\DefaultTemporalWorker;
@@ -238,4 +243,27 @@ return static function (ContainerConfigurator $container): void {
         ])
     ;
     $services->alias(ScheduleClientInterface::class, ScheduleClient::class)->public();
+
+    $services
+        ->set(WorkflowLauncher::class)
+        ->autowire()
+    ;
+    $services->alias(WorkflowLauncherInterface::class, WorkflowLauncher::class);
+
+    $services
+        ->set(TemporalIntrospector::class)
+        ->autowire()
+    ;
+
+    $services
+        ->set(TemporalDebugCommand::class)
+        ->autowire()
+        ->autoconfigure()
+    ;
+
+    $services
+        ->set(TemporalDiagramCommand::class)
+        ->autowire()
+        ->autoconfigure()
+    ;
 };

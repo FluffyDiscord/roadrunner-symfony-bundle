@@ -224,3 +224,98 @@ It is built on the interceptor events (§8), so you can write your own listener 
 ## 10. Profiler
 
 When the Symfony profiler is enabled, a data-collector tab lists the registered workers, workflows, and activities per task queue. The data comes from the compile-time registration map, so opening the profiler does not open a Temporal/RPC connection.
+
+## 11. Declarative activity stubs
+
+Instead of building activity stubs by hand in the workflow constructor, declare them with `#[ActivityStub]` and let the bundle hydrate them before the workflow runs:
+
+```php
+use FluffyDiscord\RoadRunnerBundle\Temporal\Attribute\ActivityStub;
+use FluffyDiscord\RoadRunnerBundle\Temporal\Attribute\TaskQueue;
+use FluffyDiscord\RoadRunnerBundle\Temporal\Workflow\AbstractWorkflow;
+
+#[TaskQueue('default')]
+class GreetingWorkflow extends AbstractWorkflow implements GreetingWorkflowInterface
+{
+    /** @var GreetingActivityInterface */
+    #[ActivityStub(GreetingActivityInterface::class, startToClose: '10 seconds', retryAttempts: 3)]
+    private $greeting;
+
+    public function greet(string $name): \Generator
+    {
+        return yield $this->greeting->greet($name);
+    }
+}
+```
+
+`#[ActivityStub]` options: `activity` (the interface, or a single-class activity FQCN), `queue` (omit to inherit the workflow's own queue), `startToClose` / `scheduleToClose` / `scheduleToStart` / `heartbeat` (an `int` of seconds, a duration string like `'30 minutes'`, or a `\DateInterval`), `retryAttempts` (omit for Temporal's default; `0` = unlimited), `retryBackoff`, `retryInitialInterval`, `retryMaxInterval`, `nonRetryable`.
+
+- **Extend `AbstractWorkflow`** — its constructor hydrates the stubs. If the workflow needs its own constructor (e.g. `#[WorkflowInit]`), `use HasActivityStubs` and call `$this->initActivityStubs()` from it instead.
+- **Stub properties must be untyped** (`/** @var Interface */` for the IDE only). The SDK's activity proxy does not implement the interface, so a *typed* property throws a `TypeError` on every workflow task — the bundle fails the container build with a clear message if you type one.
+- Stubs declared on a **trait** or a **parent class** are hydrated too, so shared stage stubs can live in one trait.
+- `#[ActivityStub]` is **extensible** — subclass it to ship a project preset (e.g. a `#[CustomQueueActivityStub]` that fixes the queue, timeouts and retries). The bundle matches any subclass (`IS_INSTANCEOF`). Mark your subclass with its own `#[\Attribute(\Attribute::TARGET_PROPERTY)]` — PHP does not inherit it:
+  ```php
+  #[\Attribute(\Attribute::TARGET_PROPERTY)]
+  class CustomQueueActivityStub extends ActivityStub {
+      public function __construct(string $activity) {
+          parent::__construct($activity, queue: 'custom_queue', startToClose: '5 minutes', retryAttempts: 3);
+      }
+  }
+  // then: #[CustomQueueActivityStub(MediaActivityInterface::class)] private $media;
+  ```
+
+## 12. Single-file activities
+
+An activity does not need a separate interface — put `#[ActivityInterface]` on the class and reference it by its concrete name (`#[ActivityMethod]` is optional):
+
+```php
+#[ActivityInterface(prefix: 'greeting.')]
+#[TaskQueue('default')]
+class GreetingActivity
+{
+    public function greet(string $name): string { return 'Hello, ' . $name; }
+}
+// in a workflow: #[ActivityStub(GreetingActivity::class, startToClose: 10)] private $greeting;
+```
+
+## 13. Starting workflows
+
+Declare a workflow's default start options on its interface with `#[WorkflowDefaults]`, so they live with the workflow instead of being repeated at every call site:
+
+```php
+use FluffyDiscord\RoadRunnerBundle\Temporal\Attribute\WorkflowDefaults;
+use Temporal\Common\IdReusePolicy;
+use Temporal\Common\WorkflowIdConflictPolicy;
+use Temporal\Workflow\WorkflowInterface;
+
+#[WorkflowInterface]
+#[WorkflowDefaults(
+    queue: 'default',
+    reusePolicy: IdReusePolicy::AllowDuplicateFailedOnly,
+    conflictPolicy: WorkflowIdConflictPolicy::UseExisting,
+)]
+interface GreetingWorkflowInterface { /* ... */ }
+```
+
+Inject `WorkflowLauncherInterface` and start it — `of()` seeds the builder from the attribute; the fluent methods override any field (the dynamic id, or a different reuse policy on a forced re-run):
+
+```php
+use FluffyDiscord\RoadRunnerBundle\Temporal\Client\WorkflowLauncherInterface;
+
+public function __construct(private readonly WorkflowLauncherInterface $launcher) {}
+
+$run = $this->launcher->of(GreetingWorkflowInterface::class)
+    ->id('greet-world')
+    ->startOrSkip('World');
+```
+
+`#[WorkflowDefaults]` fields (all optional): `queue`, `reusePolicy`, `conflictPolicy`, `executionTimeout` (seconds / duration string / `\DateInterval`), `retryAttempts`, `retryBackoff`. `start(...)` returns the SDK `WorkflowRunInterface` and throws `WorkflowExecutionAlreadyStartedException`; `startOrSkip(...)` catches it and returns `null`. `of()` returns a fresh, mutable builder each call, and `WorkflowLauncherInterface` is a decoratable / replaceable service.
+
+## 14. Console commands
+
+The bundle adds two commands that read the compile-time registration map (no Temporal/RPC connection):
+
+- `temporal:debug` — registered workflows/activities per task queue, with each workflow's declared stubs and their resolved options.
+- `temporal:diagram` — a Mermaid `flowchart` of workflow → activity edges (`--output <file>` to write it).
+
+Misconfigured stubs (a typed property, a missing/unparseable timeout, an unknown activity, or a workflow with `#[ActivityStub]`s but no `AbstractWorkflow`/`HasActivityStubs`) fail the **container build** with a clear message — no separate validation command is needed.
