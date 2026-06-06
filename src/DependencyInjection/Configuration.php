@@ -2,6 +2,7 @@
 
 namespace FluffyDiscord\RoadRunnerBundle\DependencyInjection;
 
+use FluffyDiscord\RoadRunnerBundle\Temporal\TemporalWorkerInterface;
 use FluffyDiscord\RoadRunnerBundle\Worker\HttpWorker;
 use Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition;
 use Symfony\Component\Config\Definition\Builder\TreeBuilder;
@@ -288,12 +289,25 @@ class Configuration implements ConfigurationInterface
             }
 
             $validOptions = array_keys(get_class_vars(WorkerOptions::class));
-            foreach (array_keys($v) as $key) {
+            foreach (array_keys($v) as $rawKey) {
+                $key = (string) $rawKey;
                 if (!in_array($key, $validOptions, true)) {
                     throw new \InvalidArgumentException(sprintf(
                         'Unknown worker option "%s". Available options are: %s',
-                        (string) $key,
+                        $key,
                         implode(', ', $validOptions),
+                    ));
+                }
+
+                // Only scalar and \DateInterval options can be carried by the array config; the
+                // remaining properties (enums like workflowPanicPolicy, value objects) would be
+                // accepted here yet TypeError when the worker assigns them at boot.
+                $type = (new \ReflectionProperty(WorkerOptions::class, $key))->getType();
+                if (!$type instanceof \ReflectionNamedType || !in_array($type->getName(), ['int', 'float', 'bool', 'string', 'DateInterval'], true)) {
+                    throw new \InvalidArgumentException(sprintf(
+                        'Worker option "%s" cannot be set from configuration; set it via a custom %s.',
+                        $key,
+                        TemporalWorkerInterface::class,
                     ));
                 }
             }

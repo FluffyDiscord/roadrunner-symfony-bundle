@@ -113,4 +113,18 @@ class TemporalConfigurationTest extends BaseTestCase
             ],
         ]]);
     }
+
+    public function testNonScalarWorkerOptionIsRejected(): void
+    {
+        // workflowPanicPolicy is a WorkflowPanicPolicy enum — the array config can't carry it, so the
+        // validator rejects it with guidance instead of letting it TypeError when the worker boots.
+        $this->expectException(InvalidConfigurationException::class);
+        $this->expectExceptionMessage('Worker option "workflowPanicPolicy" cannot be set from configuration');
+
+        $this->processConfig([[
+            'temporal' => [
+                'default_worker_options' => ['workflowPanicPolicy' => 0],
+            ],
+        ]]);
+    }
 }

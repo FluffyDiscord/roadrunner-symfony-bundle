@@ -153,7 +153,7 @@ fluffy_discord_road_runner:
                 maxConcurrentActivityExecutionSize: 4
 ```
 
-`default_worker_options` and each `worker_options.<queue>` entry map to `Temporal\Worker\WorkerOptions`; an unknown key fails configuration validation. The `<queue>` key (e.g. `billing`) is the task-queue name you put in `#[TaskQueue('billing')]`.
+`default_worker_options` and each `worker_options.<queue>` entry map to `Temporal\Worker\WorkerOptions`; an unknown key fails configuration validation. Duration options (e.g. `stickyScheduleToStartTimeout`, `workerStopTimeout`) accept an int of seconds or a duration string. Only scalar and duration options are settable here; enum/value-object options (e.g. `workflowPanicPolicy`) are rejected with a clear error — set those via a custom `TemporalWorkerInterface`. The `<queue>` key (e.g. `billing`) is the task-queue name you put in `#[TaskQueue('billing')]`.
 
 > **Not the same as `.rr.yaml`.** RoadRunner's `temporal:` config controls the *worker process pool* (`activities.num_workers`, the address, etc.). `WorkerOptions` here are the *SDK-level* knobs the bundle passes to `newWorker($queue, $options)` — per-queue concurrency caps, poller counts and rate limits — which RoadRunner's config does not cover. The default queue uses `default_worker_options`; every other queue the bundle auto-registers reads `worker_options.<queue>` (empty if unset).
 
