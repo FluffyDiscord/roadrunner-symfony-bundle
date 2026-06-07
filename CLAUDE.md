@@ -1,11 +1,11 @@
 # roadrunner-symfony-bundle
 
-RoadRunner runtime bundle for Symfony (HTTP + Centrifugo + Jobs workers).
+RoadRunner runtime bundle for Symfony (HTTP + Centrifugo + Jobs + Temporal workers).
 
 ## Quality checks
 
 Run both before committing. As of the latest cleanup, **both are green**: PHPStan
-reports 0 errors and the full suite is 299 tests / 611 assertions passing (6 skipped:
+reports 0 errors and the full suite is 352 tests / 763 assertions passing (10 skipped:
 the `@group jobs-live` tests plus Symfony-version-gated tests, none of which need a
 provisioned RoadRunner jobs pool to be considered green).
 
@@ -43,12 +43,13 @@ php vendor/bin/phpunit tests
   die/exit/fatal). See `docs/specs/graceful-error-handling.md`. The Jobs (queue consumer)
   worker — ack-on-success / nack-with-requeue-on-failure — is specced in
   `docs/specs/rr-jobs-worker.md` and registered under `Mode::MODE_JOBS`.
-- `src/Job/` — Messenger-like message bus over RR Jobs (additive on top of `JobsRunEvent`):
-  `#[AsJob]` / `#[AsJobHandler]` attributes, `JobDispatcher` (producer), `JobEnvelope`
-  (wire contract: `x-job-class` / `x-job-serializer` headers), Native (PHP serialize) +
-  optional Symfony serializers, `JobHandlerPass` (compile-time message→handler map, modeled
-  on `CentrifugoRouterPass`) and `JobRoutingListener`. Specced in `docs/specs/jobs-message-bus.md`.
-  `symfony/serializer` is `require-dev` + `suggest` only.
+- `src/Job/` — typed message bus over RR Jobs built on **Symfony Messenger** (additive on top of
+  `JobsRunEvent`): `#[AsJob]` (producer attribute) + `JobDispatcher`, `JobEnvelope` (wire contract:
+  `x-job-class` / `x-job-serializer` headers), igbinary/Native (PHP serialize) + optional Symfony
+  serializers. On consume, `JobRoutingListener` deserializes and dispatches the message into
+  `MessageBusInterface` (passing the RR task via a `HandlerArgumentsStamp`); handlers are plain
+  `#[AsMessageHandler]`. Specced in `docs/specs/jobs-message-bus.md`. `symfony/messenger` and
+  `symfony/serializer` are `require-dev` + `suggest` only.
 - `src/ErrorHandler/MinimalErrorPage.php` — dependency-free fallback error page.
 - `src/EventListener/CentrifugoEventRouter.php` + `src/DependencyInjection/Compiler/CentrifugoRouterPass.php`
   — compile-time routing table for `#[AsCentrifugoChannelListener]` / `#[AsCentrifugoRpcListener]`.

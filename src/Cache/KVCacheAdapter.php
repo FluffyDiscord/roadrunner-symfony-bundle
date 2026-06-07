@@ -30,12 +30,12 @@ class KVCacheAdapter extends Psr16Adapter
 
         if ($serializerClass !== null) {
             if (!class_exists($serializerClass)) {
-                throw new \LogicException(sprintf('Serializer class "%s" does not exist', $serializerClass));
+                throw new \LogicException(sprintf('KV serializer class "%s" (fluffy_discord_road_runner.kv.serializer) does not exist.', $serializerClass));
             }
 
             $instance = new $serializerClass();
             if (!$instance instanceof SerializerInterface) {
-                throw new \LogicException(sprintf('Serializer class "%s" must implement %s', $serializerClass, SerializerInterface::class));
+                throw new \LogicException(sprintf('KV serializer class "%s" (fluffy_discord_road_runner.kv.serializer) must implement %s.', $serializerClass, SerializerInterface::class));
             }
             $serializer = $instance;
         }

@@ -122,6 +122,14 @@ final class CentrifugoEventRouter
     }
 
     /**
+     * @return CentrifugoRoutingTable
+     */
+    public function getRoutingTable(): array
+    {
+        return $this->routingTable;
+    }
+
+    /**
      * @param list<CentrifugoHandler> $handlers
      */
     private function invoke(array $handlers, Event $event): void

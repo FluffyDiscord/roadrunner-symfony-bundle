@@ -11,7 +11,7 @@ version: "3"
 server:
     command: "php public/index.php"
     env:
-        -   APP_RUNTIME: FluffyDiscord\RoadRunnerBundle\Runtime\Runtime
+        APP_RUNTIME: FluffyDiscord\RoadRunnerBundle\Runtime\Runtime
 http:
     address: 0.0.0.0:8080
     pool:
