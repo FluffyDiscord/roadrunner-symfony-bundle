@@ -103,6 +103,33 @@ class FactoriesTest extends BaseTestCase
         self::assertSame(7, $options->maxConcurrentActivityExecutionSize);
     }
 
+    // Every \DateInterval-typed worker option must be parsed into a \DateInterval (config carries an
+    // int of seconds) — a raw write would TypeError at worker boot. Reflect them all so a newly-added
+    // SDK duration option can't silently regress past this guard.
+    public function testAllDurationWorkerOptionsAreParsedFromSeconds(): void
+    {
+        $durations = [];
+        foreach ((new \ReflectionClass(WorkerOptions::class))->getProperties(\ReflectionProperty::IS_PUBLIC) as $property) {
+            $type = $property->getType();
+            if ($type instanceof \ReflectionNamedType && $type->getName() === 'DateInterval') {
+                $durations[] = $property->getName();
+            }
+        }
+
+        self::assertNotEmpty($durations, 'expected WorkerOptions to expose at least one \DateInterval option');
+
+        foreach ($durations as $name) {
+            $value = (new DefaultTemporalWorker('default', [$name => 30]))->getWorkerOptions()->{$name};
+
+            self::assertInstanceOf(\DateInterval::class, $value, "{$name} was not parsed into a DateInterval");
+            self::assertSame(
+                30,
+                (new \DateTimeImmutable('@0'))->add($value)->getTimestamp(),
+                "{$name} did not round-trip 30 seconds",
+            );
+        }
+    }
+
     public function testDefaultTemporalWorkerDefaultsToTheDefaultQueue(): void
     {
         self::assertSame(

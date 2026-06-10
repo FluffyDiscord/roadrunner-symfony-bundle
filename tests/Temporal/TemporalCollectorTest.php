@@ -3,6 +3,7 @@
 namespace FluffyDiscord\RoadRunnerBundle\Tests\Temporal;
 
 use FluffyDiscord\RoadRunnerBundle\DataCollector\TemporalCollector;
+use FluffyDiscord\RoadRunnerBundle\Temporal\Debug\TemporalIntrospector;
 use FluffyDiscord\RoadRunnerBundle\Temporal\TemporalWorkerInitializer;
 use FluffyDiscord\RoadRunnerBundle\Temporal\TemporalWorkerInterface;
 use FluffyDiscord\RoadRunnerBundle\Tests\BaseTestCase;
@@ -25,7 +26,7 @@ class TemporalCollectorTest extends BaseTestCase
 {
     private function collector(TemporalWorkerInitializer $initializer): TemporalCollector
     {
-        return new TemporalCollector($initializer);
+        return new TemporalCollector(new TemporalIntrospector($initializer));
     }
 
     private function initializerWith(callable $configure): TemporalWorkerInitializer

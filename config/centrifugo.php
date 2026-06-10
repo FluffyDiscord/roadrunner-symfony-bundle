@@ -2,6 +2,7 @@
 
 namespace Symfony\Component\DependencyInjection\Loader\Configurator;
 
+use FluffyDiscord\RoadRunnerBundle\Command\CentrifugoDebugCommand;
 use FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\ConnectEvent;
 use FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\PublishEvent;
 use FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\RPCEvent;
@@ -84,5 +85,11 @@ return static function (ContainerConfigurator $container): void {
         ->tag('kernel.event_listener', ['event' => SubscribeEvent::class,  'method' => 'onSubscribe',  'priority' => -100])
         ->tag('kernel.event_listener', ['event' => SubRefreshEvent::class, 'method' => 'onSubRefresh', 'priority' => -100])
         ->tag('kernel.event_listener', ['event' => RPCEvent::class,        'method' => 'onRpc',        'priority' => -100])
+    ;
+
+    $services
+        ->set(CentrifugoDebugCommand::class)
+        ->autowire()
+        ->autoconfigure()
     ;
 };

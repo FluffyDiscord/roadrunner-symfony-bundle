@@ -5,24 +5,18 @@ namespace FluffyDiscord\RoadRunnerBundle\DependencyInjection;
 use FluffyDiscord\RoadRunnerBundle\Attribute\AsCentrifugoChannelListener;
 use FluffyDiscord\RoadRunnerBundle\Attribute\AsCentrifugoRpcListener;
 use FluffyDiscord\RoadRunnerBundle\Cache\KVCacheAdapter;
-use FluffyDiscord\RoadRunnerBundle\Exception\ActivityNotAssignedException;
 use FluffyDiscord\RoadRunnerBundle\Exception\CacheAutoRegisterException;
 use FluffyDiscord\RoadRunnerBundle\Exception\InvalidRPCConfigurationException;
 use FluffyDiscord\RoadRunnerBundle\Exception\TemporalAddressException;
-use FluffyDiscord\RoadRunnerBundle\Exception\WorkflowNotAssignedException;
 use FluffyDiscord\RoadRunnerBundle\Job\EventListener\JobRoutingListener;
 use FluffyDiscord\RoadRunnerBundle\Job\JobDispatcher;
 use FluffyDiscord\RoadRunnerBundle\Job\Serializer\IgbinaryJobSerializer;
 use FluffyDiscord\RoadRunnerBundle\Job\Serializer\JobSerializerInterface;
 use FluffyDiscord\RoadRunnerBundle\Job\Serializer\NativeJobSerializer;
 use FluffyDiscord\RoadRunnerBundle\Job\Serializer\SymfonyJobSerializer;
-use FluffyDiscord\RoadRunnerBundle\Temporal\Attribute\TaskQueue;
-use FluffyDiscord\RoadRunnerBundle\Temporal\DefaultTemporalWorker;
 use FluffyDiscord\RoadRunnerBundle\Temporal\Interceptor\Event\ActivityInbound\ActivityEvent;
 use FluffyDiscord\RoadRunnerBundle\Temporal\Interceptor\Event\WorkflowClient\StartEvent;
 use FluffyDiscord\RoadRunnerBundle\Temporal\Interceptor\Event\WorkflowOutboundCalls\ExecuteActivityEvent;
-use FluffyDiscord\RoadRunnerBundle\Temporal\TemporalWorkerInitializer;
-use FluffyDiscord\RoadRunnerBundle\Temporal\TemporalWorkerInterface;
 use FluffyDiscord\RoadRunnerBundle\Temporal\Tracing\TemporalTracingListener;
 use FluffyDiscord\RoadRunnerBundle\Worker\CentrifugoWorker;
 use FluffyDiscord\RoadRunnerBundle\Worker\HttpWorker;
@@ -33,7 +27,6 @@ use Spiral\Goridge\RPC\RPCInterface;
 use Spiral\RoadRunner\KeyValue\Cache;
 use Symfony\Component\Config\FileLocator;
 use Symfony\Component\DependencyInjection\ChildDefinition;
-use Symfony\Component\DependencyInjection\Compiler\CompilerPassInterface;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 use Symfony\Component\DependencyInjection\Definition;
@@ -43,15 +36,10 @@ use Symfony\Component\DependencyInjection\Loader\PhpFileLoader;
 use Symfony\Component\DependencyInjection\Reference;
 use Symfony\Component\Yaml\Yaml;
 use Sentry\State\HubInterface as SentryHubInterface;
-use Temporal\Activity\ActivityInterface;
-use Temporal\Client\ClientOptions;
 use Temporal\Client\GRPC\ServiceClientInterface;
-use Temporal\Exception\ExceptionInterceptor;
-use Temporal\Worker\ServiceCredentials;
-use Temporal\Worker\WorkerFactoryInterface;
 use Temporal\Workflow\WorkflowInterface;
 
-class FluffyDiscordRoadRunnerExtension extends Extension implements CompilerPassInterface, PrependExtensionInterface
+class FluffyDiscordRoadRunnerExtension extends Extension implements PrependExtensionInterface
 {
     public function prepend(ContainerBuilder $container): void
     {
@@ -62,13 +50,6 @@ class FluffyDiscordRoadRunnerExtension extends Extension implements CompilerPass
         $container->prependExtensionConfig('monolog', [
             'channels' => ['temporal'],
         ]);
-    }
-
-    public function process(ContainerBuilder $container): void
-    {
-        if (class_exists(WorkflowInterface::class)) {
-            $this->registerTemporal($container);
-        }
     }
 
     public function load(array $configs, ContainerBuilder $container): void
@@ -162,7 +143,7 @@ class FluffyDiscordRoadRunnerExtension extends Extension implements CompilerPass
             $container->setAlias(JobSerializerInterface::class, $serializerClass);
         }
 
-        $this->replaceTemporalParameters($config, $container);
+        $this->setTemporalParameters($config, $container);
 
         if (class_exists(WorkflowInterface::class) && ($config['temporal']['tracing'] ?? false) === true) {
             $this->registerTemporalTracing($container);
@@ -250,213 +231,25 @@ class FluffyDiscordRoadRunnerExtension extends Extension implements CompilerPass
         }
     }
 
-    private function registerTemporal(ContainerBuilder $container): void
-    {
-        if (!$container->hasDefinition(TemporalWorkerInitializer::class)) {
-            return;
-        }
-
-        $workerInitializer = $container->getDefinition(TemporalWorkerInitializer::class);
-
-        /** @var array<string, true> $allTaskQueues */
-        $allTaskQueues = [];
-
-        /** @var array<string, true> $coveredQueues */
-        $coveredQueues = [];
-
-        foreach ($container->getDefinitions() as $definition) {
-            $class = $this->getClassFromDefinition($definition);
-            if ($class === null) {
-                continue;
-            }
-
-            $interfaces = $this->getDefinitionClassInterfaces($definition);
-            $reflectionClass = new \ReflectionClass($class);
-
-            if (in_array(TemporalWorkerInterface::class, $interfaces, true)) {
-                $definition->addTag('fluffydiscord.roadrunner.temporal.worker');
-
-                foreach ($this->collectTaskQueues($reflectionClass, $interfaces) as $taskQueue) {
-                    $coveredQueues[$taskQueue] = true;
-                }
-                continue;
-            }
-
-            $isActivity = $this->hasAttributeInHierarchy($reflectionClass, ActivityInterface::class, $interfaces);
-            $isWorkflow = $this->hasAttributeInHierarchy($reflectionClass, WorkflowInterface::class, $interfaces);
-
-            if (!$isActivity && !$isWorkflow) {
-                continue;
-            }
-
-            $taskQueues = $this->collectTaskQueues($reflectionClass, $interfaces);
-
-            if ($isActivity) {
-                if ($taskQueues === []) {
-                    throw new ActivityNotAssignedException(sprintf('Activity %s is missing #[%s]', $class, TaskQueue::class));
-                }
-
-                $workerInitializer->addMethodCall('addActivity', [$class, $taskQueues]);
-
-                $definition->setShared(false);
-                $definition->setPublic(true);
-                $definition->addTag('fluffydiscord.roadrunner.temporal.activity', ['taskQueues' => $taskQueues]);
-            }
-
-            if ($isWorkflow) {
-                if ($taskQueues === []) {
-                    throw new WorkflowNotAssignedException(sprintf('Workflow %s is missing #[%s]', $class, TaskQueue::class));
-                }
-
-                $workerInitializer->addMethodCall('addWorkflow', [$class, $taskQueues]);
-
-                $definition->addTag('fluffydiscord.roadrunner.temporal.workflow', ['taskQueues' => $taskQueues]);
-            }
-
-            foreach ($taskQueues as $taskQueue) {
-                $allTaskQueues[$taskQueue] = true;
-            }
-        }
-
-        $this->registerAutoWorkers($container, array_keys($allTaskQueues), $coveredQueues);
-    }
-
-    /**
-     * @param list<string>        $taskQueues
-     * @param array<string, true> $coveredQueues
-     */
-    private function registerAutoWorkers(ContainerBuilder $container, array $taskQueues, array $coveredQueues): void
-    {
-        if (!$container->hasDefinition(DefaultTemporalWorker::class)) {
-            return;
-        }
-
-        $perQueueOptions = $container->hasParameter('fluffy_discord.roadrunner.temporal.worker_options')
-            ? $container->getParameter('fluffy_discord.roadrunner.temporal.worker_options')
-            : [];
-
-        if (!is_array($perQueueOptions)) {
-            $perQueueOptions = [];
-        }
-
-        foreach ($taskQueues as $taskQueue) {
-            if ($taskQueue === WorkerFactoryInterface::DEFAULT_TASK_QUEUE || isset($coveredQueues[$taskQueue])) {
-                continue;
-            }
-
-            $serviceId = 'fluffydiscord.roadrunner.temporal.worker.' . preg_replace('/[^A-Za-z0-9_.]/', '_', $taskQueue);
-            if ($container->hasDefinition($serviceId)) {
-                continue;
-            }
-
-            $options = $perQueueOptions[$taskQueue] ?? [];
-            if (!is_array($options)) {
-                $options = [];
-            }
-
-            $definition = new Definition(DefaultTemporalWorker::class, [
-                $taskQueue,
-                $options,
-            ]);
-            $definition->setPublic(true);
-            $definition->addTag('fluffydiscord.roadrunner.temporal.worker');
-
-            $container->setDefinition($serviceId, $definition);
-        }
-    }
-
-    /**
-     * @param \ReflectionClass<object> $reflectionClass
-     * @param list<class-string>       $interfaces
-     * @param class-string             $attributeClass
-     */
-    private function hasAttributeInHierarchy(\ReflectionClass $reflectionClass, string $attributeClass, array $interfaces): bool
-    {
-        $current = $reflectionClass;
-        while ($current !== false) {
-            if ($current->getAttributes($attributeClass) !== []) {
-                return true;
-            }
-            $current = $current->getParentClass();
-        }
-
-        foreach ($interfaces as $interface) {
-            if (!class_exists($interface) && !interface_exists($interface)) {
-                continue;
-            }
-            $interfaceReflection = new \ReflectionClass($interface);
-            if ($interfaceReflection->getAttributes($attributeClass) !== []) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /**
-     * @param \ReflectionClass<object> $reflectionClass
-     * @param list<class-string>       $interfaces
-     * @return list<string>
-     */
-    private function collectTaskQueues(\ReflectionClass $reflectionClass, array $interfaces): array
-    {
-        $taskQueues = [];
-
-        $current = $reflectionClass;
-        while ($current !== false) {
-            foreach ($current->getAttributes(TaskQueue::class, \ReflectionAttribute::IS_INSTANCEOF) as $attribute) {
-                $taskQueues[] = $attribute->newInstance()->taskQueue;
-            }
-            $current = $current->getParentClass();
-        }
-
-        foreach ($interfaces as $interface) {
-            if (!class_exists($interface) && !interface_exists($interface)) {
-                continue;
-            }
-            $interfaceReflection = new \ReflectionClass($interface);
-            foreach ($interfaceReflection->getAttributes(TaskQueue::class, \ReflectionAttribute::IS_INSTANCEOF) as $attribute) {
-                $taskQueues[] = $attribute->newInstance()->taskQueue;
-            }
-        }
-
-        return array_values(array_unique($taskQueues));
-    }
-
     /**
      * @param array{rr_config_path: ?string, temporal?: array{namespace?: string, tracing?: bool, api_key?: ?string, retryable_errors?: list<string>, default_worker_options?: array<string, mixed>, worker_options?: array<string, array<string, mixed>>}} $config
      */
-    private function replaceTemporalParameters(array $config, ContainerBuilder $container): void
+    private function setTemporalParameters(array $config, ContainerBuilder $container): void
     {
         $temporal = $config['temporal'] ?? null;
         if ($temporal === null) {
             return;
         }
 
-        $apiKey = $temporal['api_key'] ?? null;
-
-        if (isset($temporal['retryable_errors']) && $container->hasDefinition(ExceptionInterceptor::class)) {
-            $container->getDefinition(ExceptionInterceptor::class)->replaceArgument(0, $temporal['retryable_errors']);
-        }
-
-        if (isset($temporal['default_worker_options']) && $container->hasDefinition(DefaultTemporalWorker::class)) {
-            $container->getDefinition(DefaultTemporalWorker::class)->replaceArgument(1, $temporal['default_worker_options']);
-        }
-
-        if ($apiKey !== null && $container->hasDefinition(ServiceCredentials::class)) {
-            $container->getDefinition(ServiceCredentials::class)->replaceArgument(0, $apiKey);
-        }
+        $container->setParameter('fluffy_discord.roadrunner.temporal.namespace', $temporal['namespace'] ?? 'default');
+        $container->setParameter('fluffy_discord.roadrunner.temporal.api_key', $temporal['api_key'] ?? null);
+        $container->setParameter('fluffy_discord.roadrunner.temporal.retryable_errors', $temporal['retryable_errors'] ?? [\Error::class]);
+        $container->setParameter('fluffy_discord.roadrunner.temporal.default_worker_options', $temporal['default_worker_options'] ?? []);
+        $container->setParameter('fluffy_discord.roadrunner.temporal.worker_options', $temporal['worker_options'] ?? []);
 
         if ($container->hasDefinition(ServiceClientInterface::class)) {
-            $container->getDefinition(ServiceClientInterface::class)
-                ->replaceArgument(0, $this->resolveTemporalAddress($config, $container))
-                ->replaceArgument(1, $apiKey);
-
-            $container->getDefinition(ClientOptions::class)
-                ->replaceArgument(0, $temporal['namespace'] ?? 'default');
+            $container->setParameter('fluffy_discord.roadrunner.temporal.address', $this->resolveTemporalAddress($config, $container));
         }
-
-        $container->setParameter('fluffy_discord.roadrunner.temporal.worker_options', $temporal['worker_options'] ?? []);
     }
 
     /**
@@ -495,45 +288,5 @@ class FluffyDiscordRoadRunnerExtension extends Extension implements CompilerPass
         $definition->addTag('kernel.event_listener', ['event' => ActivityEvent::class, 'method' => 'onActivityInbound']);
 
         $container->setDefinition(TemporalTracingListener::class, $definition);
-    }
-
-    /**
-     * @return list<class-string>
-     */
-    private function getDefinitionClassInterfaces(Definition $definition): array
-    {
-        $class = $this->getClassFromDefinition($definition);
-        if ($class === null) {
-            return [];
-        }
-
-        $interfaces = class_implements($class);
-        if ($interfaces === false) {
-            return [];
-        }
-
-        return array_values($interfaces);
-    }
-
-    /**
-     * @return class-string|null
-     */
-    private function getClassFromDefinition(Definition $definition): ?string
-    {
-        $class = $definition->getClass();
-        if ($class === null) {
-            return null;
-        }
-
-        try {
-            if (!class_exists($class)) {
-                return null;
-            }
-        } catch (\Throwable) {
-            // Symfony\Component\ErrorHandler\Error\ClassNotFoundError cannot be caught directly.
-            return null;
-        }
-
-        return $class;
     }
 }

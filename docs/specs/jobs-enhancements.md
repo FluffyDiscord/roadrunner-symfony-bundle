@@ -1,5 +1,26 @@
 # Jobs Bus Enhancements (Implementation)
 
+> ⚠️ **SUPERSEDED / PARTIALLY OBSOLETE — read before using.** This spec was pinned at `1664c96`
+> (2026-06-02), *before* the Jobs bus was re-pointed onto **Symfony Messenger** in
+> `docs/specs/jobs-message-bus.md` (@ `c600d58`). Its core premise is now reversed: it assumes a
+> bespoke consumer (`#[AsJobHandler]` + `JobHandlerPass` + a compile-time handler table) and lists
+> *"No Symfony Messenger transport"* as a hard exclusion — but that custom routing has been **deleted**
+> and the consumer now dispatches into `MessageBusInterface`. Treat `jobs-message-bus.md` as the source
+> of truth for the bus. Status of the seven features proposed here:
+>
+> - **(D) retry / dead-letter** and **(G) requeue-with-headers** — re-scoped or done. The `#[RetryPolicy]`/DLQ
+>   design targeted the now-deleted custom table, so it is moot as written; any bounded retry/backoff/DLQ
+>   must be designed against the Messenger consumer instead (today an unhandled failure is RR-level
+>   nack-with-requeue, unbounded). **(G) already ships natively** — `JobRoutingListener` passes the RR
+>   task via `HandlerArgumentsStamp`, so a handler may take a `ReceivedTaskInterface` second parameter.
+> - **(F) profiler** — largely covered by Symfony Messenger's own profiler panel + `debug:messenger`;
+>   only producer-side dispatch timing would remain.
+> - **(A) attribute cache**, **(B) autoAck**, **(C) batch dispatch**, **(E) `jobs:list`/`pause`/`resume`** —
+>   still valid as *standalone* producer-side / RR-admin enhancements (independent of the consumer
+>   migration), if revisited. None of the seven are implemented.
+>
+> Everything below is retained for design history; do not implement it as written.
+
 **Source pinned to:** branch `additional-features` @ `1664c96`, 2026-06-02.
 **Component group:** extensions to the existing `Job\*` message bus (docs/specs/jobs-message-bus.md) and `JobsWorker` (docs/specs/rr-jobs-worker.md). Seven features, all additive — no breaking changes to the public API (`dispatch()`, `#[AsJob]`, `#[AsJobHandler]`, `JobsRunEvent`). Internal/`@internal` signatures change: `JobRoutingListener` constructor gains two arguments, routing table tuple grows from 3 to 4 elements.
 **Scope decision:** seven features enhancing the production-readiness of the Jobs bus: (A) attribute caching, (B) autoAck on `#[AsJob]`, (C) batch dispatch, (D) retry/dead-letter, (E) console commands, (F) profiler integration, (G) expose requeue-with-headers to handlers. Messenger integration is explicitly out of scope (see §Excluded).

@@ -3,9 +3,8 @@
 namespace FluffyDiscord\RoadRunnerBundle;
 
 use FluffyDiscord\RoadRunnerBundle\DependencyInjection\Compiler\CentrifugoRouterPass;
-use FluffyDiscord\RoadRunnerBundle\DependencyInjection\FluffyDiscordRoadRunnerExtension;
+use FluffyDiscord\RoadRunnerBundle\DependencyInjection\Compiler\TemporalWorkerPass;
 use RoadRunner\Centrifugo\CentrifugoWorker as RoadRunnerCentrifugoWorker;
-use Symfony\Component\DependencyInjection\Compiler\CompilerPassInterface;
 use Symfony\Component\DependencyInjection\Compiler\PassConfig;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\HttpKernel\Bundle\Bundle;
@@ -21,9 +20,8 @@ final class FluffyDiscordRoadRunnerBundle extends Bundle
             $container->addCompilerPass(new CentrifugoRouterPass(), PassConfig::TYPE_BEFORE_REMOVING);
         }
 
-        $extension = parent::getContainerExtension();
-        if (class_exists(WorkflowInterface::class) && $extension instanceof CompilerPassInterface) {
-            $container->addCompilerPass($extension, PassConfig::TYPE_BEFORE_OPTIMIZATION);
+        if (class_exists(WorkflowInterface::class)) {
+            $container->addCompilerPass(new TemporalWorkerPass(), PassConfig::TYPE_BEFORE_OPTIMIZATION);
         }
     }
 

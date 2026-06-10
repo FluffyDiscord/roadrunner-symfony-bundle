@@ -2,7 +2,7 @@
 
 namespace FluffyDiscord\RoadRunnerBundle\Tests\Temporal;
 
-use FluffyDiscord\RoadRunnerBundle\DependencyInjection\FluffyDiscordRoadRunnerExtension;
+use FluffyDiscord\RoadRunnerBundle\DependencyInjection\Compiler\TemporalWorkerPass;
 use FluffyDiscord\RoadRunnerBundle\Exception\ActivityNotAssignedException;
 use FluffyDiscord\RoadRunnerBundle\Exception\WorkflowNotAssignedException;
 use FluffyDiscord\RoadRunnerBundle\Temporal\DefaultTemporalWorker;
@@ -34,15 +34,15 @@ class ExtensionTemporalPassTest extends BaseTestCase
         $container->setDefinition(GreetingActivity::class, new Definition(GreetingActivity::class));
         $container->setDefinition(GreetingWorkflow::class, new Definition(GreetingWorkflow::class));
 
-        (new FluffyDiscordRoadRunnerExtension())->process($container);
+        (new TemporalWorkerPass())->process($container);
 
         $activity = $container->getDefinition(GreetingActivity::class);
-        self::assertTrue($activity->hasTag('fluffydiscord.roadrunner.temporal.activity'));
+        self::assertTrue($activity->hasTag('fluffy_discord.roadrunner.temporal.activity'));
         self::assertFalse($activity->isShared());
         self::assertTrue($activity->isPublic());
 
         $workflow = $container->getDefinition(GreetingWorkflow::class);
-        self::assertTrue($workflow->hasTag('fluffydiscord.roadrunner.temporal.workflow'));
+        self::assertTrue($workflow->hasTag('fluffy_discord.roadrunner.temporal.workflow'));
 
         $calls = $container->getDefinition(TemporalWorkerInitializer::class)->getMethodCalls();
         $methods = array_map(static fn (array $call) => $call[0], $calls);
@@ -66,10 +66,10 @@ class ExtensionTemporalPassTest extends BaseTestCase
         $container = $this->containerWithInitializer();
         $container->setDefinition(DefaultTemporalWorker::class, new Definition(DefaultTemporalWorker::class));
 
-        (new FluffyDiscordRoadRunnerExtension())->process($container);
+        (new TemporalWorkerPass())->process($container);
 
         self::assertTrue(
-            $container->getDefinition(DefaultTemporalWorker::class)->hasTag('fluffydiscord.roadrunner.temporal.worker'),
+            $container->getDefinition(DefaultTemporalWorker::class)->hasTag('fluffy_discord.roadrunner.temporal.worker'),
         );
     }
 
@@ -79,15 +79,15 @@ class ExtensionTemporalPassTest extends BaseTestCase
         $container->setDefinition(DefaultTemporalWorker::class, new Definition(DefaultTemporalWorker::class));
         $container->setDefinition(BillingWorkflowForTest::class, new Definition(BillingWorkflowForTest::class));
 
-        (new FluffyDiscordRoadRunnerExtension())->process($container);
+        (new TemporalWorkerPass())->process($container);
 
-        $autoWorkerId = 'fluffydiscord.roadrunner.temporal.worker.billing';
+        $autoWorkerId = 'fluffy_discord.roadrunner.temporal.worker.billing';
         self::assertTrue($container->hasDefinition($autoWorkerId));
 
         $definition = $container->getDefinition($autoWorkerId);
         self::assertSame(DefaultTemporalWorker::class, $definition->getClass());
         self::assertSame('billing', $definition->getArgument(0));
-        self::assertTrue($definition->hasTag('fluffydiscord.roadrunner.temporal.worker'));
+        self::assertTrue($definition->hasTag('fluffy_discord.roadrunner.temporal.worker'));
     }
 
     public function testNoAutoWorkerForDefaultQueue(): void
@@ -96,9 +96,9 @@ class ExtensionTemporalPassTest extends BaseTestCase
         $container->setDefinition(DefaultTemporalWorker::class, new Definition(DefaultTemporalWorker::class));
         $container->setDefinition(GreetingWorkflow::class, new Definition(GreetingWorkflow::class));
 
-        (new FluffyDiscordRoadRunnerExtension())->process($container);
+        (new TemporalWorkerPass())->process($container);
 
-        self::assertFalse($container->hasDefinition('fluffydiscord.roadrunner.temporal.worker.default'));
+        self::assertFalse($container->hasDefinition('fluffy_discord.roadrunner.temporal.worker.default'));
     }
 
     public function testNoAutoWorkerWhenUserWorkerClaimsQueue(): void
@@ -110,10 +110,10 @@ class ExtensionTemporalPassTest extends BaseTestCase
         $container->setDefinition(BillingWorkflowForTest::class, new Definition(BillingWorkflowForTest::class));
         $container->setDefinition(BillingWorkerForTest::class, new Definition(BillingWorkerForTest::class));
 
-        (new FluffyDiscordRoadRunnerExtension())->process($container);
+        (new TemporalWorkerPass())->process($container);
 
-        self::assertFalse($container->hasDefinition('fluffydiscord.roadrunner.temporal.worker.billing'));
-        self::assertTrue($container->getDefinition(BillingWorkerForTest::class)->hasTag('fluffydiscord.roadrunner.temporal.worker'));
+        self::assertFalse($container->hasDefinition('fluffy_discord.roadrunner.temporal.worker.billing'));
+        self::assertTrue($container->getDefinition(BillingWorkerForTest::class)->hasTag('fluffy_discord.roadrunner.temporal.worker'));
     }
 
     public function testActivityWithoutAssignmentThrows(): void
@@ -123,7 +123,7 @@ class ExtensionTemporalPassTest extends BaseTestCase
 
         $this->expectException(ActivityNotAssignedException::class);
 
-        (new FluffyDiscordRoadRunnerExtension())->process($container);
+        (new TemporalWorkerPass())->process($container);
     }
 
     public function testWorkflowWithoutAssignmentThrows(): void
@@ -133,7 +133,7 @@ class ExtensionTemporalPassTest extends BaseTestCase
 
         $this->expectException(WorkflowNotAssignedException::class);
 
-        (new FluffyDiscordRoadRunnerExtension())->process($container);
+        (new TemporalWorkerPass())->process($container);
     }
 }
 

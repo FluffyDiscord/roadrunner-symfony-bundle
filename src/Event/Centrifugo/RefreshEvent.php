@@ -30,7 +30,7 @@ class RefreshEvent extends Event implements CentrifugoEventInterface
     public function setResponse(RefreshResponse|ResponseInterface|null $response): self
     {
         if ($response !== null && !$response instanceof RefreshResponse) {
-            throw new \InvalidArgumentException(sprintf('Expected %s, got %s', RefreshResponse::class, $response::class));
+            throw new \InvalidArgumentException(sprintf('A listener for %s must call setResponse() with a %s, got %s.', self::class, RefreshResponse::class, $response::class));
         }
         $this->response = $response;
         return $this;

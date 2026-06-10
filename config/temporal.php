@@ -2,7 +2,13 @@
 
 namespace Symfony\Component\DependencyInjection\Loader\Configurator;
 
+use FluffyDiscord\RoadRunnerBundle\Command\TemporalDebugCommand;
+use FluffyDiscord\RoadRunnerBundle\Command\TemporalDiagramCommand;
 use FluffyDiscord\RoadRunnerBundle\DataCollector\TemporalCollector;
+use FluffyDiscord\RoadRunnerBundle\Temporal\Client\WorkflowLauncher;
+use FluffyDiscord\RoadRunnerBundle\Temporal\Client\WorkflowLauncherInterface;
+use FluffyDiscord\RoadRunnerBundle\Temporal\Debug\TemporalIntrospector;
+use FluffyDiscord\RoadRunnerBundle\Temporal\Debug\TemporalIntrospectorInterface;
 use FluffyDiscord\RoadRunnerBundle\Factory\RPCConnectionFactory;
 use FluffyDiscord\RoadRunnerBundle\Temporal\Client\TemporalClientFactory;
 use FluffyDiscord\RoadRunnerBundle\Temporal\DefaultTemporalWorker;
@@ -113,7 +119,7 @@ return static function (ContainerConfigurator $container): void {
         ->set(ServiceCredentials::class)
         ->factory([TemporalCredentialsFactory::class, 'create'])
         ->args([
-            null,
+            param('fluffy_discord.roadrunner.temporal.api_key'),
         ])
     ;
 
@@ -141,9 +147,7 @@ return static function (ContainerConfigurator $container): void {
         ->set(ExceptionInterceptor::class)
         ->public()
         ->args([
-            [
-                \Error::class,
-            ],
+            param('fluffy_discord.roadrunner.temporal.retryable_errors'),
         ])
     ;
     $services->alias(ExceptionInterceptorInterface::class, ExceptionInterceptor::class);
@@ -194,7 +198,7 @@ return static function (ContainerConfigurator $container): void {
         ->public()
         ->args([
             WorkerFactoryInterface::DEFAULT_TASK_QUEUE,
-            [],
+            param('fluffy_discord.roadrunner.temporal.default_worker_options'),
         ])
     ;
     $services->alias(TemporalWorkerInterface::class, DefaultTemporalWorker::class);
@@ -203,8 +207,8 @@ return static function (ContainerConfigurator $container): void {
         ->set(ServiceClientInterface::class)
         ->factory([TemporalClientFactory::class, 'serviceClient'])
         ->args([
-            '',
-            null,
+            param('fluffy_discord.roadrunner.temporal.address'),
+            param('fluffy_discord.roadrunner.temporal.api_key'),
         ])
     ;
 
@@ -212,7 +216,7 @@ return static function (ContainerConfigurator $container): void {
         ->set(ClientOptions::class)
         ->factory([TemporalClientFactory::class, 'clientOptions'])
         ->args([
-            'default',
+            param('fluffy_discord.roadrunner.temporal.namespace'),
         ])
     ;
 
@@ -238,4 +242,28 @@ return static function (ContainerConfigurator $container): void {
         ])
     ;
     $services->alias(ScheduleClientInterface::class, ScheduleClient::class)->public();
+
+    $services
+        ->set(WorkflowLauncher::class)
+        ->autowire()
+    ;
+    $services->alias(WorkflowLauncherInterface::class, WorkflowLauncher::class);
+
+    $services
+        ->set(TemporalIntrospector::class)
+        ->autowire()
+    ;
+    $services->alias(TemporalIntrospectorInterface::class, TemporalIntrospector::class);
+
+    $services
+        ->set(TemporalDebugCommand::class)
+        ->autowire()
+        ->autoconfigure()
+    ;
+
+    $services
+        ->set(TemporalDiagramCommand::class)
+        ->autowire()
+        ->autoconfigure()
+    ;
 };
