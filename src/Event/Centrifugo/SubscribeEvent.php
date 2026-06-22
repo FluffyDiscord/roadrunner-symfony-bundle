@@ -30,7 +30,7 @@ class SubscribeEvent extends Event implements CentrifugoEventInterface
     public function setResponse(SubscribeResponse|ResponseInterface|null $response): self
     {
         if ($response !== null && !$response instanceof SubscribeResponse) {
-            throw new \InvalidArgumentException(sprintf('Expected %s, got %s', SubscribeResponse::class, $response::class));
+            throw new \InvalidArgumentException(sprintf('A listener for %s must call setResponse() with a %s, got %s.', self::class, SubscribeResponse::class, $response::class));
         }
         $this->response = $response;
         return $this;

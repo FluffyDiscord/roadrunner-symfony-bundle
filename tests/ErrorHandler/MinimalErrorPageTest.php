@@ -7,7 +7,6 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * @see \FluffyDiscord\RoadRunnerBundle\ErrorHandler\MinimalErrorPage
- * @see docs/specs/graceful-error-handling.md §N-2 (TC-11)
  */
 class MinimalErrorPageTest extends TestCase
 {

@@ -39,10 +39,6 @@ class CentrifugoRouterPassTest extends BaseTestCase
         return $this->container->getDefinition(CentrifugoEventRouter::class)->getArgument(1);
     }
 
-    // -------------------------------------------------------------------------
-    // Early exit
-    // -------------------------------------------------------------------------
-
     public function testSkipsProcessingWhenRouterNotRegistered(): void
     {
         $container = new ContainerBuilder(); // no CentrifugoEventRouter
@@ -50,10 +46,6 @@ class CentrifugoRouterPassTest extends BaseTestCase
 
         $this->assertFalse($container->hasDefinition(CentrifugoEventRouter::class));
     }
-
-    // -------------------------------------------------------------------------
-    // Channel routing table — exact
-    // -------------------------------------------------------------------------
 
     public function testExactChannelRegisteredInTable(): void
     {
@@ -80,10 +72,6 @@ class CentrifugoRouterPassTest extends BaseTestCase
         $this->assertArrayHasKey('news', $exact);
         $this->assertArrayHasKey('sports', $exact);
     }
-
-    // -------------------------------------------------------------------------
-    // Channel routing table — wildcards
-    // -------------------------------------------------------------------------
 
     public function testWildcardChannelCompiledToRegex(): void
     {
@@ -123,10 +111,6 @@ class CentrifugoRouterPassTest extends BaseTestCase
         $this->assertCount(1, $table['wildcard']);
     }
 
-    // -------------------------------------------------------------------------
-    // Priority sorting
-    // -------------------------------------------------------------------------
-
     public function testHandlersSortedByPriorityDescending(): void
     {
         $this->registerChannelListener(PublishHandlerFixture::class, 'news', PublishEvent::class, 'handle', 5);
@@ -152,10 +136,6 @@ class CentrifugoRouterPassTest extends BaseTestCase
         $this->assertSame(1, $handlers[1][2]);
     }
 
-    // -------------------------------------------------------------------------
-    // Event inference from type hint
-    // -------------------------------------------------------------------------
-
     public function testEventInferredFromMethodTypeHint(): void
     {
         $this->registerChannelListener(PublishHandlerFixture::class, 'news', null, 'handle');
@@ -175,10 +155,6 @@ class CentrifugoRouterPassTest extends BaseTestCase
         $handlers = $this->routingTable()['channels'][SubscribeEvent::class]['exact']['news'];
         $this->assertSame('__invoke', $handlers[0][1]);
     }
-
-    // -------------------------------------------------------------------------
-    // All allowed channel event types
-    // -------------------------------------------------------------------------
 
     public function testConnectEventRegistered(): void
     {
@@ -200,10 +176,6 @@ class CentrifugoRouterPassTest extends BaseTestCase
         $this->runPass();
         $this->assertArrayHasKey(SubRefreshEvent::class, $this->routingTable()['channels']);
     }
-
-    // -------------------------------------------------------------------------
-    // RPC routing table
-    // -------------------------------------------------------------------------
 
     public function testRpcListenerRegisteredInTable(): void
     {
@@ -230,10 +202,6 @@ class CentrifugoRouterPassTest extends BaseTestCase
         $this->assertSame(20, $handlers[0][2]);
         $this->assertSame(5, $handlers[1][2]);
     }
-
-    // -------------------------------------------------------------------------
-    // Validation errors
-    // -------------------------------------------------------------------------
 
     public function testEmptyChannelThrowsInvalidArgumentException(): void
     {
@@ -281,10 +249,6 @@ class CentrifugoRouterPassTest extends BaseTestCase
         $this->runPass();
     }
 
-    // -------------------------------------------------------------------------
-    // Helpers
-    // -------------------------------------------------------------------------
-
     private function registerChannelListener(
         string  $class,
         string  $channel,
@@ -315,10 +279,6 @@ class CentrifugoRouterPassTest extends BaseTestCase
             ]);
     }
 }
-
-// ---------------------------------------------------------------------------
-// Fixture classes
-// ---------------------------------------------------------------------------
 
 class PublishHandlerFixture
 {

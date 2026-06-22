@@ -11,12 +11,6 @@ use Symfony\Component\DependencyInjection\ServiceLocator;
 use Symfony\Contracts\EventDispatcher\Event;
 
 /**
- * Routes centrifugo events to handlers registered via #[AsCentrifugoChannelListener]
- * and #[AsCentrifugoRpcListener] attributes.
- *
- * Registered at priority -100 so it fires after all default-priority listeners.
- * The routing table is built at compile time by CentrifugoRouterPass for O(1) lookup.
- *
  * @phpstan-type CentrifugoHandler array{0: string, 1: string, 2: int}
  * @phpstan-type CentrifugoChannelBucket array{exact: array<string, list<CentrifugoHandler>>, wildcard: array<string, list<CentrifugoHandler>>}
  * @phpstan-type CentrifugoRoutingTable array{channels: array<string, CentrifugoChannelBucket>, rpc: array{exact: array<string, list<CentrifugoHandler>>}}
@@ -27,12 +21,8 @@ final class CentrifugoEventRouter
     private array $resolvedCache = [];
 
     /**
-     * @param ServiceLocator<object>  $locator      Lazy service locator for all registered handler services.
-     * @param CentrifugoRoutingTable  $routingTable Compile-time routing table produced by CentrifugoRouterPass:
-     *                                              [
-     *                                                'channels' => [EventClass => ['exact' => [channel => [[svcId, method, priority], ...]], 'wildcard' => [regex => ...]]],
-     *                                                'rpc'      => ['exact' => [rpcMethod => [[svcId, method, priority], ...]]],
-     *                                              ]
+     * @param ServiceLocator<object>  $locator
+     * @param CentrifugoRoutingTable  $routingTable
      */
     public function __construct(
         private readonly ServiceLocator $locator,
@@ -42,8 +32,6 @@ final class CentrifugoEventRouter
 
     public function onConnect(ConnectEvent $event): void
     {
-        // ConnectEvent carries an array of channels; collect handlers for all of them,
-        // deduplicate by serviceId::method, then invoke sorted by priority.
         $seen     = [];
         $handlers = [];
 
@@ -101,9 +89,6 @@ final class CentrifugoEventRouter
     }
 
     /**
-     * Resolves the sorted handler list for a given event class and channel name.
-     * Result is cached after the first lookup — wildcards are only evaluated once per channel.
-     *
      * @return list<CentrifugoHandler>
      */
     private function resolveChannelHandlers(string $eventClass, string $channel): array
@@ -125,7 +110,6 @@ final class CentrifugoEventRouter
         }
 
         if ($handlers !== [] && ($table['wildcard'] ?? []) !== []) {
-            // Re-sort only when wildcard entries were potentially appended
             usort($handlers, static fn(array $a, array $b): int => $b[2] <=> $a[2]);
         }
 
@@ -138,8 +122,14 @@ final class CentrifugoEventRouter
     }
 
     /**
-     * Invokes handlers in order, stopping if propagation is stopped.
-     *
+     * @return CentrifugoRoutingTable
+     */
+    public function getRoutingTable(): array
+    {
+        return $this->routingTable;
+    }
+
+    /**
      * @param list<CentrifugoHandler> $handlers
      */
     private function invoke(array $handlers, Event $event): void

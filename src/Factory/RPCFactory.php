@@ -19,7 +19,7 @@ class RPCFactory
 
         $address = $environment->getRPCAddress();
         if ($address === '') {
-            throw new InvalidRPCConfigurationException("RPC address from environment is empty");
+            throw new InvalidRPCConfigurationException("RoadRunner RPC address is empty. Ensure 'RR_RPC' is set to a non-empty rpc.listen address, e.g. 'tcp://127.0.0.1:6001'.");
         }
         return RPC::create($address);
     }

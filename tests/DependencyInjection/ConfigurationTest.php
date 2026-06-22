@@ -24,6 +24,7 @@ class ConfigurationTest extends BaseTestCase
         self::assertTrue($config['kv']['auto_register']);
         self::assertNull($config['kv']['serializer']);
         self::assertNull($config['kv']['keypair_path']);
+        self::assertNull($config['jobs']['serializer']);
     }
 
     public function testCustomRrConfigPath(): void
@@ -73,6 +74,20 @@ class ConfigurationTest extends BaseTestCase
         $config = $this->processConfig([['kv' => ['keypair_path' => 'config/keypair.bin']]]);
 
         self::assertSame('config/keypair.bin', $config['kv']['keypair_path']);
+    }
+
+    public function testJobsSerializerCanBeSet(): void
+    {
+        self::assertSame('igbinary', $this->processConfig([['jobs' => ['serializer' => 'igbinary']]])['jobs']['serializer']);
+        self::assertSame('symfony', $this->processConfig([['jobs' => ['serializer' => 'symfony']]])['jobs']['serializer']);
+        self::assertSame('native', $this->processConfig([['jobs' => ['serializer' => 'native']]])['jobs']['serializer']);
+    }
+
+    public function testJobsSerializerRejectsUnknownStrategy(): void
+    {
+        $this->expectException(\Symfony\Component\Config\Definition\Exception\InvalidConfigurationException::class);
+
+        $this->processConfig([['jobs' => ['serializer' => 'msgpack']]]);
     }
 
     public function testTreeBuilderRootNodeName(): void

@@ -2,9 +2,13 @@
 
 namespace FluffyDiscord\RoadRunnerBundle\DependencyInjection;
 
+use FluffyDiscord\RoadRunnerBundle\Temporal\TemporalWorkerInterface;
 use FluffyDiscord\RoadRunnerBundle\Worker\HttpWorker;
+use Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition;
 use Symfony\Component\Config\Definition\Builder\TreeBuilder;
 use Symfony\Component\Config\Definition\ConfigurationInterface;
+use Temporal\Exception\ExceptionInterceptorInterface;
+use Temporal\Worker\WorkerOptions;
 
 class Configuration implements ConfigurationInterface
 {
@@ -133,10 +137,183 @@ class Configuration implements ConfigurationInterface
                     ->end()
                     ->addDefaultsIfNotSet()
                 ->end()
+                ->arrayNode("jobs")
+                    ->info($this->toInfo([
+                        'Jobs (queue consumer)',
+                        'Will activate only when "spiral/roadrunner-jobs" is installed.',
+                        'https://docs.roadrunner.dev/queues-and-jobs/overview-queues',
+                    ]))
+                    ->children()
+                        ->booleanNode("lazy_boot")
+                            ->info($this->toInfo([
+                                'See http section,',
+                                'behaves the same way.',
+                            ]))
+                            ->defaultFalse()
+                        ->end()
+                        ->enumNode("serializer")
+                            ->info($this->toInfo([
+                                'Serialization strategy for the Jobs message bus.',
+                                '',
+                                'By default (null), "igbinary" is used when the "igbinary" php',
+                                'extension is installed, otherwise "native".',
+                                '',
+                                '"igbinary" uses the igbinary extension.',
+                                '"native" uses PHP serialize/unserialize.',
+                                '"symfony" uses the Symfony Serializer component (JSON, requires symfony/serializer).',
+                            ]))
+                            ->values(["igbinary", "native", "symfony"])
+                            ->defaultNull()
+                        ->end()
+                        ->scalarNode("default_queue")
+                            ->info($this->toInfo([
+                                'Default queue/pipeline name used by JobDispatcher',
+                                'when a dispatched message has neither an explicit',
+                                'queue argument nor a #[AsJob(queue: ...)] default.',
+                                'The pipeline must already exist in your .rr.yaml.',
+                            ]))
+                            ->cannotBeEmpty()
+                            ->defaultValue("default")
+                        ->end()
+                        ->scalarNode("bus")
+                            ->info($this->toInfo([
+                                'Service id of the Symfony Messenger bus the Jobs',
+                                'consumer dispatches into. Null (default) uses the',
+                                'application default bus (MessageBusInterface).',
+                                'Only relevant with symfony/messenger installed and',
+                                'multiple buses defined.',
+                            ]))
+                            ->defaultNull()
+                        ->end()
+                    ->end()
+                    ->addDefaultsIfNotSet()
+                ->end()
             ->end()
         ;
 
+        if (class_exists(WorkerOptions::class)) {
+            $this->addTemporalNode($builder->getRootNode());
+        }
+
         return $builder;
+    }
+
+    private function addTemporalNode(ArrayNodeDefinition $rootNode): void
+    {
+        $rootNode
+            ->children()
+                ->arrayNode('temporal')
+                    ->info($this->toInfo([
+                        'Temporal',
+                        'Will activate only when "temporal/sdk" is installed.',
+                        'https://docs.roadrunner.dev/docs/plugins/temporal',
+                    ]))
+                    ->children()
+                        ->scalarNode('namespace')
+                            ->info($this->toInfo([
+                                'Temporal namespace used by the autowired clients.',
+                            ]))
+                            ->defaultValue('default')
+                        ->end()
+                        ->booleanNode('tracing')
+                            ->info($this->toInfo([
+                                'Enable the bundle\'s opt-in tracing listener: logs selected',
+                                'interceptor events on the "temporal" Monolog channel, adds Sentry',
+                                'breadcrumbs when Sentry is present, and propagates a correlation id',
+                                'into started workflows\' headers. Off by default.',
+                            ]))
+                            ->defaultFalse()
+                        ->end()
+                        ->scalarNode('api_key')
+                            ->info($this->toInfo([
+                                'API key to connect to your Temporal instance',
+                            ]))
+                            ->defaultNull()
+                        ->end()
+                        ->arrayNode('retryable_errors')
+                            ->info($this->toInfo([
+                                'Array list of exceptions',
+                                'that will let Temporal know that the workflows',
+                                'can be retried. It\'s being checked as $error instanceOf YourException',
+                                'so keep that in mind. Exceptions not listed will stop workflow execution.',
+                                'By default everything extending '.\Error::class.' can be retried.',
+                                'If you need something custom, decorate or register your own interceptor.',
+                                'More info at '.ExceptionInterceptorInterface::class,
+                            ]))
+                            ->scalarPrototype()->end()
+                            ->defaultValue([
+                                \Error::class,
+                            ])
+                        ->end()
+                        ->arrayNode('default_worker_options')
+                            ->info($this->toInfo([
+                                'Shortcut to set default worker options,',
+                                'instead of creating your own class just for that. '.
+                                'Available options: '.WorkerOptions::class,
+                            ]))
+                            ->prototype('variable')->end()
+                            ->validate()
+                                ->always($this->workerOptionsValidator())
+                            ->end()
+                        ->end()
+                        ->arrayNode('worker_options')
+                            ->info($this->toInfo([
+                                'Per-task-queue worker options, keyed by task queue name.',
+                                'Applies to the workers the bundle auto-registers for queues',
+                                'declared via #[TaskQueue]. The "default" queue is covered',
+                                'by "default_worker_options" above. Available options: '.WorkerOptions::class,
+                            ]))
+                            ->useAttributeAsKey('task_queue')
+                            ->arrayPrototype()
+                                ->prototype('variable')->end()
+                                ->validate()
+                                    ->always($this->workerOptionsValidator())
+                                ->end()
+                            ->end()
+                        ->end()
+                    ->end()
+                    ->addDefaultsIfNotSet()
+                ->end()
+            ->end()
+        ;
+    }
+
+    /**
+     * @return \Closure(mixed): mixed
+     */
+    private function workerOptionsValidator(): \Closure
+    {
+        return static function ($v) {
+            if (!is_array($v)) {
+                return $v;
+            }
+
+            $validOptions = array_keys(get_class_vars(WorkerOptions::class));
+            foreach (array_keys($v) as $rawKey) {
+                $key = (string) $rawKey;
+                if (!in_array($key, $validOptions, true)) {
+                    throw new \InvalidArgumentException(sprintf(
+                        'Unknown worker option "%s". Available options are: %s',
+                        $key,
+                        implode(', ', $validOptions),
+                    ));
+                }
+
+                // Only scalar and \DateInterval options can be carried by the array config; the
+                // remaining properties (enums like workflowPanicPolicy, value objects) would be
+                // accepted here yet TypeError when the worker assigns them at boot.
+                $type = (new \ReflectionProperty(WorkerOptions::class, $key))->getType();
+                if (!$type instanceof \ReflectionNamedType || !in_array($type->getName(), ['int', 'float', 'bool', 'string', 'DateInterval'], true)) {
+                    throw new \InvalidArgumentException(sprintf(
+                        'Worker option "%s" cannot be set from configuration; set it via a custom %s.',
+                        $key,
+                        TemporalWorkerInterface::class,
+                    ));
+                }
+            }
+
+            return $v;
+        };
     }
 
     /** @param array<string> $lines */

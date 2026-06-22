@@ -12,8 +12,6 @@ use PHPUnit\Framework\Attributes\AllowMockObjectsWithoutExpectations;
 #[AllowMockObjectsWithoutExpectations]
 class CentrifugoWorkerErrorTest extends AbstractCentrifugoWorkerTestCase
 {
-    // --- error()/disconnect() mapping ---
-
     public function testConnectAndSubscribeMapToDisconnect(): void
     {
         $worker = $this->makeWorker();
@@ -36,8 +34,6 @@ class CentrifugoWorkerErrorTest extends AbstractCentrifugoWorkerTestCase
         $this->assertSame('none', $worker->callChooseFailureAction($this->makeInvalid()));
     }
 
-    // --- client-facing message ---
-
     public function testClientMessageInDebugShowsClassAndMessageWithoutTrace(): void
     {
         $worker = $this->makeWorker(debug: true);
@@ -53,8 +49,6 @@ class CentrifugoWorkerErrorTest extends AbstractCentrifugoWorkerTestCase
         $worker = $this->makeWorker(debug: false);
         $this->assertSame('Unexpected system error', $worker->callClientMessage(new \RuntimeException('secret detail')));
     }
-
-    // --- shutdown handler (Bucket B) ---
 
     public function testShutdownLogsFatalWhenRequestInFlight(): void
     {
@@ -110,8 +104,6 @@ class CentrifugoWorkerErrorTest extends AbstractCentrifugoWorkerTestCase
         $this->assertSame(1, $worker->shutdownRegistrations);
         $this->assertInstanceOf(\Closure::class, $worker->registeredShutdown);
     }
-
-    // --- loop behaviour: one frame, hard-error stop ---
 
     public function testHardErrorStopsWorkerWithoutSecondFrame(): void
     {

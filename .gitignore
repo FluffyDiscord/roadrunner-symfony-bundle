@@ -1,5 +1,5 @@
 /.phpunit.result.cache
 /vendor/
-.idea.dual-graph/
-.dual-graph/
 .idea
+/.claude/worktrees/
+/.claude/scheduled_tasks.lock

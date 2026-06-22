@@ -7,7 +7,6 @@ function headers_send(int $statusCode = 200): int
         return $statusCode;
     }
 
-    // most dx friendly way, else you are free to create your own trait or response wrapper
     $response = debug_backtrace(DEBUG_BACKTRACE_PROVIDE_OBJECT, 2)[1]['object'] ?? null;
     if (!$response instanceof \Symfony\Component\HttpFoundation\Response) {
         return $statusCode;

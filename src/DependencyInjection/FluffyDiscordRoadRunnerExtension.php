@@ -7,8 +7,20 @@ use FluffyDiscord\RoadRunnerBundle\Attribute\AsCentrifugoRpcListener;
 use FluffyDiscord\RoadRunnerBundle\Cache\KVCacheAdapter;
 use FluffyDiscord\RoadRunnerBundle\Exception\CacheAutoRegisterException;
 use FluffyDiscord\RoadRunnerBundle\Exception\InvalidRPCConfigurationException;
+use FluffyDiscord\RoadRunnerBundle\Exception\TemporalAddressException;
+use FluffyDiscord\RoadRunnerBundle\Job\EventListener\JobRoutingListener;
+use FluffyDiscord\RoadRunnerBundle\Job\JobDispatcher;
+use FluffyDiscord\RoadRunnerBundle\Job\Serializer\IgbinaryJobSerializer;
+use FluffyDiscord\RoadRunnerBundle\Job\Serializer\JobSerializerInterface;
+use FluffyDiscord\RoadRunnerBundle\Job\Serializer\NativeJobSerializer;
+use FluffyDiscord\RoadRunnerBundle\Job\Serializer\SymfonyJobSerializer;
+use FluffyDiscord\RoadRunnerBundle\Temporal\Interceptor\Event\ActivityInbound\ActivityEvent;
+use FluffyDiscord\RoadRunnerBundle\Temporal\Interceptor\Event\WorkflowClient\StartEvent;
+use FluffyDiscord\RoadRunnerBundle\Temporal\Interceptor\Event\WorkflowOutboundCalls\ExecuteActivityEvent;
+use FluffyDiscord\RoadRunnerBundle\Temporal\Tracing\TemporalTracingListener;
 use FluffyDiscord\RoadRunnerBundle\Worker\CentrifugoWorker;
 use FluffyDiscord\RoadRunnerBundle\Worker\HttpWorker;
+use FluffyDiscord\RoadRunnerBundle\Worker\JobsWorker;
 use RoadRunner\Centrifugo\CentrifugoWorker as RoadRunnerCentrifugoWorker;
 use Spiral\Goridge\Exception\RelayException;
 use Spiral\Goridge\RPC\RPCInterface;
@@ -16,12 +28,30 @@ use Spiral\RoadRunner\KeyValue\Cache;
 use Symfony\Component\Config\FileLocator;
 use Symfony\Component\DependencyInjection\ChildDefinition;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
+use Symfony\Component\DependencyInjection\ContainerInterface;
+use Symfony\Component\DependencyInjection\Definition;
 use Symfony\Component\DependencyInjection\Extension\Extension;
+use Symfony\Component\DependencyInjection\Extension\PrependExtensionInterface;
 use Symfony\Component\DependencyInjection\Loader\PhpFileLoader;
+use Symfony\Component\DependencyInjection\Reference;
 use Symfony\Component\Yaml\Yaml;
+use Sentry\State\HubInterface as SentryHubInterface;
+use Temporal\Client\GRPC\ServiceClientInterface;
+use Temporal\Workflow\WorkflowInterface;
 
-class FluffyDiscordRoadRunnerExtension extends Extension
+class FluffyDiscordRoadRunnerExtension extends Extension implements PrependExtensionInterface
 {
+    public function prepend(ContainerBuilder $container): void
+    {
+        if (!class_exists(WorkflowInterface::class) || !$container->hasExtension('monolog')) {
+            return;
+        }
+
+        $container->prependExtensionConfig('monolog', [
+            'channels' => ['temporal'],
+        ]);
+    }
+
     public function load(array $configs, ContainerBuilder $container): void
     {
         $loader = new PhpFileLoader($container, new FileLocator(__DIR__ . "/../../config"));
@@ -71,7 +101,7 @@ class FluffyDiscordRoadRunnerExtension extends Extension
         }
 
         $configuration = $this->getConfiguration([], $container);
-        /** @var array{http: array{early_router_initialization: bool, lazy_boot: bool}, centrifugo: array{lazy_boot: bool}, kv: array{auto_register: bool, serializer: ?string, keypair_path: ?string}, rr_config_path: ?string} $config */
+        /** @var array{http: array{early_router_initialization: bool, lazy_boot: bool}, centrifugo: array{lazy_boot: bool}, jobs: array{lazy_boot: bool, serializer: 'native'|'igbinary'|'symfony'|null, default_queue: non-empty-string, bus: ?string}, kv: array{auto_register: bool, serializer: ?string, keypair_path: ?string}, rr_config_path: ?string, temporal?: array{namespace?: string, tracing?: bool, api_key?: ?string, retryable_errors?: list<string>, default_worker_options?: array<string, mixed>, worker_options?: array<string, array<string, mixed>>}} $config */
         $config = $this->processConfiguration($configuration, $configs);
 
         if ($container->hasDefinition(HttpWorker::class)) {
@@ -85,6 +115,40 @@ class FluffyDiscordRoadRunnerExtension extends Extension
             $definition->replaceArgument(0, $config["centrifugo"]["lazy_boot"]);
         }
 
+        if ($container->hasDefinition(JobsWorker::class)) {
+            $definition = $container->getDefinition(JobsWorker::class);
+            $definition->replaceArgument(0, $config["jobs"]["lazy_boot"]);
+        }
+
+        if ($container->hasDefinition(JobDispatcher::class)) {
+            $container->getDefinition(JobDispatcher::class)
+                ->replaceArgument(2, $config["jobs"]["default_queue"]);
+        }
+
+        $bus = $config["jobs"]["bus"];
+        if (is_string($bus) && $bus !== '' && $container->hasDefinition(JobRoutingListener::class)) {
+            $container->getDefinition(JobRoutingListener::class)
+                ->replaceArgument(0, new Reference($bus));
+        }
+
+        if ($container->hasAlias(JobSerializerInterface::class)) {
+            $serializer = $config["jobs"]["serializer"]
+                ?? (function_exists('igbinary_serialize') ? 'igbinary' : 'native');
+
+            $serializerClass = match ($serializer) {
+                'symfony'  => SymfonyJobSerializer::class,
+                'igbinary' => IgbinaryJobSerializer::class,
+                default    => NativeJobSerializer::class,
+            };
+            $container->setAlias(JobSerializerInterface::class, $serializerClass);
+        }
+
+        $this->setTemporalParameters($config, $container);
+
+        if (class_exists(WorkflowInterface::class) && ($config['temporal']['tracing'] ?? false) === true) {
+            $this->registerTemporalTracing($container);
+        }
+
         if (class_exists(Cache::class) && $config["kv"]["auto_register"] === true) {
             $rrConfig = $this->getRoadRunnerConfig($container, $config);
 
@@ -95,7 +159,7 @@ class FluffyDiscordRoadRunnerExtension extends Extension
                     ->register("cache.adapter.rr_kv.{$name}", KVCacheAdapter::class)
                     ->setFactory([KVCacheAdapter::class, "create"])
                     ->setArguments([
-                        "", // namespace, dummy
+                        "",
                         $container->getDefinition(RPCInterface::class),
                         $name,
                         $container->getParameter("kernel.project_dir"),
@@ -132,10 +196,6 @@ class FluffyDiscordRoadRunnerExtension extends Extension
     }
 
     /**
-     * Returns the live RoadRunner config via RPC, falling back to the
-     * YAML file when RPC is unavailable.  Throws on hard failures so
-     * that KV auto-register gets clear error messages.
-     *
      * @param array{rr_config_path: ?string} $config
      * @return array<string, mixed>
      */
@@ -143,13 +203,8 @@ class FluffyDiscordRoadRunnerExtension extends Extension
     {
         try {
             $rpc = $container->get(RPCInterface::class);
-        } catch (InvalidRPCConfigurationException $invalidRPCConfigurationException) {
-            throw new CacheAutoRegisterException($invalidRPCConfigurationException->getMessage(), previous: $invalidRPCConfigurationException);
-        }
+            assert($rpc instanceof RPCInterface);
 
-        assert($rpc instanceof RPCInterface);
-
-        try {
             /** @var string $rpcResult */
             $rpcResult = $rpc->call("rpc.Config", null);
             /** @var array<string, mixed> $decoded */
@@ -157,7 +212,7 @@ class FluffyDiscordRoadRunnerExtension extends Extension
             return $decoded;
         } catch (\JsonException $jsonException) {
             throw new CacheAutoRegisterException($jsonException->getMessage(), previous: $jsonException);
-        } catch (RelayException $relayException) {
+        } catch (InvalidRPCConfigurationException | RelayException $roadRunnerUnavailable) {
             $yaml = $this->readRoadRunnerYaml($container, $config["rr_config_path"]);
             if ($yaml !== []) {
                 return $yaml;
@@ -168,11 +223,70 @@ class FluffyDiscordRoadRunnerExtension extends Extension
                 $projectDir = $container->getParameter("kernel.project_dir");
                 throw new CacheAutoRegisterException(
                     sprintf('Unable to read RoadRunner config: %s', $projectDir . "/" . $config["rr_config_path"]),
-                    previous: $relayException,
+                    previous: $roadRunnerUnavailable,
                 );
             }
 
-            throw new CacheAutoRegisterException('Error connecting to RPC service. Is RoadRunner running? Optionally set "rr_config_path" in bundle\'s config.', previous: $relayException);
+            throw new CacheAutoRegisterException('Error connecting to RPC service. Is RoadRunner running? Optionally set "rr_config_path" in bundle\'s config.', previous: $roadRunnerUnavailable);
         }
+    }
+
+    /**
+     * @param array{rr_config_path: ?string, temporal?: array{namespace?: string, tracing?: bool, api_key?: ?string, retryable_errors?: list<string>, default_worker_options?: array<string, mixed>, worker_options?: array<string, array<string, mixed>>}} $config
+     */
+    private function setTemporalParameters(array $config, ContainerBuilder $container): void
+    {
+        $temporal = $config['temporal'] ?? null;
+        if ($temporal === null) {
+            return;
+        }
+
+        $container->setParameter('fluffy_discord.roadrunner.temporal.namespace', $temporal['namespace'] ?? 'default');
+        $container->setParameter('fluffy_discord.roadrunner.temporal.api_key', $temporal['api_key'] ?? null);
+        $container->setParameter('fluffy_discord.roadrunner.temporal.retryable_errors', $temporal['retryable_errors'] ?? [\Error::class]);
+        $container->setParameter('fluffy_discord.roadrunner.temporal.default_worker_options', $temporal['default_worker_options'] ?? []);
+        $container->setParameter('fluffy_discord.roadrunner.temporal.worker_options', $temporal['worker_options'] ?? []);
+
+        if ($container->hasDefinition(ServiceClientInterface::class)) {
+            $container->setParameter('fluffy_discord.roadrunner.temporal.address', $this->resolveTemporalAddress($config, $container));
+        }
+    }
+
+    /**
+     * @param array{rr_config_path: ?string} $config
+     */
+    private function resolveTemporalAddress(array $config, ContainerBuilder $container): string
+    {
+        try {
+            $rrConfig = $this->getRoadRunnerConfig($container, $config);
+        } catch (CacheAutoRegisterException $cacheAutoRegisterException) {
+            throw new TemporalAddressException(
+                'Unable to resolve the Temporal frontend address from RoadRunner: ' . $cacheAutoRegisterException->getMessage(),
+                previous: $cacheAutoRegisterException,
+            );
+        }
+
+        $temporal = $rrConfig['temporal'] ?? null;
+        if (is_array($temporal) && isset($temporal['address']) && is_string($temporal['address']) && $temporal['address'] !== '') {
+            return $temporal['address'];
+        }
+
+        throw new TemporalAddressException(
+            'RoadRunner config has no non-empty "temporal.address". Enable the "temporal" plugin with an "address" in your RoadRunner config (.rr.yaml).',
+        );
+    }
+
+    private function registerTemporalTracing(ContainerBuilder $container): void
+    {
+        $definition = new Definition(TemporalTracingListener::class, [
+            new Reference('monolog.logger.temporal', ContainerInterface::NULL_ON_INVALID_REFERENCE),
+            new Reference('request_stack', ContainerInterface::NULL_ON_INVALID_REFERENCE),
+            new Reference(SentryHubInterface::class, ContainerInterface::NULL_ON_INVALID_REFERENCE),
+        ]);
+        $definition->addTag('kernel.event_listener', ['event' => StartEvent::class, 'method' => 'onWorkflowStart']);
+        $definition->addTag('kernel.event_listener', ['event' => ExecuteActivityEvent::class, 'method' => 'onExecuteActivity']);
+        $definition->addTag('kernel.event_listener', ['event' => ActivityEvent::class, 'method' => 'onActivityInbound']);
+
+        $container->setDefinition(TemporalTracingListener::class, $definition);
     }
 }

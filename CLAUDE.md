@@ -1,11 +1,13 @@
 # roadrunner-symfony-bundle
 
-RoadRunner runtime bundle for Symfony (HTTP + Centrifugo workers).
+RoadRunner runtime bundle for Symfony (HTTP + Centrifugo + Jobs + Temporal workers).
 
 ## Quality checks
 
 Run both before committing. As of the latest cleanup, **both are green**: PHPStan
-reports 0 errors and the full suite is 196 tests / 350 assertions passing.
+reports 0 errors and the full suite is 352 tests / 763 assertions passing (10 skipped:
+the `@group jobs-live` tests plus Symfony-version-gated tests, none of which need a
+provisioned RoadRunner jobs pool to be considered green).
 
 ### Static analysis — PHPStan (level `max`)
 
@@ -36,9 +38,21 @@ php vendor/bin/phpunit tests
 
 ## Layout
 
-- `src/Worker/` — `HttpWorker`, `CentrifugoWorker` (graceful error handling: one frame
-  per request, STDERR/Sentry logging, `register_shutdown_function` rescue for
-  die/exit/fatal). See `docs/specs/graceful-error-handling.md`.
+- `src/Worker/` — `HttpWorker`, `CentrifugoWorker`, `JobsWorker` (graceful error handling:
+  one frame per request, STDERR/Sentry logging, `register_shutdown_function` rescue for
+  die/exit/fatal). See `docs/specs/graceful-error-handling.md`. The Jobs (queue consumer)
+  worker — ack-on-success / nack-with-requeue-on-failure — is specced in
+  `docs/specs/rr-jobs-worker.md` and registered under `Mode::MODE_JOBS`.
+- `src/Job/` — typed message bus over RR Jobs built on **Symfony Messenger** (additive on top of
+  `JobsRunEvent`): `#[AsJob]` (producer attribute) + `JobDispatcher`, `JobEnvelope` (wire contract:
+  `x-job-class` / `x-job-serializer` headers), igbinary/Native (PHP serialize) + optional Symfony
+  serializers. On consume, `JobRoutingListener` deserializes and dispatches the message into
+  `MessageBusInterface` (passing the RR task via a `HandlerArgumentsStamp`); handlers are plain
+  `#[AsMessageHandler]`. Specced in `docs/specs/jobs-message-bus.md`. `symfony/messenger` and
+  `symfony/serializer` are `require-dev` + `suggest` only.
 - `src/ErrorHandler/MinimalErrorPage.php` — dependency-free fallback error page.
 - `src/EventListener/CentrifugoEventRouter.php` + `src/DependencyInjection/Compiler/CentrifugoRouterPass.php`
   — compile-time routing table for `#[AsCentrifugoChannelListener]` / `#[AsCentrifugoRpcListener]`.
+- Optional **distributed locks**: when `roadrunner-php/symfony-lock-driver` is installed, `config/services.php`
+  wires a Symfony `LockFactory` / `PersistingStoreInterface` onto RR's Lock plugin over the bundle's RPC
+  (no `src/` class of our own — pure DI wiring, guarded by `class_exists(RoadRunnerStore::class)`).

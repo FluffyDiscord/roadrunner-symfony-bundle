@@ -2,6 +2,19 @@
 
 Yet another runtime for Symfony and [RoadRunner](https://roadrunner.dev/).
 
+## Features
+
+- [HTTP worker](#usage) — drop-in runtime, no per-request kernel reset
+- [Response & file streaming](#responsefile-streaming) — `StreamedResponse`, `StreamedJsonResponse`, `BinaryFileResponse`
+- [Early Hints (103)](#early-hints-103)
+- [Graceful error handling](#error-handling) — proper HTTP responses for `die()`/`exit()`/fatals
+- [Sentry](#sentry) & [Monolog](#monolog) integration
+- [Centrifugo (websockets)](#centrifugo-websockets) — `#[AsCentrifugoChannelListener]` / `#[AsCentrifugoRpcListener]`
+- [Jobs / queues](#jobs-queues) + [typed message bus](#message-bus-dispatch-typed-messages-messenger-style) — dispatch plain objects, handle them with standard Symfony Messenger `#[AsMessageHandler]`s
+- [Key-Value cache](#configuration) — auto-registered `cache.adapter.rr_kv.*` adapters
+- [Distributed locks](#distributed-locks-symfonylock) — Symfony `LockFactory` over RR's Lock plugin
+- [Temporal](#temporal-beta-test) (beta) — workflows & activities, see the [usage guide](docs/temporal.md)
+
 ## Installation
 
 ```shell
@@ -22,11 +35,20 @@ rpc:
     listen: tcp://127.0.0.1:6001
 ```
 
-Don't forget to add the `RR_RPC` to your `.env`:
+Don't forget to add the `RR_RPC` to your `.env` — it **must match** the `rpc.listen` address in `.rr.yaml`:
 
 ```dotenv
 RR_RPC=tcp://127.0.0.1:6001
 ```
+
+> **Starter config:** the bundle ships a fuller, commented `.rr.yaml` (gzip/static middleware, dev
+> `pool.debug`, logging) at [`install/.rr.yaml`](install/.rr.yaml). After installing, copy it to your
+> project root and tweak it instead of writing one by hand:
+> ```shell
+> cp vendor/fluffydiscord/roadrunner-symfony-bundle/install/.rr.yaml .rr.yaml
+> ```
+> There is no Symfony Flex recipe yet, so the `.rr.yaml`, the `RR_RPC` line, and the kernel-trait swap
+> (step 2 below) are all manual.
 
 2. Replace `MicroKernelTrait` with `RoadRunnerMicroKernelTrait` in your `Kernel.php`:
 
@@ -109,6 +131,14 @@ fluffy_discord_road_runner:
   # Will activate only when "roadrunner-php/centrifugo" is installed.
   # https://docs.roadrunner.dev/plugins/centrifuge
   centrifugo:
+    # See http section,
+    # behaves the same way.
+    lazy_boot: false
+
+  # Jobs (queue consumer)
+  # Will activate only when "spiral/roadrunner-jobs" is installed.
+  # https://docs.roadrunner.dev/queues-and-jobs/overview-queues
+  jobs:
     # See http section,
     # behaves the same way.
     lazy_boot: false
@@ -383,6 +413,197 @@ class RpcHandler
 #### How it works
 
 The routing table is built **at container compile time** — there is no runtime overhead beyond a single hash-map lookup per request. Handlers are dispatched in priority order and respect `stopPropagation()`. The routing listeners fire at priority `-100`, after any plain `#[AsEventListener]` handlers at default priority `0`.
+
+## Jobs (queues)
+
+To consume [RoadRunner Jobs](https://docs.roadrunner.dev/queues-and-jobs/overview-queues) (queue tasks) add the `spiral/roadrunner-jobs` package:
+
+```shell
+composer require spiral/roadrunner-jobs
+```
+
+Configure a `jobs` pool in your `.rr.yaml`, for example:
+
+```yaml
+jobs:
+  pool:
+    num_workers: 4
+  pipelines:
+    emails:
+      driver: memory
+      config:
+        priority: 10
+  consume: ["emails"]
+```
+
+The bundle registers a Jobs worker under RoadRunner's `jobs` mode. Listen to a single `JobsRunEvent`, dispatched once per consumed task, with a normal `#[AsEventListener]`:
+
+```php
+<?php
+
+namespace App\EventListener;
+
+use FluffyDiscord\RoadRunnerBundle\Event\Worker\Jobs\JobsRunEvent;
+use Symfony\Component\EventDispatcher\Attribute\AsEventListener;
+
+#[AsEventListener(event: JobsRunEvent::class, method: "onJob")]
+final class JobListener
+{
+    public function onJob(JobsRunEvent $event): void
+    {
+        // metadata
+        $event->getName();      // job name
+        $event->getQueue();     // broker queue name
+        $event->getPipeline();  // RoadRunner pipeline name
+        $event->getId();        // task id
+        $event->getHeaders();   // array<string, string[]>
+
+        // your payload (raw string — you own the format)
+        $data = json_decode($event->getPayload(), true);
+
+        // ... process the task ...
+    }
+}
+```
+
+**Ack / nack semantics:**
+- If your listener returns normally, the worker **acks** the task (it is removed from the queue).
+- If your listener throws any `\Throwable`, the worker **nacks with requeue** (`redelivery: true`) so the task is retried, and logs the error to STDERR / Sentry. A hard `\Error` additionally stops the worker (RoadRunner respawns it).
+- If the worker dies mid-task (`die`/`exit`/fatal), a shutdown handler best-effort requeues the task so it is not lost.
+
+> **Poison-message caveat:** because the default for an unhandled failure is *requeue*, a task that always throws will be redelivered indefinitely. If a job can fail permanently, **catch the error inside your listener** and decide there (e.g. log + return normally to ack-and-drop, or take the task via `$event->getTask()` and call `->nack($e, redelivery: false)` yourself). A listener that takes ownership of the task (`getTask()->ack()`/`nack()`/`requeue()`) is respected — the worker will not respond a second time.
+
+Like the other workers, `jobs` supports `lazy_boot` (see [Configuration](#configuration)); it defaults to `false`.
+
+### Message bus (dispatch typed messages, Messenger-style)
+
+On top of the raw `JobsRunEvent`, the bundle ships an optional typed layer built on **Symfony Messenger**: dispatch a **plain PHP object** to a queue and handle it with a standard `#[AsMessageHandler]` on the consumer side — no manual (de)serialization, and you reuse Messenger's routing, middleware, `debug:messenger` and profiler panel. The raw `JobsRunEvent` and RR Jobs services keep working unchanged; this layer is purely additive (a task it did not produce is left untouched for your raw listeners).
+
+It activates once `symfony/messenger` is installed:
+
+```shell
+composer require symfony/messenger
+```
+
+Serialization works out of the box — by default the **igbinary** serializer is used when the `igbinary` extension is present, otherwise the zero-dependency **Native** serializer (PHP `serialize()`/`unserialize()`, which handles any serializable object including private state). For interoperable JSON payloads you can opt into the **Symfony Serializer** instead:
+
+```shell
+# optional — only needed for jobs.serializer: symfony
+composer require symfony/serializer symfony/property-access
+```
+
+> The strategy is chosen by the `jobs.serializer` config (`igbinary` / `native` / `symfony`) and recorded in the task's `x-job-serializer` header so the consumer decodes with the same one. Selecting `symfony` without `symfony/serializer` installed throws a clear error.
+
+Mark a message class with `#[AsJob]` (queue/delay/priority are optional defaults):
+
+```php
+use FluffyDiscord\RoadRunnerBundle\Job\Attribute\AsJob;
+
+#[AsJob(queue: 'emails', delay: 0, priority: 10)]
+final class SendWelcomeEmail
+{
+    public function __construct(public string $email) {}
+}
+```
+
+Dispatch it with the `JobDispatcher` service (public; explicit arguments override the attribute defaults):
+
+```php
+use FluffyDiscord\RoadRunnerBundle\Job\JobDispatcher;
+
+public function __construct(private JobDispatcher $jobs) {}
+
+$this->jobs->dispatch(new SendWelcomeEmail('a@b.test'));
+// or override per dispatch:
+$this->jobs->dispatch(new SendWelcomeEmail('a@b.test'), queue: 'priority', delay: 30, priority: 5);
+```
+
+Handle it with a standard Symfony Messenger handler — `#[AsMessageHandler]` (the message class is inferred from the first parameter):
+
+```php
+use Symfony\Component\Messenger\Attribute\AsMessageHandler;
+
+#[AsMessageHandler]
+final class SendWelcomeEmailHandler
+{
+    public function __invoke(SendWelcomeEmail $message): void
+    {
+        // ... send the email ...
+    }
+}
+```
+
+Everything `#[AsMessageHandler]` already supports applies — handler priority, multiple handlers per message, `__invoke` or a named method, and `php bin/console debug:messenger` to inspect the wiring. Consumed jobs arrive on the Messenger transport named `roadrunner`, so you can scope a handler with `#[AsMessageHandler(fromTransport: 'roadrunner')]` to tell RoadRunner jobs apart from messages you dispatch through Messenger normally.
+
+**Need the RoadRunner task** (to read headers, or ack/nack/requeue manually)? Add a second `ReceivedTaskInterface` parameter — the bundle passes the consumed task to your handler:
+
+```php
+use Spiral\RoadRunner\Jobs\Task\ReceivedTaskInterface;
+use Symfony\Component\Messenger\Attribute\AsMessageHandler;
+
+#[AsMessageHandler]
+final class SendWelcomeEmailHandler
+{
+    public function __invoke(SendWelcomeEmail $message, ReceivedTaskInterface $task): void
+    {
+        // $task->getHeaders(); $task->withDelay(30)->requeue(...); $task->nack($e, redelivery: false); ...
+    }
+}
+```
+
+**Ack / nack semantics** match the raw listener: if every handler returns normally the task is **acked**; if a handler throws, the worker **nacks with requeue** (`redelivery: true`) and logs the error to STDERR / Sentry; a message with **no** registered handler is logged and acked as a no-op. The poison-message caveat from the raw section applies equally — an always-throwing handler is requeued indefinitely unless you catch the error, or take ownership of the task via the `ReceivedTaskInterface` above and `nack(..., redelivery: false)` yourself.
+
+The serializer, default queue and target bus are configurable:
+
+```yaml
+fluffy_discord_road_runner:
+  jobs:
+    serializer: ~              # default: "igbinary" if the extension is present, else "native". Or "symfony" (JSON).
+    default_queue: "default"   # used when neither a dispatch() argument nor #[AsJob(queue:)] is given; pipeline must exist in your .rr.yaml
+    bus: ~                     # service id of the Messenger bus to dispatch into (default: the application's default bus)
+```
+
+> **Wire-format note:** the envelope (`x-job-class` / `x-job-serializer` headers, message FQCN as the RR job name) is a stable contract — changing it would break in-flight queued tasks across an upgrade (`docs/specs/jobs-message-bus.md`).
+
+## Distributed locks (symfony/lock)
+
+Optional. Install the bridge and you get a Symfony `LockFactory` backed by RoadRunner's Lock plugin over the same RPC connection — no extra config:
+
+```shell
+composer require roadrunner-php/symfony-lock-driver
+```
+
+Add a `lock` section to your `.rr.yaml`, then autowire `LockFactory` (or `PersistingStoreInterface`) anywhere:
+
+```php
+use Symfony\Component\Lock\LockFactory;
+
+public function __construct(private LockFactory $locks) {}
+
+$lock = $this->locks->createLock('report-generation');
+if ($lock->acquire()) { /* ... */ $lock->release(); }
+```
+
+## Temporal (beta-test)
+
+> [!WARNING]
+> Temporal support is in **beta**. The overall flow and the way it's implemented might still
+> change. The goal is a nice and easy DX, which is being actively explored right now — expect
+> breaking changes until the API settles.
+
+The bundle integrates [Temporal](https://learn.temporal.io/getting_started/php/). It activates
+automatically once `temporal/sdk` is installed:
+
+```bash
+composer require temporal/sdk
+```
+
+Assign workflows/activities to a worker's task queue with the `#[TaskQueue]` attribute, run
+them under RoadRunner's `temporal` plugin, and react to interceptor calls via Symfony events. A
+profiler tab lists the registered workers, workflows and activities.
+
+**→ Full usage guide with copy-paste examples: [`docs/temporal.md`](docs/temporal.md)** (defining
+activities/workflows, configuration, starting a workflow, interceptor events).
 
 ## Developing with Symfony and RoadRunner
 
