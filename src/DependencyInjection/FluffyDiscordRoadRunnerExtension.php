@@ -5,6 +5,8 @@ namespace FluffyDiscord\RoadRunnerBundle\DependencyInjection;
 use FluffyDiscord\RoadRunnerBundle\Attribute\AsCentrifugoChannelListener;
 use FluffyDiscord\RoadRunnerBundle\Attribute\AsCentrifugoRpcListener;
 use FluffyDiscord\RoadRunnerBundle\Cache\KVCacheAdapter;
+use FluffyDiscord\RoadRunnerBundle\Doctrine\DoctrinePreconnectListener;
+use FluffyDiscord\RoadRunnerBundle\Event\Worker\WorkerBootingEvent;
 use FluffyDiscord\RoadRunnerBundle\Exception\CacheAutoRegisterException;
 use FluffyDiscord\RoadRunnerBundle\Exception\InvalidRPCConfigurationException;
 use FluffyDiscord\RoadRunnerBundle\Exception\TemporalAddressException;
@@ -101,7 +103,7 @@ class FluffyDiscordRoadRunnerExtension extends Extension implements PrependExten
         }
 
         $configuration = $this->getConfiguration([], $container);
-        /** @var array{http: array{early_router_initialization: bool, lazy_boot: bool}, centrifugo: array{lazy_boot: bool}, jobs: array{lazy_boot: bool, serializer: 'native'|'igbinary'|'symfony'|null, default_queue: non-empty-string, bus: ?string}, kv: array{auto_register: bool, serializer: ?string, keypair_path: ?string}, rr_config_path: ?string, temporal?: array{namespace?: string, tracing?: bool, api_key?: ?string, retryable_errors?: list<string>, default_worker_options?: array<string, mixed>, worker_options?: array<string, array<string, mixed>>}} $config */
+        /** @var array{http: array{early_router_initialization: bool, lazy_boot: bool}, centrifugo: array{lazy_boot: bool}, jobs: array{lazy_boot: bool, serializer: 'native'|'igbinary'|'symfony'|null, default_queue: non-empty-string, bus: ?string}, doctrine: array{preconnect: bool}, kv: array{auto_register: bool, serializer: ?string, keypair_path: ?string}, rr_config_path: ?string, temporal?: array{namespace?: string, tracing?: bool, api_key?: ?string, retryable_errors?: list<string>, default_worker_options?: array<string, mixed>, worker_options?: array<string, array<string, mixed>>}} $config */
         $config = $this->processConfiguration($configuration, $configs);
 
         if ($container->hasDefinition(HttpWorker::class)) {
@@ -147,6 +149,10 @@ class FluffyDiscordRoadRunnerExtension extends Extension implements PrependExten
 
         if (class_exists(WorkflowInterface::class) && ($config['temporal']['tracing'] ?? false) === true) {
             $this->registerTemporalTracing($container);
+        }
+
+        if (class_exists(\Doctrine\DBAL\Connection::class) && $config["doctrine"]["preconnect"] === true) {
+            $this->registerDoctrinePreconnect($container);
         }
 
         if (class_exists(Cache::class) && $config["kv"]["auto_register"] === true) {
@@ -288,5 +294,17 @@ class FluffyDiscordRoadRunnerExtension extends Extension implements PrependExten
         $definition->addTag('kernel.event_listener', ['event' => ActivityEvent::class, 'method' => 'onActivityInbound']);
 
         $container->setDefinition(TemporalTracingListener::class, $definition);
+    }
+
+    private function registerDoctrinePreconnect(ContainerBuilder $container): void
+    {
+        // "doctrine" registry referenced optionally: DBAL without doctrine-bundle → null → no-op.
+        $definition = new Definition(DoctrinePreconnectListener::class, [
+            new Reference('doctrine', ContainerInterface::NULL_ON_INVALID_REFERENCE),
+            new Reference('logger', ContainerInterface::NULL_ON_INVALID_REFERENCE),
+        ]);
+        $definition->addTag('kernel.event_listener', ['event' => WorkerBootingEvent::class, 'method' => '__invoke']);
+
+        $container->setDefinition(DoctrinePreconnectListener::class, $definition);
     }
 }
