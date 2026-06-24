@@ -22,6 +22,7 @@ class HttpWorkerEarlyHintsTest extends AbstractHttpWorkerTestCase
     protected function tearDown(): void
     {
         HttpWorker::$currentHttpWorker = null;
+        HttpWorker::$bootWarmupInProgress = false;
         parent::tearDown();
     }
 
@@ -239,5 +240,20 @@ class HttpWorkerEarlyHintsTest extends AbstractHttpWorkerTestCase
         $result = headers_send(103);
 
         $this->assertSame(103, $result);
+    }
+
+    public function testHeadersSendNoOpDuringBootWarmup(): void
+    {
+        // Boot-time dummy request: a worker is set, but informational responses must be
+        // swallowed — there is no real request frame to write a 103 to (see HttpWorkerBootTest).
+        HttpWorker::$currentHttpWorker = $this->spiralHttpWorker;
+        HttpWorker::$bootWarmupInProgress = true;
+
+        $response = new Response();
+        $response->headers->set('Link', '</style.css>; rel=preload');
+
+        $this->spiralHttpWorker->expects($this->never())->method('respond');
+
+        $response->sendHeaders(103);
     }
 }

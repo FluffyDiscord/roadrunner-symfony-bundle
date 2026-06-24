@@ -489,7 +489,10 @@ echo "  RoadRunner up (http :8080, jobs, temporal worker booting)"
 
 echo "### Running the FULL suite in-container: php vendor/bin/phpunit tests ###"
 FAIL=0
-php vendor/bin/phpunit tests --log-junit var/ju.xml || FAIL=1
+# doctrine-preconnect-live needs a PostgreSQL server this image does not provision; it has its
+# own harness (tests/docker-validate-doctrine-preconnect.sh), so exclude it here to keep the
+# "net skipped: 0" invariant below honest.
+php vendor/bin/phpunit tests --exclude-group doctrine-preconnect-live --log-junit var/ju.xml || FAIL=1
 
 # The full run necessarily skips ONE test — testIgbinaryWithoutExtensionThrows asserts the
 # MISSING-extension error path, which cannot be exercised while ext-igbinary is loaded. A process

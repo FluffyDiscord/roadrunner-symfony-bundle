@@ -188,6 +188,28 @@ class Configuration implements ConfigurationInterface
                     ->end()
                     ->addDefaultsIfNotSet()
                 ->end()
+                ->arrayNode("doctrine")
+                    ->info($this->toInfo([
+                        'Doctrine integration.',
+                        'Will activate only when "doctrine/dbal" is installed.',
+                    ]))
+                    ->children()
+                        ->booleanNode("preconnect")
+                            ->info($this->toInfo([
+                                'Open PostgreSQL Doctrine connections at worker boot',
+                                '(after the kernel boots, before the first request) so',
+                                'the first request skips the PostgreSQL connection',
+                                'handshake. Only PostgreSQL connections are touched;',
+                                'other drivers are ignored. Requires doctrine/dbal;',
+                                'inert without it. Runs on every worker boot regardless',
+                                'of "lazy_boot". Set false to opt out (no listener is',
+                                'registered).',
+                            ]))
+                            ->defaultTrue()
+                        ->end()
+                    ->end()
+                    ->addDefaultsIfNotSet()
+                ->end()
             ->end()
         ;
 

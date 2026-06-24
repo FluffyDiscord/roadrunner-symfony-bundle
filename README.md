@@ -4,7 +4,7 @@ Yet another runtime for Symfony and [RoadRunner](https://roadrunner.dev/).
 
 ## Features
 
-- [HTTP worker](#usage) — drop-in runtime, no per-request kernel reset
+- [HTTP worker](#usage) — drop-in runtime; service reset runs *after* the response, off the request's critical path
 - [Response & file streaming](#responsefile-streaming) — `StreamedResponse`, `StreamedJsonResponse`, `BinaryFileResponse`
 - [Early Hints (103)](#early-hints-103)
 - [Graceful error handling](#error-handling) — proper HTTP responses for `die()`/`exit()`/fatals
@@ -14,6 +14,7 @@ Yet another runtime for Symfony and [RoadRunner](https://roadrunner.dev/).
 - [Key-Value cache](#configuration) — auto-registered `cache.adapter.rr_kv.*` adapters
 - [Distributed locks](#distributed-locks-symfonylock) — Symfony `LockFactory` over RR's Lock plugin
 - [Temporal](#temporal-beta-test) (beta) — workflows & activities, see the [usage guide](docs/temporal.md)
+- [PostgreSQL preconnect](#database-connections) — opens PostgreSQL Doctrine connections at worker boot so the first request skips the connection handshake
 
 ## Installation
 
@@ -68,16 +69,30 @@ class Kernel extends BaseKernel
 }
 ```
 
-The default behavior of Symfony's kernel is to reset your services 
-before request is handled and this adds latency to every request.
+### Service reset
 
-|    | When new request arrives                                           | Your app                                              | After response was sent back |
-| -- |--------------------------------------------------------------------|-------------------------------------------------------|------------------------------|
-| Symfony | does a reset, if something fails here, request won't be handled    | waits for reset to be done, then handles your request | **kernel does nothing**          |
-| RoadRunnerBundle | **kernel does nothing**, this ensures request is passed to you app |       immediately handles your request                                  | does a reset                 |  
+|               | New request arrives                                  | Your app                          | After the response is sent                    |
+| ------------- | ---------------------------------------------------- | --------------------------------- | --------------------------------------------- |
+| Stock Symfony | resets services first (reset is on the request path) | handled only after reset finishes | does nothing                                  |
+| This bundle   | container already warm, handed straight to your app  | handled immediately               | `terminate()`, then `services_resetter` reset |
 
-- `PostgreSQL` - **no need to do anything**, if you did not disable persistent connections
-- `Mysql`, `MariaDB` - create listener for `WorkerRequestReceivedEvent` and reset your database connections
+> ⚠️ **Non‑shared services (`shared: false`).** Before Symfony 8.1 these are **not** reset even with
+> `ResetInterface` — `services_resetter` builds its own throwaway instance instead of resetting the
+> ones your app used. Starting Symfony 8.1, it's fixed.
+
+#### Database connections
+
+- **PostgreSQL** — connections are opened at worker boot for you (see `doctrine.preconnect` in
+  [Configuration](#configuration)), so the first request skips the connection handshake. With the
+  native `pgsql` driver every worker always opens its own socket (it has no persistent-connection
+  support); with the PDO driver a `persistent` connection can additionally be reused across worker
+  spawns. Either way, preconnect warms the socket before the first request.
+- **MySQL / MariaDB** — listen to `WorkerRequestReceivedEvent` and reset your database connections
+  (preconnect intentionally skips non-PostgreSQL drivers).
+
+> The Doctrine ORM `EntityManager` identity map is cleared for you: the `doctrine` registry implements
+> `ResetInterface`, so `services_resetter` clears it between requests. The bullets above concern the
+> underlying DBAL **connection** (stale/dropped sockets), not the identity map.
 
 ## Configuration
 
@@ -142,6 +157,17 @@ fluffy_discord_road_runner:
     # See http section,
     # behaves the same way.
     lazy_boot: false
+
+  # Doctrine
+  # Will activate only when "doctrine/dbal" is installed.
+  doctrine:
+    # Open PostgreSQL connections at worker boot, before the
+    # first request, so the first request skips the PostgreSQL
+    # connection handshake. Only PostgreSQL connections are
+    # touched; other drivers are ignored. Runs on every worker
+    # boot regardless of "lazy_boot". Set false to opt out
+    # (no listener is registered).
+    preconnect: true
 
   # Key-Value storage
   # Will activate only when "spiral/roadrunner-kv" is installed.
@@ -608,7 +634,7 @@ activities/workflows, configuration, starting a workflow, interceptor events).
 ## Developing with Symfony and RoadRunner
 
 - If possible, stop using lazy loading in your services, inject services immediately. Lazy loaded services might introduce memory leaks and make your services slower to initialize when requests arrive.
-- Do not use/create local class/array caches in your services, only if you know, what you are doing. Try to make them stateless or use [ResetInterface](https://github.com/symfony/contracts/blob/main/Service/ResetInterface.php) to clean up before each request, so state is not being shared.
+- Do not use/create local class/array caches in your services, only if you know, what you are doing. Try to make them stateless or use [ResetInterface](https://github.com/symfony/contracts/blob/main/Service/ResetInterface.php) to clean up between requests, so state is not being shared. Mind the [non‑shared caveat](#service-reset): a `shared: false` resettable service isn't reset before Symfony 8.1.
 - Symfony forms might leak data across requests due to caching, see section bellow.
 - Simplify your `User` session serialization by taking advantage of `EquatableInterface` and a custom de/serialization logic. 
 This will prevent errors because of detached Doctrine entities and, as a side bonus, will speed up loading user from sessions.
