@@ -34,3 +34,16 @@ logs:
 
 rpc:
     listen: tcp://127.0.0.1:6001
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Bundle configuration is Symfony config (NOT RoadRunner) and lives in your app:
+#   config/packages/fluffy_discord_road_runner.yaml
+#
+# For example, PostgreSQL connections are opened at worker boot by default so the
+# first request skips the connection handshake — set this to false to opt out:
+#   fluffy_discord_road_runner:
+#     doctrine:
+#       preconnect: true
+#
+# See the bundle README "Configuration" for every option.
+# ─────────────────────────────────────────────────────────────────────────────
