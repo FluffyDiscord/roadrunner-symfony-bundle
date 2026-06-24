@@ -58,6 +58,42 @@ class HttpWorkerBootTest extends AbstractHttpWorkerTestCase
         $this->makeWorker(earlyRouterInit: false, lazyBoot: false)->start();
     }
 
+    public function testEarlyRouterInitSuppressesEarlyHints(): void
+    {
+        if (!\function_exists('headers_send')) {
+            require_once __DIR__ . '/../../src/Resources/headers_send_polyfill.php';
+        }
+        HttpWorker::$currentHttpWorker = $this->spiralHttpWorker;
+
+        // The dummy boot request emits Early Hints, exactly like an app's controller would
+        // (e.g. ViteEarlyHints::send -> sendHeaders(103)). The flag must be set while it runs.
+        $this->kernel->method('handle')->willReturnCallback(function (Request $request): Response {
+            if ($request->attributes->get(HttpWorker::DUMMY_REQUEST_ATTRIBUTE)) {
+                $this->assertTrue(HttpWorker::$bootWarmupInProgress, 'flag must be set during the dummy request');
+                $response = new Response();
+                $response->headers->set('Link', '</style.css>; rel=preload');
+                $response->sendHeaders(103);
+            }
+            return new Response();
+        });
+
+        // No 103 frame may reach the worker during boot — it would corrupt the protocol.
+        $this->spiralHttpWorker->expects($this->never())->method('respond');
+
+        $this->psr7Worker->method('waitRequest')->willReturn(null);
+
+        $this->makeWorker(earlyRouterInit: true, lazyBoot: false)->start();
+
+        $this->assertFalse(HttpWorker::$bootWarmupInProgress, 'flag must be reset after boot warmup');
+    }
+
+    protected function tearDown(): void
+    {
+        HttpWorker::$currentHttpWorker = null;
+        HttpWorker::$bootWarmupInProgress = false;
+        parent::tearDown();
+    }
+
     public function testWorkerBootingEventAlwaysDispatched(): void
     {
         $this->psr7Worker->method('waitRequest')->willReturn(null);

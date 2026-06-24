@@ -35,6 +35,15 @@ class HttpWorker implements WorkerInterface
 
     public static ?\Spiral\RoadRunner\Http\HttpWorker $currentHttpWorker = null;
 
+    /**
+     * True only while the worker is serving its own early-router-initialization dummy
+     * request at boot (see DUMMY_REQUEST_ATTRIBUTE). The headers_send() polyfill checks
+     * this to swallow informational (1xx) responses such as Early Hints: at boot there is
+     * no real RoadRunner request frame to write them to, and emitting one corrupts the
+     * worker protocol so it never reaches "ready".
+     */
+    public static bool $bootWarmupInProgress = false;
+
     public const string DUMMY_REQUEST_ATTRIBUTE = "rr_dummy_request";
 
     private bool $shutdownRegistered = false;
@@ -79,7 +88,12 @@ class HttpWorker implements WorkerInterface
             $this->kernel->boot();
 
             if ($this->earlyRouterInitialization) {
-                $this->kernel->handle(new Request(attributes: [self::DUMMY_REQUEST_ATTRIBUTE => true]));
+                self::$bootWarmupInProgress = true;
+                try {
+                    $this->kernel->handle(new Request(attributes: [self::DUMMY_REQUEST_ATTRIBUTE => true]));
+                } finally {
+                    self::$bootWarmupInProgress = false;
+                }
             }
 
             new \ReflectionClass(StreamedJsonResponse::class);

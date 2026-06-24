@@ -3,7 +3,7 @@
 function headers_send(int $statusCode = 200): int
 {
     $rr = \FluffyDiscord\RoadRunnerBundle\Worker\HttpWorker::$currentHttpWorker;
-    if ($rr === null || $statusCode >= 200) {
+    if ($rr === null || $statusCode >= 200 || \FluffyDiscord\RoadRunnerBundle\Worker\HttpWorker::$bootWarmupInProgress) {
         return $statusCode;
     }
 
