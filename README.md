@@ -5,6 +5,7 @@ Yet another runtime for Symfony and [RoadRunner](https://roadrunner.dev/).
 ## Features
 
 - [HTTP worker](#usage) — drop-in runtime; service reset runs *after* the response, off the request's critical path
+- [Worker warmup](#worker-warmup) — zero-config pre-warming; first request at steady-state speed
 - [Response & file streaming](#responsefile-streaming) — `StreamedResponse`, `StreamedJsonResponse`, `BinaryFileResponse`
 - [Early Hints (103)](#early-hints-103)
 - [Graceful error handling](#error-handling) — proper HTTP responses for `die()`/`exit()`/fatals
@@ -580,51 +581,34 @@ fluffy_discord_road_runner:
 
 ## Worker warmup
 
-A freshly spawned worker serves its first request several times slower than its steady
-state: each RoadRunner worker is an independent `cli` process that lazily compiles
-thousands of classes and lazily initializes framework infrastructure (Doctrine metadata
-and entity persisters, form types, event listeners, Twig runtimes, Symfony cache-pool
-files) on its first real request. `opcache.preload` does not help — the Symfony-generated
-preload file returns early under the `cli` SAPI.
+A fresh worker's first request is several times slower than its steady state: PHP
+compiles thousands of classes and Symfony initializes its infrastructure lazily, on
+first use. `opcache.preload` can't help — it is a no-op in `cli` workers.
 
-The bundle fixes this in two zero-config layers, both running while the worker boots,
-BEFORE RoadRunner marks it ready (so the warm-up cost is never observed by a request):
+The bundle warms all of this during worker boot, before RoadRunner marks the worker
+ready. Zero config:
 
-1. **Generic warmers** — router matcher/generator, Doctrine metadata + entity persisters,
-   event listeners, form-type registry, Twig runtimes, plus a first-boot fallback that
-   preloads the class list from the Symfony-generated preload file. Each warmer
-   self-disables when its dependency is absent; a failing warmer is logged and skipped,
-   never blocking worker boot.
-2. **Learned manifest** — after real responses, the worker records which classes and
-   cache files traffic actually loaded into a JSON manifest
-   (`<kernel.cache_dir>/roadrunner/warmup.manifest.json` by default). Every subsequently
-   booted worker replays it and serves its first request at steady-state latency.
-   Measured on a production Sylius app: first request 252 ms -> 41 ms (steady state
-   33-43 ms). The manifest is traffic-shaped: only page types visited during the
-   learning window are fully warmed. It self-invalidates when the container is rebuilt.
+1. **Generic warmers** — router, Doctrine metadata, event listeners, form types, Twig
+   runtimes, container preload class list. Missing dependencies are skipped.
+2. **Learned manifest** — workers record what real traffic loads
+   (`<kernel.cache_dir>/roadrunner/warmup.manifest.json`) and every next worker replays
+   it at boot. Invalidated automatically when the container is rebuilt.
 
-Notes for production:
+Measured on a production Sylius app: first request 252 ms → 41 ms (steady state 33–43 ms).
 
-- Run worker PHP with `display_errors=0` (or `stderr`): PHP warnings printed to stdout
-  corrupt the RoadRunner worker protocol — this applies to any worker-mode setup, but a
-  boot-time class preload makes load-time warnings more likely to surface.
-- `opcache.file_cache=/some/dir` is worth setting when you run many workers or restart
-  them often: compiled bytecode is shared on disk across worker processes, cutting
-  worker boot from ~600 ms to ~200 ms at the cost of a few ms on first requests. The
-  bundle detects it and automatically skips the (redundant, and in that combination
-  harmful) boot-time compilation of cache files.
-- Memory: preloaded classes live in each worker process's own opcache; budget
-  `opcache.memory_consumption` x worker count.
-- `warmup.learn_requests` (default 30) bounds recording per worker process; raise it if
-  your traffic takes longer to touch all important page types, lower it to shave the
-  last few ms off early-response availability. Recording stops on its own either way.
-- Set `warmup.manifest_path` outside the cache dir to persist learning across deploys
-  (e.g. autoscaling fleets); the build-id check relearns automatically after each
-  container rebuild.
+Production notes:
+
+- Run worker PHP with `display_errors=0` — warnings on stdout corrupt the worker protocol.
+- `opcache.file_cache=/some/dir` shares compiled bytecode across workers
+  (worker boot ~600 ms → ~200 ms). The bundle adapts to it automatically.
+- Warmed classes live in each worker's own opcache — budget
+  `opcache.memory_consumption` × worker count.
+- `warmup.learn_requests` (default 30) — how many responses each worker records.
+- Set `warmup.manifest_path` outside the cache dir to keep learning across deploys.
 
 ### Warming your own services
 
-Implement the interface — autoconfiguration tags and orders it for you:
+Implement the interface — autoconfiguration does the rest:
 
 ```php
 use FluffyDiscord\RoadRunnerBundle\Warmup\WorkerWarmerInterface;
@@ -642,17 +626,8 @@ class MyCacheWarmer implements WorkerWarmerInterface
 }
 ```
 
-Alternatively, listen to `WorkerBootingEvent` directly (equal-status extension seam,
-used by the bundle's own PostgreSQL preconnect). The warmers run inside the runner's
-try/catch — throwing never prevents the worker from serving.
-
-### Upgrading from early_router_initialization (v7)
-
-`http.early_router_initialization` and its boot-time dummy request are gone — remove the
-key from your config. The dummy request carried no Host header, which crashed
-host-based channel/tenant resolution (Sylius etc.); if you added a request listener that
-short-circuits requests carrying `HttpWorker::DUMMY_REQUEST_ATTRIBUTE`, delete it — the
-constant no longer exists and the router warmer needs no HTTP request at all.
+Or listen to `WorkerBootingEvent`. A throwing warmer is logged and skipped — warmup
+never prevents the worker from serving.
 
 ## Distributed locks (symfony/lock)
 
