@@ -19,7 +19,6 @@ use Symfony\Component\ErrorHandler\ErrorRenderer\HtmlErrorRenderer;
 use Symfony\Component\ErrorHandler\Exception\FlattenException;
 use Symfony\Component\EventDispatcher\EventDispatcherInterface;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
-use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpFoundation\StreamedJsonResponse;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -36,20 +35,16 @@ class HttpWorker implements WorkerInterface
     public static ?\Spiral\RoadRunner\Http\HttpWorker $currentHttpWorker = null;
 
     /**
-     * True only while the worker is serving its own early-router-initialization dummy
-     * request at boot (see DUMMY_REQUEST_ATTRIBUTE). The headers_send() polyfill checks
-     * this to swallow informational (1xx) responses such as Early Hints: at boot there is
-     * no real RoadRunner request frame to write them to, and emitting one corrupts the
-     * worker protocol so it never reaches "ready".
+     * True only while WorkerWarmupRunner executes the boot-time warmers. The
+     * headers_send() polyfill checks this to swallow informational (1xx) responses such
+     * as Early Hints: at boot there is no real RoadRunner request frame to write them
+     * to, and emitting one corrupts the worker protocol so it never reaches "ready".
      */
     public static bool $bootWarmupInProgress = false;
-
-    public const string DUMMY_REQUEST_ATTRIBUTE = "rr_dummy_request";
 
     private bool $shutdownRegistered = false;
 
     public function __construct(
-        private readonly bool                       $earlyRouterInitialization,
         private readonly bool                       $lazyBoot,
         private readonly KernelInterface            $kernel,
         private readonly EventDispatcherInterface   $eventDispatcher,
@@ -86,15 +81,6 @@ class HttpWorker implements WorkerInterface
 
         if (!$this->lazyBoot) {
             $this->kernel->boot();
-
-            if ($this->earlyRouterInitialization) {
-                self::$bootWarmupInProgress = true;
-                try {
-                    $this->kernel->handle(new Request(attributes: [self::DUMMY_REQUEST_ATTRIBUTE => true]));
-                } finally {
-                    self::$bootWarmupInProgress = false;
-                }
-            }
 
             new \ReflectionClass(StreamedJsonResponse::class);
             new \ReflectionClass(StreamedResponse::class);

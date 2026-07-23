@@ -3,7 +3,6 @@
 namespace FluffyDiscord\RoadRunnerBundle\DependencyInjection;
 
 use FluffyDiscord\RoadRunnerBundle\Temporal\TemporalWorkerInterface;
-use FluffyDiscord\RoadRunnerBundle\Worker\HttpWorker;
 use Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition;
 use Symfony\Component\Config\Definition\Builder\TreeBuilder;
 use Symfony\Component\Config\Definition\ConfigurationInterface;
@@ -50,29 +49,6 @@ class Configuration implements ConfigurationInterface
                                 'or just boot up using only a few "emergency" workers',
                                 'and then use dynamic worker scaling as described here',
                                 'https://docs.roadrunner.dev/php-worker/scaling',
-                            ]))
-                            ->defaultFalse()
-                        ->end()
-                        ->booleanNode("early_router_initialization")
-                            ->info($this->toInfo([
-                                'This decides if Symfony routing should be preloaded',
-                                'when worker starts and boots Symfony kernel.',
-                                '',
-                                'This option halves the initial request response time.',
-                                '(based on a project with over 400 routes',
-                                'and quite a lot of services, YMMW)',
-                                '',
-                                'true - sends one dummy (empty) HTTP request',
-                                'for kernel to initialize routing and services around it',
-                                '',
-                                'false - only when first request arrives',
-                                'routing and it\'s services are loaded',
-                                '',
-                                'You might want to create a dummy "/"',
-                                'route for the route to "land",',
-                                'or listen to onKernelRequest events',
-                                'and look in the request for the attribute',
-                                HttpWorker::class.'::DUMMY_REQUEST_ATTRIBUTE',
                             ]))
                             ->defaultFalse()
                         ->end()
@@ -182,6 +158,53 @@ class Configuration implements ConfigurationInterface
                                 'application default bus (MessageBusInterface).',
                                 'Only relevant with symfony/messenger installed and',
                                 'multiple buses defined.',
+                            ]))
+                            ->defaultNull()
+                        ->end()
+                    ->end()
+                    ->addDefaultsIfNotSet()
+                ->end()
+                ->arrayNode("warmup")
+                    ->info($this->toInfo([
+                        'Worker warmup system: pre-initializes framework infrastructure',
+                        '(router, Doctrine metadata + persisters, event listeners, form',
+                        'types, Twig runtimes) and replays a learned manifest of',
+                        'classes/files real traffic loaded, all while the worker boots,',
+                        'before RoadRunner marks it ready. First request then performs',
+                        'at steady-state latency. Runs for every worker type on every',
+                        'worker boot regardless of "lazy_boot".',
+                        'See docs/specs/worker-warmup.md.',
+                    ]))
+                    ->children()
+                        ->booleanNode("enabled")
+                            ->info('Master switch for the runner, all built-in warmers and the recorder.')
+                            ->defaultTrue()
+                        ->end()
+                        ->booleanNode("learn")
+                            ->info($this->toInfo([
+                                'Learned-manifest layer: record which classes and cache',
+                                'files real responses load, replay them at every',
+                                'subsequent worker boot. The manifest only covers routes',
+                                'actually visited while learning.',
+                            ]))
+                            ->defaultTrue()
+                        ->end()
+                        ->integerNode("learn_requests")
+                            ->info('Stop recording after this many responses per worker process.')
+                            ->min(1)
+                            ->defaultValue(30)
+                        ->end()
+                        ->scalarNode("manifest_path")
+                            ->validate()
+                                ->ifTrue(static fn($value) => $value !== null && !is_string($value))
+                                ->thenInvalid('warmup.manifest_path must be a string or null.')
+                            ->end()
+                            ->info($this->toInfo([
+                                'Where the learned manifest (JSON) is stored.',
+                                'null = <kernel.cache_dir>/roadrunner/warmup.manifest.json',
+                                'Point it outside the cache dir to persist learning across',
+                                'deploys; the manifest self-invalidates when the container',
+                                'build id changes.',
                             ]))
                             ->defaultNull()
                         ->end()

@@ -244,8 +244,9 @@ class HttpWorkerEarlyHintsTest extends AbstractHttpWorkerTestCase
 
     public function testHeadersSendNoOpDuringBootWarmup(): void
     {
-        // Boot-time dummy request: a worker is set, but informational responses must be
-        // swallowed — there is no real request frame to write a 103 to (see HttpWorkerBootTest).
+        // Boot-time warmup (WorkerWarmupRunner sets the flag): a worker is set, but
+        // informational responses must be swallowed — there is no real request frame to
+        // write a 103 to (see HttpWorkerBootTest).
         HttpWorker::$currentHttpWorker = $this->spiralHttpWorker;
         HttpWorker::$bootWarmupInProgress = true;
 

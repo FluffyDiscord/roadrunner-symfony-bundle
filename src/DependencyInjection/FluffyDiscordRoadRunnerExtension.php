@@ -7,6 +7,7 @@ use FluffyDiscord\RoadRunnerBundle\Attribute\AsCentrifugoRpcListener;
 use FluffyDiscord\RoadRunnerBundle\Cache\KVCacheAdapter;
 use FluffyDiscord\RoadRunnerBundle\Doctrine\DoctrinePreconnectListener;
 use FluffyDiscord\RoadRunnerBundle\Event\Worker\WorkerBootingEvent;
+use FluffyDiscord\RoadRunnerBundle\Event\Worker\WorkerResponseSentEvent;
 use FluffyDiscord\RoadRunnerBundle\Exception\CacheAutoRegisterException;
 use FluffyDiscord\RoadRunnerBundle\Exception\InvalidRPCConfigurationException;
 use FluffyDiscord\RoadRunnerBundle\Exception\TemporalAddressException;
@@ -20,6 +21,17 @@ use FluffyDiscord\RoadRunnerBundle\Temporal\Interceptor\Event\ActivityInbound\Ac
 use FluffyDiscord\RoadRunnerBundle\Temporal\Interceptor\Event\WorkflowClient\StartEvent;
 use FluffyDiscord\RoadRunnerBundle\Temporal\Interceptor\Event\WorkflowOutboundCalls\ExecuteActivityEvent;
 use FluffyDiscord\RoadRunnerBundle\Temporal\Tracing\TemporalTracingListener;
+use FluffyDiscord\RoadRunnerBundle\Warmup\ContainerPreloadWarmer;
+use FluffyDiscord\RoadRunnerBundle\Warmup\DoctrineWarmer;
+use FluffyDiscord\RoadRunnerBundle\Warmup\EventListenersWarmer;
+use FluffyDiscord\RoadRunnerBundle\Warmup\FormRegistryWarmer;
+use FluffyDiscord\RoadRunnerBundle\Warmup\LearnedManifestWarmer;
+use FluffyDiscord\RoadRunnerBundle\Warmup\RouterWarmer;
+use FluffyDiscord\RoadRunnerBundle\Warmup\TwigRuntimesWarmer;
+use FluffyDiscord\RoadRunnerBundle\Warmup\WarmupManifestRecorder;
+use FluffyDiscord\RoadRunnerBundle\Warmup\WarmupManifestStorage;
+use FluffyDiscord\RoadRunnerBundle\Warmup\WorkerWarmerInterface;
+use FluffyDiscord\RoadRunnerBundle\Warmup\WorkerWarmupRunner;
 use FluffyDiscord\RoadRunnerBundle\Worker\CentrifugoWorker;
 use FluffyDiscord\RoadRunnerBundle\Worker\HttpWorker;
 use FluffyDiscord\RoadRunnerBundle\Worker\JobsWorker;
@@ -35,6 +47,7 @@ use Symfony\Component\DependencyInjection\Definition;
 use Symfony\Component\DependencyInjection\Extension\Extension;
 use Symfony\Component\DependencyInjection\Extension\PrependExtensionInterface;
 use Symfony\Component\DependencyInjection\Loader\PhpFileLoader;
+use Symfony\Component\DependencyInjection\Argument\TaggedIteratorArgument;
 use Symfony\Component\DependencyInjection\Reference;
 use Symfony\Component\Yaml\Yaml;
 use Sentry\State\HubInterface as SentryHubInterface;
@@ -103,13 +116,16 @@ class FluffyDiscordRoadRunnerExtension extends Extension implements PrependExten
         }
 
         $configuration = $this->getConfiguration([], $container);
-        /** @var array{http: array{early_router_initialization: bool, lazy_boot: bool}, centrifugo: array{lazy_boot: bool}, jobs: array{lazy_boot: bool, serializer: 'native'|'igbinary'|'symfony'|null, default_queue: non-empty-string, bus: ?string}, doctrine: array{preconnect: bool}, kv: array{auto_register: bool, serializer: ?string, keypair_path: ?string}, rr_config_path: ?string, temporal?: array{namespace?: string, tracing?: bool, api_key?: ?string, retryable_errors?: list<string>, default_worker_options?: array<string, mixed>, worker_options?: array<string, array<string, mixed>>}} $config */
+        /** @var array{http: array{lazy_boot: bool}, warmup: array{enabled: bool, learn: bool, learn_requests: int, manifest_path: ?string}, centrifugo: array{lazy_boot: bool}, jobs: array{lazy_boot: bool, serializer: 'native'|'igbinary'|'symfony'|null, default_queue: non-empty-string, bus: ?string}, doctrine: array{preconnect: bool}, kv: array{auto_register: bool, serializer: ?string, keypair_path: ?string}, rr_config_path: ?string, temporal?: array{namespace?: string, tracing?: bool, api_key?: ?string, retryable_errors?: list<string>, default_worker_options?: array<string, mixed>, worker_options?: array<string, array<string, mixed>>}} $config */
         $config = $this->processConfiguration($configuration, $configs);
 
         if ($container->hasDefinition(HttpWorker::class)) {
             $definition = $container->getDefinition(HttpWorker::class);
-            $definition->replaceArgument(0, $config["http"]["early_router_initialization"]);
-            $definition->replaceArgument(1, $config["http"]["lazy_boot"]);
+            $definition->replaceArgument(0, $config["http"]["lazy_boot"]);
+        }
+
+        if ($config["warmup"]["enabled"] === true) {
+            $this->registerWarmup($container, $config["warmup"]);
         }
 
         if ($container->hasDefinition(CentrifugoWorker::class)) {
@@ -294,6 +310,96 @@ class FluffyDiscordRoadRunnerExtension extends Extension implements PrependExten
         $definition->addTag('kernel.event_listener', ['event' => ActivityEvent::class, 'method' => 'onActivityInbound']);
 
         $container->setDefinition(TemporalTracingListener::class, $definition);
+    }
+
+    /**
+     * See docs/specs/worker-warmup.md. All wiring lives here (config-flag-gated), not in
+     * config/services.php — same rule as registerDoctrinePreconnect.
+     *
+     * @param array{enabled: bool, learn: bool, learn_requests: int, manifest_path: ?string} $warmupConfig
+     */
+    private function registerWarmup(ContainerBuilder $container, array $warmupConfig): void
+    {
+        $container
+            ->registerForAutoconfiguration(WorkerWarmerInterface::class)
+            ->addTag('fluffy_discord.road_runner.worker_warmer');
+
+        $manifestPath = $warmupConfig['manifest_path'] ?? '%kernel.cache_dir%/roadrunner/warmup.manifest.json';
+
+        $storage = new Definition(WarmupManifestStorage::class, [
+            $manifestPath,
+            new Reference('parameter_bag', ContainerInterface::NULL_ON_INVALID_REFERENCE),
+            new Reference('logger', ContainerInterface::NULL_ON_INVALID_REFERENCE),
+        ]);
+        $container->setDefinition(WarmupManifestStorage::class, $storage);
+
+        $learnedManifestWarmer = new Definition(LearnedManifestWarmer::class, [
+            new Reference(WarmupManifestStorage::class),
+            new Reference('logger', ContainerInterface::NULL_ON_INVALID_REFERENCE),
+        ]);
+        $learnedManifestWarmer->addTag('fluffy_discord.road_runner.worker_warmer', ['priority' => 64]);
+        $container->setDefinition(LearnedManifestWarmer::class, $learnedManifestWarmer);
+
+        $containerPreloadWarmer = new Definition(ContainerPreloadWarmer::class, [
+            '%kernel.build_dir%',
+            new Reference(WarmupManifestStorage::class),
+            new Reference('logger', ContainerInterface::NULL_ON_INVALID_REFERENCE),
+        ]);
+        $containerPreloadWarmer->addTag('fluffy_discord.road_runner.worker_warmer', ['priority' => 48]);
+        $container->setDefinition(ContainerPreloadWarmer::class, $containerPreloadWarmer);
+
+        $routerWarmer = new Definition(RouterWarmer::class, [
+            new Reference('router.default', ContainerInterface::NULL_ON_INVALID_REFERENCE),
+        ]);
+        $routerWarmer->addTag('fluffy_discord.road_runner.worker_warmer', ['priority' => 32]);
+        $container->setDefinition(RouterWarmer::class, $routerWarmer);
+
+        if (interface_exists(\Doctrine\Persistence\ManagerRegistry::class)) {
+            $doctrineWarmer = new Definition(DoctrineWarmer::class, [
+                new Reference('doctrine', ContainerInterface::NULL_ON_INVALID_REFERENCE),
+            ]);
+            $doctrineWarmer->addTag('fluffy_discord.road_runner.worker_warmer', ['priority' => 32]);
+            $container->setDefinition(DoctrineWarmer::class, $doctrineWarmer);
+        }
+
+        $eventListenersWarmer = new Definition(EventListenersWarmer::class, [
+            new Reference('event_dispatcher', ContainerInterface::NULL_ON_INVALID_REFERENCE),
+        ]);
+        $eventListenersWarmer->addTag('fluffy_discord.road_runner.worker_warmer', ['priority' => 16]);
+        $container->setDefinition(EventListenersWarmer::class, $eventListenersWarmer);
+
+        if (interface_exists(\Symfony\Component\Form\FormRegistryInterface::class)) {
+            $formRegistryWarmer = new Definition(FormRegistryWarmer::class, [
+                new TaggedIteratorArgument('form.type'),
+                new Reference('form.registry', ContainerInterface::NULL_ON_INVALID_REFERENCE),
+            ]);
+            $formRegistryWarmer->addTag('fluffy_discord.road_runner.worker_warmer', ['priority' => 16]);
+            $container->setDefinition(FormRegistryWarmer::class, $formRegistryWarmer);
+        }
+
+        $twigRuntimesWarmer = new Definition(TwigRuntimesWarmer::class, [
+            new TaggedIteratorArgument('twig.runtime'),
+        ]);
+        $twigRuntimesWarmer->addTag('fluffy_discord.road_runner.worker_warmer', ['priority' => 16]);
+        $container->setDefinition(TwigRuntimesWarmer::class, $twigRuntimesWarmer);
+
+        $runner = new Definition(WorkerWarmupRunner::class, [
+            new TaggedIteratorArgument('fluffy_discord.road_runner.worker_warmer'),
+            new Reference('logger', ContainerInterface::NULL_ON_INVALID_REFERENCE),
+        ]);
+        $runner->addTag('kernel.event_listener', ['event' => WorkerBootingEvent::class, 'method' => '__invoke', 'priority' => 128]);
+        $container->setDefinition(WorkerWarmupRunner::class, $runner);
+
+        if ($warmupConfig['learn'] === true) {
+            $recorder = new Definition(WarmupManifestRecorder::class, [
+                new Reference(WarmupManifestStorage::class),
+                '%kernel.cache_dir%',
+                $warmupConfig['learn_requests'],
+                new Reference('logger', ContainerInterface::NULL_ON_INVALID_REFERENCE),
+            ]);
+            $recorder->addTag('kernel.event_listener', ['event' => WorkerResponseSentEvent::class, 'method' => '__invoke']);
+            $container->setDefinition(WarmupManifestRecorder::class, $recorder);
+        }
     }
 
     private function registerDoctrinePreconnect(ContainerBuilder $container): void

@@ -60,7 +60,6 @@ return static function (ContainerConfigurator $container) {
         ->set(BundleHttpWorker::class)
         ->public()
         ->args([
-            true,
             false,
             service(KernelInterface::class),
             service(EventDispatcherInterface::class),
