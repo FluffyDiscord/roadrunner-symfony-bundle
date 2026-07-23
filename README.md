@@ -2,6 +2,8 @@
 
 Yet another runtime for Symfony and [RoadRunner](https://roadrunner.dev/).
 
+> Using DDEV? There's a companion [DDEV add-on](https://github.com/FluffyDiscord/ddev-roadrunner-symfony) for a one-command local setup — see [DDEV add-on](#ddev-add-on) below.
+
 ## Features
 
 - [HTTP worker](#usage) — drop-in runtime; service reset runs *after* the response, off the request's critical path
@@ -782,6 +784,17 @@ $correctForm = $this->createForm(MyType::class, options: [
 With RoadRunner you cannot simply dump and die, because nothing will be printed.
 I would like to introduce [Buggregator](https://docs.buggregator.dev/config/var-dumper.html) to work around that. 
 As a bonus it can also work as a [mailtrap](https://docs.buggregator.dev/config/smtp.html) or testing [Sentry](https://docs.buggregator.dev/config/sentry.html) locally
+
+## DDEV add-on
+
+If you develop with [DDEV](https://ddev.com/), the [`ddev-roadrunner-symfony`](https://github.com/FluffyDiscord/ddev-roadrunner-symfony)
+add-on wires RoadRunner into your DDEV project so you can get this bundle running locally in one command:
+
+```shell
+ddev add-on get FluffyDiscord/ddev-roadrunner-symfony
+```
+
+See the [add-on repository](https://github.com/FluffyDiscord/ddev-roadrunner-symfony) for configuration and usage details.
 
 ## Credits
 
