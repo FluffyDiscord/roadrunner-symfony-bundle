@@ -110,7 +110,6 @@ abstract class AbstractHttpWorkerTestCase extends BaseTestCase
     }
 
     protected function makeWorker(
-        bool                $earlyRouterInit = false,
         bool                $lazyBoot = true,
         bool                $debug = false,
         ?KernelInterface    $kernel = null,
@@ -118,7 +117,6 @@ abstract class AbstractHttpWorkerTestCase extends BaseTestCase
     ): TestableHttpWorker
     {
         $worker = new TestableHttpWorker(
-            earlyRouterInitialization: $earlyRouterInit,
             lazyBoot: $lazyBoot,
             kernel: $kernel ?? $this->kernel,
             eventDispatcher: $this->eventDispatcher,

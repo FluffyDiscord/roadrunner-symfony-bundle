@@ -51,7 +51,7 @@
 | B (no frame started), debug | `MinimalErrorPage` (500, `text/html`), **best-effort** | ≤1 (`respond`; if it throws → `error`) | fatal details (or generic, for bare die/exit)→STDERR; **best-effort Sentry** | process exits; RR respawns |
 | B (no frame started), prod | bare 500, best-effort | ≤1 | STDERR; best-effort Sentry | exits; RR respawns |
 | B′ mid-stream | (truncated stream) | **0 added** | STDERR; best-effort Sentry | exits; RR respawns |
-| boot / dummy early-router request death | (RR's error — no client) | 0 | STDERR if reachable | exits; RR respawns |
+| boot-time death (superseded: was "dummy early-router request" — replaced by boot warmers, see worker-warmup.md ADR-10) | (RR's error — no client) | 0 | STDERR if reachable | exits; RR respawns |
 | C | (RR's internal error) | 0 | nothing from us | RR respawns |
 
 **Invariant I-1 (corrected):** the worker emits **one terminal frame on the non-streamed path**; **streamed responses emit one frame per chunk by design** (O8). The shutdown rescue emits a frame **only when no frame for the current request has started** (`handlingRequest && !responseStarted`) — it never appends to an in-progress or completed response.
@@ -83,7 +83,7 @@ if (!$this->shutdownRegistered) {                 // Invariant I-3 — instance 
 }
 ```
 
-Registration happens **after** `boot()` / the dummy early-router request (`HttpWorker.php:78-93`) and immediately before the loop, so boot-time death is naturally a no-op (`$handlingRequest === false`). The dummy request runs in `boot()` outside the loop and never sets `$handlingRequest` (boot/dummy row in §3).
+Registration happens **after** `boot()` and immediately before the loop, so boot-time death is naturally a no-op (`$handlingRequest === false`). (superseded: this used to name the dummy early-router request, removed in favor of boot warmers — worker-warmup.md ADR-10; warmup runs on `WorkerBootingEvent` outside the loop and never sets `$handlingRequest`.)
 
 Per iteration: top → all three `false`; after non-null `waitRequest()` → `$handlingRequest = true`; **immediately before** `getHttpWorker()->respond(...)` (success path) and before `respond()` (catch path) → `$responseStarted = true`; after a successful normal `respond()` → `$responseSent = true`.
 
@@ -263,7 +263,7 @@ Run 2026-05-29 against **RoadRunner v2025.1.14** (linux/amd64) + a minimal Symfo
 | die/exit/fatal, no frame started | shutdown fn + `handlingRequest && !responseStarted` | debug minimal page / prod 500 (best-effort, A-1) | `error()` if `respond` throws | details or generic→STDERR; best-effort Sentry | exits; RR respawns |
 | die/exit/fatal **mid-stream** (B′) | shutdown fn + `responseStarted` | none (no added frame) | — | STDERR; best-effort Sentry | exits; RR respawns |
 | OOM during render in handler | `message` ~ `Allowed memory size` | `memory_limit=-1`, then minimal page | RR's error (give up) | STDERR | exits |
-| fatal during boot / dummy request | shutdown fn + `handlingRequest===false` | none (no client) | — | STDERR if reachable | exits; RR respawns |
+| fatal during boot / warmup (superseded: was "dummy request" — worker-warmup.md ADR-10) | shutdown fn + `handlingRequest===false` | none (no client) | — | STDERR if reachable | exits; RR respawns |
 | Cleanup (`terminate`/`reset`) throws | existing `finally` nested try/catch (`HttpWorker.php:179-189`) | — | — | STDERR (was `error()`) | `stop()` |
 | `waitRequest()` throws | existing `catch` (`HttpWorker.php:107-110`) | 418 teapot, `continue` | — | — | keep alive (unchanged) |
 

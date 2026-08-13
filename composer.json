@@ -65,7 +65,9 @@
         "symfony/messenger": "^7.4 || ^8",
         "spiral/roadrunner-jobs": "^4.7",
         "doctrine/dbal" : "^4",
-        "doctrine/persistence" : "^4"
+        "doctrine/persistence" : "^4",
+        "doctrine/orm": "^3.6",
+        "symfony/form": "^8.0"
     },
     "suggest" : {
         "spiral/roadrunner-jobs" : "Enables the RoadRunner Jobs (queue consumer) worker, the raw JobsRunEvent and the typed Jobs message bus. Without it only the HTTP/Centrifugo/Temporal workers are available.",

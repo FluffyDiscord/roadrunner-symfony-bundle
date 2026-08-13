@@ -19,7 +19,10 @@ class ConfigurationTest extends BaseTestCase
 
         self::assertSame('.rr.yaml', $config['rr_config_path']);
         self::assertFalse($config['http']['lazy_boot']);
-        self::assertFalse($config['http']['early_router_initialization']);
+        self::assertTrue($config['warmup']['enabled']);
+        self::assertTrue($config['warmup']['learn']);
+        self::assertSame(30, $config['warmup']['learn_requests']);
+        self::assertNull($config['warmup']['manifest_path']);
         self::assertFalse($config['centrifugo']['lazy_boot']);
         self::assertTrue($config['kv']['auto_register']);
         self::assertNull($config['kv']['serializer']);
@@ -41,11 +44,27 @@ class ConfigurationTest extends BaseTestCase
         self::assertTrue($config['http']['lazy_boot']);
     }
 
-    public function testEarlyRouterInitializationCanBeEnabled(): void
+    public function testEarlyRouterInitializationNodeIsGone(): void
     {
-        $config = $this->processConfig([['http' => ['early_router_initialization' => true]]]);
+        $this->expectException(\Symfony\Component\Config\Definition\Exception\InvalidConfigurationException::class);
 
-        self::assertTrue($config['http']['early_router_initialization']);
+        $this->processConfig([['http' => ['early_router_initialization' => true]]]);
+    }
+
+    public function testWarmupCanBeDisabled(): void
+    {
+        $config = $this->processConfig([['warmup' => ['enabled' => false, 'learn' => false]]]);
+
+        self::assertFalse($config['warmup']['enabled']);
+        self::assertFalse($config['warmup']['learn']);
+    }
+
+    public function testWarmupManifestPathCanBeSet(): void
+    {
+        $config = $this->processConfig([['warmup' => ['manifest_path' => '/var/data/warmup.json', 'learn_requests' => 5]]]);
+
+        self::assertSame('/var/data/warmup.json', $config['warmup']['manifest_path']);
+        self::assertSame(5, $config['warmup']['learn_requests']);
     }
 
     public function testCentrifugoLazyBootCanBeEnabled(): void

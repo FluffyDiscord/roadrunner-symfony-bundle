@@ -2,9 +2,12 @@
 
 Yet another runtime for Symfony and [RoadRunner](https://roadrunner.dev/).
 
+> Using DDEV? There's a companion [DDEV add-on](https://github.com/FluffyDiscord/ddev-roadrunner-symfony) for a one-command local setup — see [DDEV add-on](#ddev-add-on) below.
+
 ## Features
 
 - [HTTP worker](#usage) — drop-in runtime; service reset runs *after* the response, off the request's critical path
+- [Worker warmup](#worker-warmup) — zero-config pre-warming; first request at steady-state speed
 - [Response & file streaming](#responsefile-streaming) — `StreamedResponse`, `StreamedJsonResponse`, `BinaryFileResponse`
 - [Early Hints (103)](#early-hints-103)
 - [Graceful error handling](#error-handling) — proper HTTP responses for `die()`/`exit()`/fatals
@@ -122,25 +125,12 @@ fluffy_discord_road_runner:
     # https://docs.roadrunner.dev/php-worker/scaling
     lazy_boot: false
 
-    # This decides if Symfony routing should be preloaded
-    # when worker starts and boots Symfony kernel.
-    #
-    # This option halves the initial request response time.
-    # (based on a project with over 400 routes
-    # and quite a lot of services, YMMW)
-    #
-    # true - sends one dummy (empty) HTTP request
-    # for kernel to initialize routing and services around it
-    #
-    # false - only when first request arrives
-    # routing and it's services are loaded
-    #
-    # You might want to create a dummy "/"
-    # route for the route to "land",
-    # or listen to onKernelRequest events
-    # and look in the request for the attribute
-    # FluffyDiscord\RoadRunnerBundle\Worker\HttpWorker::DUMMY_REQUEST_ATTRIBUTE
-    early_router_initialization: false
+  # Worker warmup (see "Worker warmup" section below)
+  warmup:
+    enabled: true
+    learn: true
+    learn_requests: 30
+    manifest_path: null
 
   # Centrifugo (websockets)
   # Will activate only when "roadrunner-php/centrifugo" is installed.
@@ -591,6 +581,56 @@ fluffy_discord_road_runner:
 
 > **Wire-format note:** the envelope (`x-job-class` / `x-job-serializer` headers, message FQCN as the RR job name) is a stable contract — changing it would break in-flight queued tasks across an upgrade (`docs/specs/jobs-message-bus.md`).
 
+## Worker warmup
+
+A fresh worker's first request is several times slower than its steady state: PHP
+compiles thousands of classes and Symfony initializes its infrastructure lazily, on
+first use. `opcache.preload` can't help — it is a no-op in `cli` workers.
+
+The bundle warms all of this during worker boot, before RoadRunner marks the worker
+ready. Zero config:
+
+1. **Generic warmers** — router, Doctrine metadata, event listeners, form types, Twig
+   runtimes, container preload class list. Missing dependencies are skipped.
+2. **Learned manifest** — workers record what real traffic loads
+   (`<kernel.cache_dir>/roadrunner/warmup.manifest.json`) and every next worker replays
+   it at boot. Invalidated automatically when the container is rebuilt.
+
+Measured on a production Sylius app: first request 252 ms → 41 ms (steady state 33–43 ms).
+
+Production notes:
+
+- Run worker PHP with `display_errors=0` — warnings on stdout corrupt the worker protocol.
+- `opcache.file_cache=/some/dir` shares compiled bytecode across workers
+  (worker boot ~600 ms → ~200 ms). The bundle adapts to it automatically.
+- Warmed classes live in each worker's own opcache — budget
+  `opcache.memory_consumption` × worker count.
+- `warmup.learn_requests` (default 30) — how many responses each worker records.
+- Set `warmup.manifest_path` outside the cache dir to keep learning across deploys.
+
+### Warming your own services
+
+Implement the interface — autoconfiguration does the rest:
+
+```php
+use FluffyDiscord\RoadRunnerBundle\Warmup\WorkerWarmerInterface;
+
+class MyCacheWarmer implements WorkerWarmerInterface
+{
+    public function __construct(private readonly MyExpensiveService $service)
+    {
+    }
+
+    public function warmup(): void
+    {
+        $this->service->buildInMemoryIndexes();
+    }
+}
+```
+
+Or listen to `WorkerBootingEvent`. A throwing warmer is logged and skipped — warmup
+never prevents the worker from serving.
+
 ## Distributed locks (symfony/lock)
 
 Optional. Install the bridge and you get a Symfony `LockFactory` backed by RoadRunner's Lock plugin over the same RPC connection — no extra config:
@@ -744,6 +784,17 @@ $correctForm = $this->createForm(MyType::class, options: [
 With RoadRunner you cannot simply dump and die, because nothing will be printed.
 I would like to introduce [Buggregator](https://docs.buggregator.dev/config/var-dumper.html) to work around that. 
 As a bonus it can also work as a [mailtrap](https://docs.buggregator.dev/config/smtp.html) or testing [Sentry](https://docs.buggregator.dev/config/sentry.html) locally
+
+## DDEV add-on
+
+If you develop with [DDEV](https://ddev.com/), the [`ddev-roadrunner-symfony`](https://github.com/FluffyDiscord/ddev-roadrunner-symfony)
+add-on wires RoadRunner into your DDEV project so you can get this bundle running locally in one command:
+
+```shell
+ddev add-on get FluffyDiscord/ddev-roadrunner-symfony
+```
+
+See the [add-on repository](https://github.com/FluffyDiscord/ddev-roadrunner-symfony) for configuration and usage details.
 
 ## Credits
 
