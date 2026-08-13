@@ -13,7 +13,7 @@ class HttpWorkerBootTest extends AbstractHttpWorkerTestCase
     public function testLazyBootSkipsKernelBoot(): void
     {
         $this->kernel->expects($this->never())->method('boot');
-        $this->psr7Worker->method('waitRequest')->willReturn(null);
+        $this->spiralHttpWorker->method('waitRequest')->willReturn(null);
 
         $this->makeWorker(lazyBoot: true)->start();
     }
@@ -22,7 +22,7 @@ class HttpWorkerBootTest extends AbstractHttpWorkerTestCase
     {
         $this->kernel->expects($this->once())->method('boot');
         $this->kernel->method('handle')->willReturn(new Response());
-        $this->psr7Worker->method('waitRequest')->willReturn(null);
+        $this->spiralHttpWorker->method('waitRequest')->willReturn(null);
 
         $this->makeWorker(lazyBoot: false)->start();
     }
@@ -30,7 +30,7 @@ class HttpWorkerBootTest extends AbstractHttpWorkerTestCase
     public function testBootIssuesNoRequest(): void
     {
         $this->kernel->expects($this->never())->method('handle');
-        $this->psr7Worker->method('waitRequest')->willReturn(null);
+        $this->spiralHttpWorker->method('waitRequest')->willReturn(null);
 
         $this->makeWorker(lazyBoot: false)->start();
     }
@@ -67,7 +67,7 @@ class HttpWorkerBootTest extends AbstractHttpWorkerTestCase
 
     public function testWorkerBootingEventAlwaysDispatched(): void
     {
-        $this->psr7Worker->method('waitRequest')->willReturn(null);
+        $this->spiralHttpWorker->method('waitRequest')->willReturn(null);
 
         $dispatched = [];
         $this->eventDispatcher

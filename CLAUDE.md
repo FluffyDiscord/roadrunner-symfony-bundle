@@ -5,9 +5,12 @@ RoadRunner runtime bundle for Symfony (HTTP + Centrifugo + Jobs + Temporal worke
 ## Quality checks
 
 Run both before committing. As of the latest cleanup, **both are green**: PHPStan
-reports 0 errors and the full suite is 352 tests / 763 assertions passing (10 skipped:
-the `@group jobs-live` tests plus Symfony-version-gated tests, none of which need a
-provisioned RoadRunner jobs pool to be considered green).
+
+### Benchmarks — `tests/docker-bench.sh`
+
+RPS + conversion-attribution harness. Runs wrk inside docker against a raw-PHP
+ceiling worker and the bundle with both `http.request_factory` strategies; numbers are
+session-relative — compare only within one run.
 
 ### Static analysis — PHPStan (level `max`)
 

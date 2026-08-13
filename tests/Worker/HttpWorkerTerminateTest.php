@@ -3,7 +3,6 @@
 namespace FluffyDiscord\RoadRunnerBundle\Tests\Worker;
 
 use PHPUnit\Framework\Attributes\AllowMockObjectsWithoutExpectations;
-use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 
 #[AllowMockObjectsWithoutExpectations]
@@ -15,11 +14,10 @@ class HttpWorkerTerminateTest extends AbstractHttpWorkerTestCase
         $kernel->method('handle')->willReturn(new Response());
         $kernel->expects($this->once())->method('terminate');
 
-        $this->psr7Worker
+        $this->spiralHttpWorker
             ->method('waitRequest')
-            ->willReturnOnConsecutiveCalls($this->psrRequest(), null)
+            ->willReturnOnConsecutiveCalls($this->rrRequest(), null)
         ;
-        $this->httpFoundationFactory->method('createRequest')->willReturn(new Request());
 
         $this->makeWorker(kernel: $kernel)->start();
     }
@@ -30,11 +28,10 @@ class HttpWorkerTerminateTest extends AbstractHttpWorkerTestCase
         $kernel->method('handle')->willThrowException(new \RuntimeException());
         $kernel->expects($this->never())->method('terminate');
 
-        $this->psr7Worker
+        $this->spiralHttpWorker
             ->method('waitRequest')
-            ->willReturnOnConsecutiveCalls($this->psrRequest(), null)
+            ->willReturnOnConsecutiveCalls($this->rrRequest(), null)
         ;
-        $this->httpFoundationFactory->method('createRequest')->willReturn(new Request());
 
         $this->makeWorker(kernel: $kernel)->start();
     }

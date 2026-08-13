@@ -3,7 +3,6 @@
 namespace FluffyDiscord\RoadRunnerBundle\Tests\Worker;
 
 use PHPUnit\Framework\Attributes\AllowMockObjectsWithoutExpectations;
-use Symfony\Component\HttpFoundation\Request;
 
 #[AllowMockObjectsWithoutExpectations]
 class HttpWorkerOutOfMemoryTest extends AbstractHttpWorkerTestCase
@@ -12,9 +11,8 @@ class HttpWorkerOutOfMemoryTest extends AbstractHttpWorkerTestCase
     {
         $oom = self::makeOutOfMemoryError();
 
-        $this->psr7Worker->method('waitRequest')
-            ->willReturnOnConsecutiveCalls($this->psrRequest(), null);
-        $this->httpFoundationFactory->method('createRequest')->willReturn(new Request());
+        $this->spiralHttpWorker->method('waitRequest')
+            ->willReturnOnConsecutiveCalls($this->rrRequest(), null);
 
         $this->kernel->method('handle')
             ->willReturnCallback(static function () use ($oom): void { throw $oom; });
@@ -29,9 +27,8 @@ class HttpWorkerOutOfMemoryTest extends AbstractHttpWorkerTestCase
         $firstOom  = self::makeOutOfMemoryError();
         $secondOom = self::makeOutOfMemoryError();
 
-        $this->psr7Worker->method('waitRequest')
-            ->willReturnOnConsecutiveCalls($this->psrRequest(), null);
-        $this->httpFoundationFactory->method('createRequest')->willReturn(new Request());
+        $this->spiralHttpWorker->method('waitRequest')
+            ->willReturnOnConsecutiveCalls($this->rrRequest(), null);
 
         $this->kernel->method('handle')
             ->willReturnCallback(static function () use ($firstOom): void { throw $firstOom; });

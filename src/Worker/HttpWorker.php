@@ -8,12 +8,14 @@ use FluffyDiscord\RoadRunnerBundle\Event\Worker\WorkerResponseSentEvent;
 use FluffyDiscord\RoadRunnerBundle\ErrorHandler\MinimalErrorPage;
 use FluffyDiscord\RoadRunnerBundle\Factory\BinaryFileResponseWrapper;
 use FluffyDiscord\RoadRunnerBundle\Factory\DefaultResponseWrapper;
+use FluffyDiscord\RoadRunnerBundle\Factory\Psr7SymfonyRequestFactory;
 use FluffyDiscord\RoadRunnerBundle\Factory\StreamedJsonResponseWrapper;
 use FluffyDiscord\RoadRunnerBundle\Factory\StreamedResponseWrapper;
+use FluffyDiscord\RoadRunnerBundle\Factory\SymfonyRequestFactoryInterface;
 use Nyholm\Psr7;
 use Sentry\State\HubInterface as SentryHubInterface;
 use Spiral\RoadRunner;
-use Symfony\Bridge\PsrHttpMessage\Factory\HttpFoundationFactory;
+use Spiral\RoadRunner\Http\GlobalState;
 use Symfony\Bridge\PsrHttpMessage\HttpFoundationFactoryInterface;
 use Symfony\Component\ErrorHandler\ErrorRenderer\HtmlErrorRenderer;
 use Symfony\Component\ErrorHandler\Exception\FlattenException;
@@ -29,7 +31,7 @@ use Symfony\Component\HttpKernel\TerminableInterface;
 
 class HttpWorker implements WorkerInterface
 {
-    private HttpFoundationFactoryInterface $httpFoundationFactory;
+    private SymfonyRequestFactoryInterface $symfonyRequestFactory;
     private Psr7\Factory\Psr17Factory $psrFactory;
 
     public static ?\Spiral\RoadRunner\Http\HttpWorker $currentHttpWorker = null;
@@ -52,10 +54,11 @@ class HttpWorker implements WorkerInterface
         private readonly ?ServicesResetterInterface $servicesResetter,
         private readonly ?SentryHubInterface        $sentryHubInterface = null,
         ?HttpFoundationFactoryInterface             $httpFoundationFactory = null,
+        ?SymfonyRequestFactoryInterface             $symfonyRequestFactory = null,
     )
     {
         $this->psrFactory = new Psr7\Factory\Psr17Factory();
-        $this->httpFoundationFactory = $httpFoundationFactory ?? new HttpFoundationFactory();
+        $this->symfonyRequestFactory = $symfonyRequestFactory ?? new Psr7SymfonyRequestFactory($httpFoundationFactory);
     }
 
     protected function createPsr7Worker(): RoadRunner\Http\PSR7Worker
@@ -110,8 +113,8 @@ class HttpWorker implements WorkerInterface
             $responseSent = false;
 
             try {
-                $request = $worker->waitRequest();
-                if ($request === null) {
+                $rrRequest = $worker->getHttpWorker()->waitRequest();
+                if ($rrRequest === null) {
                     break;
                 }
             } catch (\Throwable) {
@@ -126,7 +129,8 @@ class HttpWorker implements WorkerInterface
 
                 $this->eventDispatcher->dispatch(new WorkerRequestReceivedEvent());
 
-                $symfonyRequest = $this->httpFoundationFactory->createRequest($request);
+                $server = GlobalState::enrichServerVars($rrRequest);
+                $symfonyRequest = $this->symfonyRequestFactory->createRequest($rrRequest, $server);
                 $symfonyResponse = $this->kernel->handle($symfonyRequest);
 
                 $content = match (true) {
@@ -201,7 +205,7 @@ class HttpWorker implements WorkerInterface
 
                 $handlingRequest = false;
 
-                unset($request, $symfonyRequest, $symfonyResponse, $content);
+                unset($rrRequest, $symfonyRequest, $symfonyResponse, $content);
             }
         }
     }

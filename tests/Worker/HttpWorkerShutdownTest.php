@@ -160,7 +160,7 @@ class HttpWorkerShutdownTest extends AbstractHttpWorkerTestCase
     /** TC-12: the shutdown handler is registered at most once per worker instance. */
     public function testShutdownRegisteredOncePerInstance(): void
     {
-        $this->psr7Worker->method('waitRequest')->willReturn(null);
+        $this->spiralHttpWorker->method('waitRequest')->willReturn(null);
 
         $worker = $this->makeWorker();
         $worker->start();

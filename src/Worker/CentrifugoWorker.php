@@ -49,8 +49,11 @@ class CentrifugoWorker implements WorkerInterface
 
     public function start(): void
     {
+        $booted = false;
+
         if (!$this->lazyBoot) {
             $this->kernel->boot();
+            $booted = true;
         }
 
         $this->eventDispatcher->dispatch(new WorkerBootingEvent());
@@ -78,7 +81,10 @@ class CentrifugoWorker implements WorkerInterface
 
                 $this->eventDispatcher->dispatch(new WorkerRequestReceivedEvent());
 
-                $this->kernel->boot();
+                if (!$booted) {
+                    $this->kernel->boot();
+                    $booted = true;
+                }
 
                 $event = match (true) {
                     $request instanceof Request\Connect => new ConnectEvent($request),

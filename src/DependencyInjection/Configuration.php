@@ -52,6 +52,24 @@ class Configuration implements ConfigurationInterface
                             ]))
                             ->defaultFalse()
                         ->end()
+                        ->enumNode("request_factory")
+                            ->info($this->toInfo([
+                                'How RoadRunner requests are converted to Symfony requests.',
+                                '',
+                                'native (fastest) - build the Symfony Request directly from the',
+                                'RoadRunner request, skipping the intermediate PSR-7 object.',
+                                'psr7 - the legacy chain: build a PSR-7 request, then convert it',
+                                'via symfony/psr-http-message-bridge. Required when you decorate',
+                                'the conversion with a custom HttpFoundationFactoryInterface.',
+                                'auto (default) - psr7 when a custom HttpFoundationFactoryInterface',
+                                'service is registered, native otherwise.',
+                                '',
+                                'Behavior differences between the paths are documented in',
+                                'UPGRADE.md.',
+                            ]))
+                            ->values(["auto", "native", "psr7"])
+                            ->defaultValue("auto")
+                        ->end()
                     ->end()
                     ->addDefaultsIfNotSet()
                 ->end()

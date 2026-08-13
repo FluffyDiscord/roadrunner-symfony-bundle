@@ -4,7 +4,6 @@ namespace FluffyDiscord\RoadRunnerBundle\Tests\Worker;
 
 use FluffyDiscord\RoadRunnerBundle\Worker\HttpWorker;
 use PHPUnit\Framework\Attributes\AllowMockObjectsWithoutExpectations;
-use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 
 #[AllowMockObjectsWithoutExpectations]
@@ -28,7 +27,7 @@ class HttpWorkerEarlyHintsTest extends AbstractHttpWorkerTestCase
 
     public function testCurrentHttpWorkerSetOnStart(): void
     {
-        $this->psr7Worker->method('waitRequest')->willReturn(null);
+        $this->spiralHttpWorker->method('waitRequest')->willReturn(null);
 
         $this->makeWorker()->start();
 
@@ -96,8 +95,7 @@ class HttpWorkerEarlyHintsTest extends AbstractHttpWorkerTestCase
             return $response;
         });
 
-        $this->psr7Worker->method('waitRequest')->willReturnOnConsecutiveCalls($this->psrRequest(), null);
-        $this->httpFoundationFactory->method('createRequest')->willReturn(new Request());
+        $this->spiralHttpWorker->method('waitRequest')->willReturnOnConsecutiveCalls($this->rrRequest(), null);
 
         $this->makeWorker()->start();
 
@@ -125,9 +123,8 @@ class HttpWorkerEarlyHintsTest extends AbstractHttpWorkerTestCase
                 $psr7RespondCalls[] = func_get_args();
             });
 
-        $this->psr7Worker->method('waitRequest')
-            ->willReturnOnConsecutiveCalls($this->psrRequest(), null);
-        $this->httpFoundationFactory->method('createRequest')->willReturn(new Request());
+        $this->spiralHttpWorker->method('waitRequest')
+            ->willReturnOnConsecutiveCalls($this->rrRequest(), null);
 
         $this->kernel->method('handle')->willReturnCallback(function (): never {
             $response = new Response();
@@ -168,9 +165,8 @@ class HttpWorkerEarlyHintsTest extends AbstractHttpWorkerTestCase
             return new Response('ok', 200);
         });
 
-        $this->psr7Worker->method('waitRequest')
-            ->willReturnOnConsecutiveCalls($this->psrRequest(), $this->psrRequest(), null);
-        $this->httpFoundationFactory->method('createRequest')->willReturn(new Request());
+        $this->spiralHttpWorker->method('waitRequest')
+            ->willReturnOnConsecutiveCalls($this->rrRequest(), $this->rrRequest(), null);
 
         $this->makeWorker(debug: false)->start();
 

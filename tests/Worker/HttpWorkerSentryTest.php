@@ -4,7 +4,6 @@ namespace FluffyDiscord\RoadRunnerBundle\Tests\Worker;
 
 use PHPUnit\Framework\Attributes\AllowMockObjectsWithoutExpectations;
 use Sentry\ClientInterface as SentryClientInterface;
-use Symfony\Component\HttpFoundation\Request;
 
 #[AllowMockObjectsWithoutExpectations]
 class HttpWorkerSentryTest extends AbstractHttpWorkerTestCase
@@ -27,11 +26,10 @@ class HttpWorkerSentryTest extends AbstractHttpWorkerTestCase
         $sentryHub = $this->makeSentryHubMock();
         $sentryHub->expects($this->once())->method('captureException')->with($exception);
 
-        $this->psr7Worker
+        $this->spiralHttpWorker
             ->method('waitRequest')
-            ->willReturnOnConsecutiveCalls($this->psrRequest(), null)
+            ->willReturnOnConsecutiveCalls($this->rrRequest(), null)
         ;
-        $this->httpFoundationFactory->method('createRequest')->willReturn(new Request());
         $this->kernel->method('handle')->willThrowException($exception);
 
         $this->makeWorker(sentryHub: $sentryHub)->start();

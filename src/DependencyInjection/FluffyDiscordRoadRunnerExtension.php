@@ -116,13 +116,15 @@ class FluffyDiscordRoadRunnerExtension extends Extension implements PrependExten
         }
 
         $configuration = $this->getConfiguration([], $container);
-        /** @var array{http: array{lazy_boot: bool}, warmup: array{enabled: bool, learn: bool, learn_requests: int, manifest_path: ?string}, centrifugo: array{lazy_boot: bool}, jobs: array{lazy_boot: bool, serializer: 'native'|'igbinary'|'symfony'|null, default_queue: non-empty-string, bus: ?string}, doctrine: array{preconnect: bool}, kv: array{auto_register: bool, serializer: ?string, keypair_path: ?string}, rr_config_path: ?string, temporal?: array{namespace?: string, tracing?: bool, api_key?: ?string, retryable_errors?: list<string>, default_worker_options?: array<string, mixed>, worker_options?: array<string, array<string, mixed>>}} $config */
+        /** @var array{http: array{lazy_boot: bool, request_factory: 'auto'|'native'|'psr7'}, warmup: array{enabled: bool, learn: bool, learn_requests: int, manifest_path: ?string}, centrifugo: array{lazy_boot: bool}, jobs: array{lazy_boot: bool, serializer: 'native'|'igbinary'|'symfony'|null, default_queue: non-empty-string, bus: ?string}, doctrine: array{preconnect: bool}, kv: array{auto_register: bool, serializer: ?string, keypair_path: ?string}, rr_config_path: ?string, temporal?: array{namespace?: string, tracing?: bool, api_key?: ?string, retryable_errors?: list<string>, default_worker_options?: array<string, mixed>, worker_options?: array<string, array<string, mixed>>}} $config */
         $config = $this->processConfiguration($configuration, $configs);
 
         if ($container->hasDefinition(HttpWorker::class)) {
             $definition = $container->getDefinition(HttpWorker::class);
             $definition->replaceArgument(0, $config["http"]["lazy_boot"]);
         }
+
+        $container->setParameter("fluffy_discord.http.request_factory", $config["http"]["request_factory"]);
 
         if ($config["warmup"]["enabled"] === true) {
             $this->registerWarmup($container, $config["warmup"]);

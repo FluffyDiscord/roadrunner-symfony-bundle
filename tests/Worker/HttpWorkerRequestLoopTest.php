@@ -12,7 +12,7 @@ class HttpWorkerRequestLoopTest extends AbstractHttpWorkerTestCase
 {
     public function testNullRequestBreaksLoop(): void
     {
-        $this->psr7Worker->expects($this->once())->method('waitRequest')->willReturn(null);
+        $this->spiralHttpWorker->expects($this->once())->method('waitRequest')->willReturn(null);
 
         $this->makeWorker()->start();
 
@@ -22,7 +22,7 @@ class HttpWorkerRequestLoopTest extends AbstractHttpWorkerTestCase
     public function testWaitRequestExceptionResponds418AndContinues(): void
     {
         $callCount = 0;
-        $this->psr7Worker
+        $this->spiralHttpWorker
             ->method('waitRequest')
             ->willReturnCallback(function () use (&$callCount) {
                 $callCount++;
@@ -42,10 +42,21 @@ class HttpWorkerRequestLoopTest extends AbstractHttpWorkerTestCase
         $this->makeWorker()->start();
     }
 
+    public function testServerSuperglobalNotMutatedByRequestHandling(): void
+    {
+        $this->setupSuccessfulRequest();
+
+        $serverBeforeLoop = $_SERVER;
+
+        $this->makeWorker()->start();
+
+        $this->assertSame($serverBeforeLoop, $_SERVER);
+    }
+
     public function testWaitRequestExceptionDoesNotDispatchRequestOrResponseEvents(): void
     {
         $callCount = 0;
-        $this->psr7Worker
+        $this->spiralHttpWorker
             ->method('waitRequest')
             ->willReturnCallback(function () use (&$callCount) {
                 return ++$callCount === 1 ? throw new \RuntimeException() : null;

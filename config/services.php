@@ -2,7 +2,10 @@
 
 namespace Symfony\Component\DependencyInjection\Loader\Configurator;
 
+use FluffyDiscord\RoadRunnerBundle\Factory\NativeSymfonyRequestFactory;
+use FluffyDiscord\RoadRunnerBundle\Factory\Psr7SymfonyRequestFactory;
 use FluffyDiscord\RoadRunnerBundle\Factory\RPCFactory;
+use FluffyDiscord\RoadRunnerBundle\Factory\SymfonyRequestFactoryInterface;
 use FluffyDiscord\RoadRunnerBundle\Worker\HttpWorker as BundleHttpWorker;
 use FluffyDiscord\RoadRunnerBundle\Worker\WorkerRegistry;
 use Sentry\State\HubInterface as SentryHubInterface;
@@ -57,6 +60,17 @@ return static function (ContainerConfigurator $container) {
     ;
 
     $services
+        ->set(NativeSymfonyRequestFactory::class)
+    ;
+
+    $services
+        ->set(Psr7SymfonyRequestFactory::class)
+        ->args([
+            service(HttpFoundationFactoryInterface::class)->nullOnInvalid(),
+        ])
+    ;
+
+    $services
         ->set(BundleHttpWorker::class)
         ->public()
         ->args([
@@ -66,7 +80,8 @@ return static function (ContainerConfigurator $container) {
             param('kernel.debug'),
             service("services_resetter")->nullOnInvalid(),
             service(SentryHubInterface::class)->nullOnInvalid(),
-            service(HttpFoundationFactoryInterface::class)->nullOnInvalid(),
+            null,
+            service(SymfonyRequestFactoryInterface::class),
         ])
     ;
 

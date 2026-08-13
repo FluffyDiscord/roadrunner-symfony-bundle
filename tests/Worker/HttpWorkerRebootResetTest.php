@@ -3,7 +3,6 @@
 namespace FluffyDiscord\RoadRunnerBundle\Tests\Worker;
 
 use PHPUnit\Framework\Attributes\AllowMockObjectsWithoutExpectations;
-use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 
 #[AllowMockObjectsWithoutExpectations]
@@ -15,11 +14,10 @@ class HttpWorkerRebootResetTest extends AbstractHttpWorkerTestCase
         $kernel->method('handle')->willThrowException(new \RuntimeException('err'));
         $kernel->expects($this->once())->method('reboot')->with(null);
 
-        $this->psr7Worker
+        $this->spiralHttpWorker
             ->method('waitRequest')
-            ->willReturnOnConsecutiveCalls($this->psrRequest(), null)
+            ->willReturnOnConsecutiveCalls($this->rrRequest(), null)
         ;
-        $this->httpFoundationFactory->method('createRequest')->willReturn(new Request());
 
         $this->makeWorker(kernel: $kernel)->start();
     }
@@ -30,11 +28,10 @@ class HttpWorkerRebootResetTest extends AbstractHttpWorkerTestCase
         $kernel->method('handle')->willReturn(new Response());
         $kernel->expects($this->never())->method('reboot');
 
-        $this->psr7Worker
+        $this->spiralHttpWorker
             ->method('waitRequest')
-            ->willReturnOnConsecutiveCalls($this->psrRequest(), null)
+            ->willReturnOnConsecutiveCalls($this->rrRequest(), null)
         ;
-        $this->httpFoundationFactory->method('createRequest')->willReturn(new Request());
 
         $this->makeWorker(kernel: $kernel)->start();
     }
@@ -50,11 +47,10 @@ class HttpWorkerRebootResetTest extends AbstractHttpWorkerTestCase
 
     public function testServicesResetterCalledEvenOnExceptionInProductionMode(): void
     {
-        $this->psr7Worker
+        $this->spiralHttpWorker
             ->method('waitRequest')
-            ->willReturnOnConsecutiveCalls($this->psrRequest(), null)
+            ->willReturnOnConsecutiveCalls($this->rrRequest(), null)
         ;
-        $this->httpFoundationFactory->method('createRequest')->willReturn(new Request());
         $this->kernel->method('handle')->willThrowException(new \RuntimeException());
 
         $this->servicesResetter->expects($this->once())->method('reset');
@@ -91,11 +87,10 @@ class HttpWorkerRebootResetTest extends AbstractHttpWorkerTestCase
         $kernel->method('handle')->willReturn(new Response());
         $kernel->method('terminate')->willThrowException(new \RuntimeException('cleanup failure'));
 
-        $this->psr7Worker
+        $this->spiralHttpWorker
             ->method('waitRequest')
-            ->willReturnOnConsecutiveCalls($this->psrRequest(), null)
+            ->willReturnOnConsecutiveCalls($this->rrRequest(), null)
         ;
-        $this->httpFoundationFactory->method('createRequest')->willReturn(new Request());
 
         // Cleanup failures are logged to STDERR (logError), not emitted as a second relay frame.
         $this->rrWorker->expects($this->never())->method('error');

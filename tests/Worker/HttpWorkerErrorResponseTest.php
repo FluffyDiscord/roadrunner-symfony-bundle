@@ -3,7 +3,6 @@
 namespace FluffyDiscord\RoadRunnerBundle\Tests\Worker;
 
 use PHPUnit\Framework\Attributes\AllowMockObjectsWithoutExpectations;
-use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
@@ -73,11 +72,10 @@ class HttpWorkerErrorResponseTest extends AbstractHttpWorkerTestCase
     /** IT-02 / TC-10: a thrown request emits exactly one response frame and zero error() frames. */
     public function testCatchPathEmitsSingleFrameAndLogsToStderr(): void
     {
-        $this->psr7Worker
+        $this->spiralHttpWorker
             ->method('waitRequest')
-            ->willReturnOnConsecutiveCalls($this->psrRequest(), null)
+            ->willReturnOnConsecutiveCalls($this->rrRequest(), null)
         ;
-        $this->httpFoundationFactory->method('createRequest')->willReturn(new Request());
         $this->kernel->method('handle')->willThrowException(new \RuntimeException('only once'));
 
         $this->psr7Worker->expects($this->once())->method('respond');

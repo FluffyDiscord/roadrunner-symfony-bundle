@@ -3,6 +3,7 @@
 namespace FluffyDiscord\RoadRunnerBundle;
 
 use FluffyDiscord\RoadRunnerBundle\DependencyInjection\Compiler\CentrifugoRouterPass;
+use FluffyDiscord\RoadRunnerBundle\DependencyInjection\Compiler\RequestFactoryPass;
 use FluffyDiscord\RoadRunnerBundle\DependencyInjection\Compiler\TemporalWorkerPass;
 use RoadRunner\Centrifugo\CentrifugoWorker as RoadRunnerCentrifugoWorker;
 use Symfony\Component\DependencyInjection\Compiler\PassConfig;
@@ -15,6 +16,8 @@ final class FluffyDiscordRoadRunnerBundle extends Bundle
     public function build(ContainerBuilder $container): void
     {
         parent::build($container);
+
+        $container->addCompilerPass(new RequestFactoryPass(), PassConfig::TYPE_BEFORE_OPTIMIZATION);
 
         if (class_exists(RoadRunnerCentrifugoWorker::class)) {
             $container->addCompilerPass(new CentrifugoRouterPass(), PassConfig::TYPE_BEFORE_REMOVING);

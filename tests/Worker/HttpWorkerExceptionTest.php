@@ -3,7 +3,6 @@
 namespace FluffyDiscord\RoadRunnerBundle\Tests\Worker;
 
 use PHPUnit\Framework\Attributes\AllowMockObjectsWithoutExpectations;
-use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 
 #[AllowMockObjectsWithoutExpectations]
@@ -11,11 +10,10 @@ class HttpWorkerExceptionTest extends AbstractHttpWorkerTestCase
 {
     public function testKernelExceptionResponds500WithoutBodyInProdMode(): void
     {
-        $this->psr7Worker
+        $this->spiralHttpWorker
             ->method('waitRequest')
-            ->willReturnOnConsecutiveCalls($this->psrRequest(), null)
+            ->willReturnOnConsecutiveCalls($this->rrRequest(), null)
         ;
-        $this->httpFoundationFactory->method('createRequest')->willReturn(new Request());
         $this->kernel->method('handle')->willThrowException(new \RuntimeException('boom'));
 
         $this->psr7Worker
@@ -43,11 +41,10 @@ class HttpWorkerExceptionTest extends AbstractHttpWorkerTestCase
     {
         $exception = new \RuntimeException('debug info');
 
-        $this->psr7Worker
+        $this->spiralHttpWorker
             ->method('waitRequest')
-            ->willReturnOnConsecutiveCalls($this->psrRequest(), null)
+            ->willReturnOnConsecutiveCalls($this->rrRequest(), null)
         ;
-        $this->httpFoundationFactory->method('createRequest')->willReturn(new Request());
         $this->kernel->method('handle')->willThrowException($exception);
 
         $this->psr7Worker
@@ -68,11 +65,10 @@ class HttpWorkerExceptionTest extends AbstractHttpWorkerTestCase
 
     public function testErrorCallsWorkerStop(): void
     {
-        $this->psr7Worker
+        $this->spiralHttpWorker
             ->method('waitRequest')
-            ->willReturnOnConsecutiveCalls($this->psrRequest(), null)
+            ->willReturnOnConsecutiveCalls($this->rrRequest(), null)
         ;
-        $this->httpFoundationFactory->method('createRequest')->willReturn(new Request());
         $this->kernel->method('handle')->willThrowException(new \Error('fatal'));
 
         $this->rrWorker->expects($this->atLeastOnce())->method('stop');
@@ -82,11 +78,10 @@ class HttpWorkerExceptionTest extends AbstractHttpWorkerTestCase
 
     public function testExceptionDoesNotCallWorkerStop(): void
     {
-        $this->psr7Worker
+        $this->spiralHttpWorker
             ->method('waitRequest')
-            ->willReturnOnConsecutiveCalls($this->psrRequest(), null)
+            ->willReturnOnConsecutiveCalls($this->rrRequest(), null)
         ;
-        $this->httpFoundationFactory->method('createRequest')->willReturn(new Request());
         $this->kernel->method('handle')->willThrowException(new \RuntimeException('soft error'));
 
         $this->rrWorker->expects($this->never())->method('stop');

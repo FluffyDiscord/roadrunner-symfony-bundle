@@ -125,6 +125,23 @@ fluffy_discord_road_runner:
     # https://docs.roadrunner.dev/php-worker/scaling
     lazy_boot: false
 
+    # How RoadRunner requests are converted to Symfony requests.
+    #
+    # native (fastest) - build the Symfony Request directly from the
+    # RoadRunner request, skipping the intermediate PSR-7 object.
+    # Roughly halves the per-request conversion cost.
+    # psr7 - the previous behavior: build a PSR-7 request first, then
+    # convert it via symfony/psr-http-message-bridge. Use this when you
+    # decorate the conversion with a custom HttpFoundationFactoryInterface
+    # service (that service is picked up automatically).
+    # auto (default) - psr7 when a custom HttpFoundationFactoryInterface
+    # service is registered, native otherwise.
+    #
+    # The small, deliberate behavior differences of "native" (uploaded-file
+    # class/pathname, verbatim header forwarding, raw query-string encoding)
+    # are listed in UPGRADE.md.
+    request_factory: auto
+
   # Worker warmup (see "Worker warmup" section below)
   warmup:
     enabled: true
@@ -194,7 +211,7 @@ or else your trusted headers will not work.
 
 Symfony is using the `$_SERVER['REMOTE_ADDR']` to find out the proxy address,
 but in the context of RoadRunner, `$_SERVER` contains only environment 
-variables and the `REMOTE_ADDS` is missing. This is intentional.
+variables and the `REMOTE_ADDR` is missing. This is intentional.
 
 
 ## Response/file streaming
