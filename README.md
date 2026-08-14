@@ -45,15 +45,6 @@ Don't forget to add the `RR_RPC` to your `.env` — it **must match** the `rpc.l
 RR_RPC=tcp://127.0.0.1:6001
 ```
 
-> **Starter config:** the bundle ships a fuller, commented `.rr.yaml` (gzip/static middleware, dev
-> `pool.debug`, logging) at [`install/.rr.yaml`](install/.rr.yaml). After installing, copy it to your
-> project root and tweak it instead of writing one by hand:
-> ```shell
-> cp vendor/fluffydiscord/roadrunner-symfony-bundle/install/.rr.yaml .rr.yaml
-> ```
-> There is no Symfony Flex recipe yet, so the `.rr.yaml`, the `RR_RPC` line, and the kernel-trait swap
-> (step 2 below) are all manual.
-
 2. Replace `MicroKernelTrait` with `RoadRunnerMicroKernelTrait` in your `Kernel.php`:
 
 ```diff
