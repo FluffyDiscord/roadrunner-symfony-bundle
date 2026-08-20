@@ -10,17 +10,30 @@ use Psr\Log\LoggerInterface;
 readonly class WorkerWarmupRunner
 {
     /**
+     * Under "http.pool.debug: true" RoadRunner spawns a fresh process for every request, so
+     * nothing warmed survives to a second request and the boot-time replay only adds latency.
+     * Worse, compiling cached Twig templates early-binds their classes, which makes Twig skip
+     * its freshness check and serve stale templates in development. The runner therefore
+     * no-ops unless the kernel runs in persistent worker mode (kernel.runtime_mode.worker).
+     *
      * @param iterable<WorkerWarmerInterface> $warmers priority-ordered tagged iterator
      */
     public function __construct(
         private iterable         $warmers,
         private ?LoggerInterface $logger = null,
+        private bool             $persistentWorker = true,
     )
     {
     }
 
     public function __invoke(WorkerBootingEvent $event): void
     {
+        if (!$this->persistentWorker) {
+            $this->logger?->debug('RoadRunner warmup: skipped, the worker pool runs in debug mode (one process per request).');
+
+            return;
+        }
+
         $totalStart = microtime(true);
         $warmerCount = 0;
 

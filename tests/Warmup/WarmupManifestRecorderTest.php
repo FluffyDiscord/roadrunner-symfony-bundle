@@ -42,6 +42,15 @@ class WarmupManifestRecorderTest extends BaseTestCase
         self::assertContains(WarmupManifestRecorder::class, $manifest['classes']);
     }
 
+    public function testRecordsNothingWhenTheWorkerIsNotPersistent(): void
+    {
+        $recorder = new WarmupManifestRecorder($this->makeStorage(), '/definitely-not-a-cache-dir', 5, persistentWorker: false);
+
+        $recorder(new WorkerResponseSentEvent(Mode::MODE_HTTP));
+
+        self::assertNull($this->makeStorage()->read(), 'a debug-mode pool never replays a manifest, so learning one is wasted disk writes');
+    }
+
     public function testRecordsSymbolsLoadedBetweenResponses(): void
     {
         $recorder = new WarmupManifestRecorder($this->makeStorage(), '/definitely-not-a-cache-dir', 5);

@@ -606,6 +606,13 @@ ready. Zero config:
 
 Measured on a production Sylius app: first request 252 ms → 41 ms (steady state 33–43 ms).
 
+Development (`http.pool.debug: true`): warmup and learning switch themselves off. With one
+process per request nothing warmed survives to a second request, so replaying the manifest
+only adds boot latency — and compiling cached Twig templates at boot early-binds their
+classes, which makes Twig skip its freshness check and keep serving stale templates after an
+edit. The gate is `kernel.runtime_mode.worker`, which the bundle's runtime derives from
+`pool.debug` in your `.rr.yaml`; no configuration needed.
+
 Production notes:
 
 - Run worker PHP with `display_errors=0` — warnings on stdout corrupt the worker protocol.

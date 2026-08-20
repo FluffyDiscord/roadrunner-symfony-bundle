@@ -94,6 +94,14 @@ class WarmupWiringTest extends BaseTestCase
         self::assertTrue($container->hasDefinition(LearnedManifestWarmer::class));
     }
 
+    public function testRunnerAndRecorderAreGatedOnPersistentWorkerMode(): void
+    {
+        $container = $this->load(null);
+
+        self::assertSame('%kernel.runtime_mode.worker%', $container->getDefinition(WorkerWarmupRunner::class)->getArgument(2));
+        self::assertSame('%kernel.runtime_mode.worker%', $container->getDefinition(WarmupManifestRecorder::class)->getArgument(4));
+    }
+
     public function testRecorderListensOnResponseSent(): void
     {
         $container = $this->load(null);

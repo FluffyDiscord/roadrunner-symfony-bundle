@@ -388,6 +388,7 @@ class FluffyDiscordRoadRunnerExtension extends Extension implements PrependExten
         $runner = new Definition(WorkerWarmupRunner::class, [
             new TaggedIteratorArgument('fluffy_discord.road_runner.worker_warmer'),
             new Reference('logger', ContainerInterface::NULL_ON_INVALID_REFERENCE),
+            '%kernel.runtime_mode.worker%',
         ]);
         $runner->addTag('kernel.event_listener', ['event' => WorkerBootingEvent::class, 'method' => '__invoke', 'priority' => 128]);
         $container->setDefinition(WorkerWarmupRunner::class, $runner);
@@ -398,6 +399,7 @@ class FluffyDiscordRoadRunnerExtension extends Extension implements PrependExten
                 '%kernel.cache_dir%',
                 $warmupConfig['learn_requests'],
                 new Reference('logger', ContainerInterface::NULL_ON_INVALID_REFERENCE),
+                '%kernel.runtime_mode.worker%',
             ]);
             $recorder->addTag('kernel.event_listener', ['event' => WorkerResponseSentEvent::class, 'method' => '__invoke']);
             $container->setDefinition(WarmupManifestRecorder::class, $recorder);

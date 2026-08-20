@@ -55,6 +55,31 @@ class WorkerWarmupRunnerTest extends BaseTestCase
         self::assertSame(['first', 'second', 'third'], $calls);
     }
 
+    public function testSkipsEveryWarmerWhenTheWorkerIsNotPersistent(): void
+    {
+        $calls = [];
+        $warmer = new class($calls) implements WorkerWarmerInterface {
+            /** @param list<string> $calls */
+            public function __construct(private array &$calls)
+            {
+            }
+
+            public function warmup(): void
+            {
+                $this->calls[] = 'ran';
+            }
+        };
+
+        [$logger, $records] = $this->makeCollectingLogger();
+        $runner = new WorkerWarmupRunner([$warmer], $logger, persistentWorker: false);
+        $runner(new WorkerBootingEvent());
+
+        self::assertSame([], $calls, 'a debug-mode pool discards the process after one request; warming it only adds latency and early-binds stale Twig classes');
+        self::assertCount(1, $records);
+        self::assertSame('debug', $records[0][0]);
+        self::assertStringContainsString('debug mode', $records[0][1]);
+    }
+
     public function testSwallowsWarmerFailureAndContinues(): void
     {
         $calls = [];

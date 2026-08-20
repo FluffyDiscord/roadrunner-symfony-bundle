@@ -30,13 +30,14 @@ class WarmupManifestRecorder
         private readonly string                $cacheDir,
         private readonly int                   $learnRequests,
         private readonly ?LoggerInterface      $logger = null,
+        private readonly bool                  $persistentWorker = true,
     )
     {
     }
 
     public function __invoke(WorkerResponseSentEvent $event): void
     {
-        if ($this->done) {
+        if ($this->done || !$this->persistentWorker) {
             return;
         }
 

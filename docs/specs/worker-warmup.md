@@ -184,6 +184,24 @@ polyfill's boot-time swallow still applies). BC: apps referencing the removed no
 config exception at compile; apps referencing the constant get a fatal — release as
 **v7.0.0** with an upgrade note.
 
+### ADR-11 — Debug pools (`http.pool.debug: true`) run no warmup and learn nothing
+
+Under `pool.debug` RoadRunner discards the PHP process after every request, so warmed state
+never reaches a second request and the boot-time replay is pure latency (measured in a Sylius
+dev app: 1.3 s per request on top of a 0.55 s kernel boot). It is also incorrect: replaying
+compiled Twig templates through `opcache_compile_file()` early-binds `__TwigTemplate_*`
+classes whose parent is already loaded, and `Twig\Environment::loadTemplate()` checks
+`class_exists($cls, false)` *before* its `auto_reload` freshness check — the edited source is
+never recompiled and the shop keeps rendering the stale template until the cache dir is
+cleared. ADR-3's "boot-compiled template class is simply reused" is only correct when the
+cache dir is immutable for the worker's lifetime, which a dev pool is not.
+
+`WorkerWarmupRunner` and `WarmupManifestRecorder` therefore receive
+`%kernel.runtime_mode.worker%` (an env-resolved parameter, so it reflects the booting
+process) and no-op when it is false. `Runtime::resolveRuntimeMode()` already maps
+`pool.debug` → `worker=0`, so the gate needs no new configuration and no file I/O of its own.
+`warmup.enabled: false` remains the explicit opt-out for persistent pools.
+
 ## 3. Behavior specification
 
 Boot sequence (`HttpWorker::start()`, non-lazy path; identical hooks for other workers
@@ -383,6 +401,7 @@ Unit — `tests/Warmup/`:
 | U2 | RunnerSwallowsWarmerFailure | 2nd warmer throws | 1st+3rd still run, error logged, no throw |
 | U3 | RunnerSetsBootWarmupFlag | stub warmer asserting flag | `$bootWarmupInProgress` true during, false after (also on throw) |
 | U3b | RunnerSwallowsStdout | warmer that echoes | nothing reaches stdout; captured output logged |
+| U3c | RunnerSkipsNonPersistentWorker | `persistentWorker: false` | no warmer invoked, one debug log (ADR-11) |
 | U4 | StorageRoundTrip | write(classes, files) → read | same lists, version=1, build_id stamped |
 | U5 | StorageMergesUnion | write A, write B | read = A∪B, no dupes |
 | U6 | StorageFiltersAnonymous | class names with `@anonymous` | not persisted |
@@ -397,6 +416,8 @@ Unit — `tests/Warmup/`:
 | U13b | RecorderSkipsUngrownSets | event where neither count grew | no storage write (verified via a write spy or backdated mtime — same-second mtime comparison is vacuous) |
 | U13c | RecorderCacheDirFilter | cacheDir set to a real include prefix | manifest files contain only cache-dir entries; vendor/src files excluded (they would resurrect the early-binding fatal) |
 | U14 | RecorderHttpModeOnly | event mode ≠ http | no write |
+| U14b | RecorderSkipsNonPersistentWorker | `persistentWorker: false`, http event | no write (ADR-11) |
+| U14c | WiringGatesOnRuntimeModeWorker | default config | runner arg 2 and recorder arg 4 = `%kernel.runtime_mode.worker%` |
 | U15 | RouterWarmer / DoctrineWarmer / FormRegistryWarmer null-dep no-op | null / empty deps | no throw, no-op |
 | U15b | RouterWarmerWarmsConcreteRouter | `Router` instance | `getMatcher()` + `getGenerator()` each called once |
 | U15c | RouterWarmerIgnoresNonRouterImplementations | plain `RouterInterface` mock | no method invoked — `match()` in particular never called |
@@ -447,4 +468,6 @@ User-facing errors: none — the system has no request-path surface; misconfigur
 
 ## Divergence Log
 
-(empty)
+- 2026-08-20 — ADR-11 added (v7.1.2): warmup + learning gated on persistent worker mode after
+  a dev app with `pool.debug: true` served stale Twig templates through the early-bound
+  manifest replay.
