@@ -99,12 +99,23 @@ cat > "$CTX/app/src/Kernel.php" <<'PHP'
 namespace App;
 
 use FluffyDiscord\RoadRunnerBundle\FluffyDiscordRoadRunnerBundle;
+use FluffyDiscord\RoadRunnerBundle\Event\Worker\WorkerBootingEvent;
 use FluffyDiscord\RoadRunnerBundle\Kernel\RoadRunnerMicroKernelTrait;
 use Symfony\Bundle\FrameworkBundle\FrameworkBundle;
 use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigurator;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpKernel\Kernel as BaseKernel;
 use Symfony\Component\Routing\Loader\Configurator\RoutingConfigurator;
+
+class BootFailureListener
+{
+    public function __invoke(WorkerBootingEvent $event): void
+    {
+        if (getenv('BOOT_FAIL') === 'listener') {
+            throw new \RuntimeException('boot listener exploded: missing service configuration');
+        }
+    }
+}
 
 class Kernel extends BaseKernel
 {
@@ -113,6 +124,15 @@ class Kernel extends BaseKernel
     public function registerBundles(): iterable
     {
         return [new FrameworkBundle(), new FluffyDiscordRoadRunnerBundle()];
+    }
+
+    public function boot(): void
+    {
+        if (getenv('BOOT_FAIL') === 'kernel') {
+            throw new \RuntimeException('kernel boot exploded: container is broken');
+        }
+
+        parent::boot();
     }
 
     public function ok(): Response { return new Response('OK from worker pid=' . getmypid()); }
@@ -127,6 +147,11 @@ class Kernel extends BaseKernel
             'http_method_override' => false, 'handle_all_throwables' => true,
             'php_errors' => ['log' => true],
         ]);
+
+        $c->services()
+            ->set(BootFailureListener::class)
+            ->tag('kernel.event_listener', ['event' => WorkerBootingEvent::class, 'method' => '__invoke'])
+        ;
     }
 
     protected function configureRoutes(RoutingConfigurator $r): void
@@ -157,7 +182,7 @@ FAIL=0
 assert() { # $1=label $2=haystack $3=needle
   if grep -qF -- "$3" <<< "$2"; then echo "  PASS: $1"; else echo "  FAIL: $1 (missing: $3)"; FAIL=1; fi  # here-string, not a pipe (avoids pipefail+SIGPIPE on large bodies)
 }
-gen_yaml() { # $1=debug(0|1)
+gen_yaml() { # $1=debug(0|1) $2=env $3=BOOT_FAIL mode (none|listener|kernel)
   cat > /app/.rr.yaml <<YAML
 version: "3"
 server:
@@ -167,6 +192,7 @@ server:
         APP_ENV: "${2:-dev}"
         APP_DEBUG: "$1"
         APP_SECRET: "validation-secret"
+        BOOT_FAIL: "${3:-none}"
         RR_RPC: "tcp://127.0.0.1:6001"
 http:
     address: "127.0.0.1:8080"
@@ -198,6 +224,48 @@ gen_yaml 0 prod; RR=$(run_rr); wait_ready
 code=$(get exit); body=$(cat /tmp/b); echo "/exit -> $code (${#body} body bytes)"; assert "prod exit is HTTP 500" "$code" "500"
 if [ -z "$body" ]; then echo "  PASS: prod exit body is empty (no info disclosure)"; else echo "  FAIL: prod exit leaked a body"; FAIL=1; fi
 kill "$RR" 2>/dev/null; wait "$RR" 2>/dev/null || true
+
+echo "### BOOT FAILURE — Bucket D (docs/specs/graceful-error-handling.md §6) ###"
+# These scenarios never become ready, so wait_ready() is skipped: it curls /ok with --retry and
+# exits 0 on a 500, so it would burn its --max-time and pass regardless of the app being broken.
+boot_fail_start() { gen_yaml "$1" "$2" "$3"; RR=$(run_rr); sleep 6; }   # RR must be assigned in this shell, not a subshell
+boot_fail_stop() { kill "$RR" 2>/dev/null; wait "$RR" 2>/dev/null || true; sleep 1; }
+
+boot_fail_start 1 dev listener; code=$(get ok); body=$(cat /tmp/b)
+echo "IT-REAL-D1 listener/debug -> $code (${#body} body bytes)"
+assert "D1: boot listener failure is HTTP 500" "$code" "500"
+assert "D1: debug body shows the real boot error" "$body" "boot listener exploded"
+boot_fail_stop
+
+boot_fail_start 0 prod listener; code=$(get ok); body=$(cat /tmp/b)
+echo "IT-REAL-D2 listener/prod -> $code"
+assert "D2: prod keeps serving after a failed boot listener" "$code" "200"
+assert "D2: the failure is logged" "$(cat /app/rr.log)" "[roadrunner-symfony] BOOT FAILURE"
+boot_fail_stop
+
+boot_fail_start 1 dev kernel; code=$(get ok); body=$(cat /tmp/b)
+echo "IT-REAL-D3 kernel/debug -> $code (${#body} body bytes)"
+assert "D3: kernel boot failure is HTTP 500" "$code" "500"
+assert "D3: debug body shows the real boot error" "$body" "kernel boot exploded"
+boot_fail_stop
+
+boot_fail_start 0 prod kernel; code=$(get ok); body=$(cat /tmp/b)
+echo "IT-REAL-D3 kernel/prod -> $code (${#body} body bytes)"
+assert "D3: prod kernel boot failure is HTTP 500" "$code" "500"
+if [ -z "$body" ]; then echo "  PASS: D3 prod body is empty (no info disclosure)"; else echo "  FAIL: D3 prod leaked a body"; FAIL=1; fi
+# IT-REAL-D5: the same broken prod worker answers repeated requests without wedging the pool.
+d5=0
+for _ in 1 2 3; do [ "$(get ok)" = "500" ] || d5=1; done
+[ "$d5" -eq 0 ] && echo "  PASS: D5 three consecutive prod boot failures all return 500" || { echo "  FAIL: D5 repeated boot failures did not all return 500"; FAIL=1; }
+allocation_failures=$(grep -c 'allocate_timeout\|worker allocation' /app/rr.log || true)
+[ "$allocation_failures" -eq 0 ] && echo "  PASS: D5 RR logged no allocation failure" || { echo "  FAIL: D5 RR logged $allocation_failures allocation failures"; FAIL=1; }
+boot_fail_stop
+
+gen_yaml 1 dev none; RR=$(run_rr); wait_ready; code=$(get ok); body=$(cat /tmp/b)
+echo "IT-REAL-D4 recovery -> $code"
+assert "D4: recovery once the cause is gone" "$code" "200"
+assert "D4: recovery body" "$body" "OK from worker"
+boot_fail_stop
 
 echo ""; [ "$FAIL" -eq 0 ] && echo "=== ALL CHECKS PASSED ===" || { echo "=== SOME CHECKS FAILED ==="; }
 exit "$FAIL"

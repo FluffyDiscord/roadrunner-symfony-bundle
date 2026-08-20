@@ -2,6 +2,7 @@
 
 namespace FluffyDiscord\RoadRunnerBundle\Tests\Worker;
 
+use FluffyDiscord\RoadRunnerBundle\ErrorHandler\WorkerErrorResponder;
 use FluffyDiscord\RoadRunnerBundle\Factory\NativeSymfonyRequestFactory;
 use FluffyDiscord\RoadRunnerBundle\Factory\SymfonyRequestFactoryInterface;
 use FluffyDiscord\RoadRunnerBundle\Tests\BaseTestCase;
@@ -26,6 +27,14 @@ interface TestKernelInterface extends KernelInterface, TerminableInterface, Rebo
 {
 }
 
+class FailingRendererWorkerErrorResponder extends WorkerErrorResponder
+{
+    protected function renderHtmlError(\Throwable $throwable): \Symfony\Component\ErrorHandler\Exception\FlattenException
+    {
+        throw new \RuntimeException('simulated renderer failure');
+    }
+}
+
 class TestableHttpWorker extends HttpWorker
 {
     private PSR7Worker $injectedWorker;
@@ -38,6 +47,8 @@ class TestableHttpWorker extends HttpWorker
     public ?\Closure $registeredShutdown = null;
     /** when true, renderHtmlError() throws, to exercise the MinimalErrorPage fallback */
     public bool $failHtmlRenderer = false;
+    /** mirrors the constructor's $debug so the responder seam cannot silently pin it */
+    public bool $responderDebug = false;
 
     public function injectPsr7Worker(PSR7Worker $worker): void
     {
@@ -61,13 +72,13 @@ class TestableHttpWorker extends HttpWorker
         $this->loggedErrors[] = $message;
     }
 
-    protected function renderHtmlError(\Throwable $throwable): \Symfony\Component\ErrorHandler\Exception\FlattenException
+    protected function getThrowableResponder(): WorkerErrorResponder
     {
         if ($this->failHtmlRenderer) {
-            throw new \RuntimeException('simulated renderer failure');
+            return new FailingRendererWorkerErrorResponder($this->responderDebug);
         }
 
-        return parent::renderHtmlError($throwable);
+        return parent::getThrowableResponder();
     }
 
     /** Invoke the protected Bucket B handler directly. */
@@ -128,6 +139,8 @@ abstract class AbstractHttpWorkerTestCase extends BaseTestCase
             symfonyRequestFactory: $symfonyRequestFactory ?? new NativeSymfonyRequestFactory(),
         );
         $worker->injectPsr7Worker($this->psr7Worker);
+        $worker->responderDebug = $debug;
+
         return $worker;
     }
 
