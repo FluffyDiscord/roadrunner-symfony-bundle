@@ -10,7 +10,7 @@ final class MinimalErrorPage
      * @param array<array-key, mixed>|null $error
      * @param string|null $detail
      */
-    public static function render(int $statusCode, ?array $error, ?string $detail = null): string
+    public static function render(int $statusCode, ?array $error, ?string $detail = null, ?DumpSnapshot $dumpSnapshot = null): string
     {
         $title = match ($statusCode) {
             500 => 'Internal Server Error',
@@ -39,12 +39,58 @@ final class MinimalErrorPage
         if ($message !== null) {
             $body .= '<pre class="msg">' . htmlspecialchars($message, \ENT_QUOTES | \ENT_SUBSTITUTE, 'UTF-8') . '</pre>';
         } else {
-            $body .= '<p>The worker terminated while handling this request.</p>';
+            $explanation = self::getTerminationExplanation();
+            $body .= '<pre class="msg">' . htmlspecialchars($explanation, \ENT_QUOTES | \ENT_SUBSTITUTE, 'UTF-8') . '</pre>';
         }
         if ($location !== null) {
             $body .= '<p class="loc">' . htmlspecialchars($location, \ENT_QUOTES | \ENT_SUBSTITUTE, 'UTF-8') . '</p>';
         }
 
+        if ($dumpSnapshot !== null) {
+            $body .= self::renderDumpSection($dumpSnapshot);
+        }
+
+        return self::renderDocument($statusText, $body);
+    }
+
+    private static function getTerminationExplanation(): string
+    {
+        return "The worker was terminated by die() or exit() while handling this request.\n\n"
+            . "PHP records no file or line for die()/exit(), so this page cannot point at it. "
+            . "Look for a forgotten die(), exit() or dd() on this request's code path.";
+    }
+
+    private static function renderDumpSection(DumpSnapshot $dumpSnapshot): string
+    {
+        $location = htmlspecialchars($dumpSnapshot->location, \ENT_QUOTES | \ENT_SUBSTITUTE, 'UTF-8');
+        $fileLink = $dumpSnapshot->fileLink;
+
+        if ($fileLink !== null) {
+            $escapedFileLink = htmlspecialchars($fileLink, \ENT_QUOTES | \ENT_SUBSTITUTE, 'UTF-8');
+            $location = '<a href="' . $escapedFileLink . '">' . $location . '</a>';
+        }
+
+        $section = '<p class="dump">Last dump ran at ' . $location;
+
+        $dumpDestination = $dumpSnapshot->dumpDestination;
+
+        if ($dumpDestination !== null) {
+            $section .= ' — dump sent to ' . htmlspecialchars($dumpDestination, \ENT_QUOTES | \ENT_SUBSTITUTE, 'UTF-8');
+        }
+
+        $section .= '</p>';
+
+        $renderedDumps = $dumpSnapshot->renderedDumps;
+
+        if ($renderedDumps !== null) {
+            $section .= '<div class="dumps">' . $renderedDumps . '</div>';
+        }
+
+        return $section;
+    }
+
+    private static function renderDocument(string $statusText, string $body): string
+    {
         return '<!DOCTYPE html>'
             . '<html lang="en"><head><meta charset="UTF-8">'
             . '<meta name="robots" content="noindex,nofollow">'
@@ -56,6 +102,9 @@ final class MinimalErrorPage
             . '.msg{white-space:pre-wrap;word-break:break-word;background:#2a2a31;border-left:3px solid #ff5f56;'
             . 'padding:1rem;border-radius:4px;font-size:.95rem;overflow:auto}'
             . '.loc{color:#9a9aa6;font-family:monospace;font-size:.85rem;margin-top:.75rem}'
+            . '.dump{font-family:monospace;font-size:.9rem;margin-top:1rem}'
+            . '.dump a{color:#7fd1ff}'
+            . '.dumps{margin-top:.5rem}'
             . '</style></head><body>'
             . $body
             . '</body></html>';

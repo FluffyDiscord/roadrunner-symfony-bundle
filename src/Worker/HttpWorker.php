@@ -3,6 +3,8 @@
 namespace FluffyDiscord\RoadRunnerBundle\Worker;
 
 use FluffyDiscord\RoadRunnerBundle\ErrorHandler\BootFailureReporting;
+use FluffyDiscord\RoadRunnerBundle\ErrorHandler\DumpCapture;
+use FluffyDiscord\RoadRunnerBundle\ErrorHandler\FatalError;
 use FluffyDiscord\RoadRunnerBundle\Event\Worker\WorkerBootingEvent;
 use FluffyDiscord\RoadRunnerBundle\Event\Worker\WorkerRequestReceivedEvent;
 use FluffyDiscord\RoadRunnerBundle\Event\Worker\WorkerResponseSentEvent;
@@ -58,6 +60,7 @@ class HttpWorker implements WorkerInterface
         private readonly ?SentryHubInterface        $sentryHubInterface = null,
         ?HttpFoundationFactoryInterface             $httpFoundationFactory = null,
         ?SymfonyRequestFactoryInterface             $symfonyRequestFactory = null,
+        private readonly ?DumpCapture               $dumpCapture = null,
     )
     {
         $this->psrFactory = new Psr7\Factory\Psr17Factory();
@@ -120,7 +123,7 @@ class HttpWorker implements WorkerInterface
         if (!$this->shutdownRegistered) {
             $this->shutdownRegistered = true;
             $this->registerShutdown(function () use ($worker, &$handlingRequest, &$responseStarted): void {
-                $this->handleShutdown($worker, $handlingRequest, $responseStarted, error_get_last());
+                $this->handleShutdown($worker, $handlingRequest, $responseStarted, FatalError::getLastFatalError());
             });
         }
 
@@ -256,13 +259,15 @@ class HttpWorker implements WorkerInterface
             @ini_set('memory_limit', '-1');
         }
 
+        $dumpSnapshot = $this->dumpCapture?->getSnapshot();
+
         try {
             if ($this->debug) {
                 $errorPageHeaders = InformationalHeaders::getUnsentHeaders(['Content-Type' => ['text/html; charset=utf-8']]);
 
                 $worker->getHttpWorker()->respond(
                     Response::HTTP_INTERNAL_SERVER_ERROR,
-                    MinimalErrorPage::render(Response::HTTP_INTERNAL_SERVER_ERROR, $error),
+                    MinimalErrorPage::render(Response::HTTP_INTERNAL_SERVER_ERROR, $error, null, $dumpSnapshot),
                     $errorPageHeaders,
                     true,
                 );
@@ -276,10 +281,12 @@ class HttpWorker implements WorkerInterface
             }
         }
 
+        $dumpSuffix = $dumpSnapshot?->getLogSuffix() ?? '';
+
         $this->logError(
             $error !== null && isset($error['message'])
-                ? sprintf('fatal: %s in %s:%d', $error['message'], $error['file'] ?? '?', $error['line'] ?? 0)
-                : 'worker terminated via die/exit during request',
+                ? sprintf('fatal: %s in %s:%d', $error['message'], $error['file'] ?? '?', $error['line'] ?? 0) . $dumpSuffix
+                : 'worker terminated via die/exit during request' . $dumpSuffix,
         );
 
         try {

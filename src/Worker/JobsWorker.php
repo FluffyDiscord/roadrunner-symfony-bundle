@@ -4,6 +4,8 @@ namespace FluffyDiscord\RoadRunnerBundle\Worker;
 
 use FluffyDiscord\RoadRunnerBundle\Event\Worker\Jobs\JobsRunEvent;
 use FluffyDiscord\RoadRunnerBundle\ErrorHandler\BootFailureReporting;
+use FluffyDiscord\RoadRunnerBundle\ErrorHandler\DumpCapture;
+use FluffyDiscord\RoadRunnerBundle\ErrorHandler\FatalError;
 use FluffyDiscord\RoadRunnerBundle\Event\Worker\WorkerBootingEvent;
 use FluffyDiscord\RoadRunnerBundle\Event\Worker\WorkerRequestReceivedEvent;
 use FluffyDiscord\RoadRunnerBundle\Event\Worker\WorkerResponseSentEvent;
@@ -31,6 +33,7 @@ class JobsWorker implements WorkerInterface
         private readonly EventDispatcherInterface   $eventDispatcher,
         private readonly ?ServicesResetterInterface $servicesResetter,
         private readonly ?SentryHubInterface        $sentryHubInterface = null,
+        private readonly ?DumpCapture               $dumpCapture = null,
     )
     {
     }
@@ -54,7 +57,7 @@ class JobsWorker implements WorkerInterface
         if (!$this->shutdownRegistered) {
             $this->shutdownRegistered = true;
             $this->registerShutdown(function () use (&$handlingTask, &$responded, &$currentTask): void {
-                $this->handleShutdown($handlingTask, $responded, $currentTask, error_get_last());
+                $this->handleShutdown($handlingTask, $responded, $currentTask, FatalError::getLastFatalError());
             });
         }
 
@@ -150,10 +153,13 @@ class JobsWorker implements WorkerInterface
         } catch (\Throwable) {
         }
 
+        $dumpSnapshot = $this->dumpCapture?->getSnapshot();
+        $dumpSuffix = $dumpSnapshot?->getLogSuffix() ?? '';
+
         $this->logError(
             $error !== null && isset($error['message'])
-                ? sprintf('fatal: %s in %s:%d', $error['message'], $error['file'] ?? '?', $error['line'] ?? 0)
-                : 'worker terminated via die/exit during task',
+                ? sprintf('fatal: %s in %s:%d', $error['message'], $error['file'] ?? '?', $error['line'] ?? 0) . $dumpSuffix
+                : 'worker terminated via die/exit during task' . $dumpSuffix,
         );
 
         try {

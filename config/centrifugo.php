@@ -2,6 +2,7 @@
 
 namespace Symfony\Component\DependencyInjection\Loader\Configurator;
 
+use FluffyDiscord\RoadRunnerBundle\ErrorHandler\DumpCapture;
 use FluffyDiscord\RoadRunnerBundle\Command\CentrifugoDebugCommand;
 use FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\ConnectEvent;
 use FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\PublishEvent;
@@ -63,6 +64,7 @@ return static function (ContainerConfigurator $container): void {
             service(EventDispatcherInterface::class),
             service("services_resetter")->nullOnInvalid(),
             service(SentryHubInterface::class)->nullOnInvalid(),
+            service(DumpCapture::class)->nullOnInvalid(),
         ])
     ;
 

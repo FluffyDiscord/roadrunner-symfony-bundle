@@ -11,6 +11,8 @@ use FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\RPCEvent;
 use FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\SubRefreshEvent;
 use FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\SubscribeEvent;
 use FluffyDiscord\RoadRunnerBundle\ErrorHandler\BootFailureReporting;
+use FluffyDiscord\RoadRunnerBundle\ErrorHandler\DumpCapture;
+use FluffyDiscord\RoadRunnerBundle\ErrorHandler\FatalError;
 use FluffyDiscord\RoadRunnerBundle\Event\Worker\WorkerBootingEvent;
 use FluffyDiscord\RoadRunnerBundle\Event\Worker\WorkerRequestReceivedEvent;
 use FluffyDiscord\RoadRunnerBundle\Event\Worker\WorkerResponseSentEvent;
@@ -46,6 +48,7 @@ class CentrifugoWorker implements WorkerInterface
         private readonly EventDispatcherInterface   $eventDispatcher,
         private readonly ?ServicesResetterInterface $servicesResetter,
         private readonly ?SentryHubInterface        $sentryHubInterface = null,
+        private readonly ?DumpCapture               $dumpCapture = null,
     )
     {
     }
@@ -72,7 +75,7 @@ class CentrifugoWorker implements WorkerInterface
         if (!$this->shutdownRegistered) {
             $this->shutdownRegistered = true;
             $this->registerShutdown(function () use (&$handlingRequest, &$responded, &$currentRequest): void {
-                $this->handleShutdown($handlingRequest, $responded, $currentRequest, error_get_last());
+                $this->handleShutdown($handlingRequest, $responded, $currentRequest, FatalError::getLastFatalError());
             });
         }
 
@@ -188,10 +191,13 @@ class CentrifugoWorker implements WorkerInterface
             $this->respondToFailedRequest($request, 'Unexpected system error');
         } catch (\Throwable) {}
 
+        $dumpSnapshot = $this->dumpCapture?->getSnapshot();
+        $dumpSuffix = $dumpSnapshot?->getLogSuffix() ?? '';
+
         $this->logError(
             $error !== null && isset($error['message'])
-                ? sprintf('fatal: %s in %s:%d', $error['message'], $error['file'] ?? '?', $error['line'] ?? 0)
-                : 'worker terminated via die/exit during request',
+                ? sprintf('fatal: %s in %s:%d', $error['message'], $error['file'] ?? '?', $error['line'] ?? 0) . $dumpSuffix
+                : 'worker terminated via die/exit during request' . $dumpSuffix,
         );
 
         try {

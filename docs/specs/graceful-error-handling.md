@@ -3,6 +3,7 @@
 **Source pinned to:** commit `d0afcea` (branch `symfony81`), 2026-05-29.
 **Component:** `FluffyDiscord\RoadRunnerBundle\Worker\HttpWorker` error pipeline + new `ErrorHandler\MinimalErrorPage`.
 **Scope decision (user, 2026-05-29):** full redesign of the HTTP worker error path; custom page for uncatchable termination, Symfony renderer for catchable exceptions, bare 500 in prod; validate with PHPUnit tests *and* a real RoadRunner run.
+**Revision:** rev4 — fatal-only filtering of `error_get_last()` (`ErrorHandler\FatalError`) so a stale deprecation is never reported as the cause of a `die`/`exit`; explicit die/exit wording on the rescue page (§4.2 stale-error note).
 **Revision:** rev3 — adds **Bucket D (boot-time failure)**, §6; supersedes the rev2 rows that recorded boot-time death as "no client, 0 frames".
 **Revision:** rev2 — incorporates Gate 3 adversarial findings (3 CRITICAL / 4 HIGH / 5 MEDIUM / 2 LOW). Material changes: `responseStarted` flag for the streamed path, A-1 reframed as a validation-blocking hypothesis, one-shot shutdown registration, re-entrancy & boot-time rules, NULL-`error_get_last` handling, Sentry-on-fatal, cgroup caveat.
 
@@ -108,6 +109,8 @@ protected function handleShutdown(
 5. Best-effort Sentry: `try { $this->sentryHubInterface?->captureMessage(...); $this->sentryHubInterface?->getClient()?->flush(); } catch (\Throwable) {}` (may not fire under OOM — documented, not guaranteed).
 
 **NULL-error note (MEDIUM):** bare `die()`/`exit()` (and `die("text")`) leave `error_get_last() === null`. Bucket B is therefore distinguished **solely by the flags**, never by the presence of an `$error` array. With `$error === null`, render the generic page and log the generic message (step 4).
+
+**Stale-error note (rev4):** `error_get_last()` returns the last error of **any** severity, so after a `die()` it usually hands back an unrelated `E_USER_DEPRECATED`/`E_WARNING` raised earlier in the request — in a Sylius app, typically a `DebugClassLoader` deprecation — and the rescue page then blames `DebugClassLoader.php:363` for a `die` in a controller. The workers therefore read the last error through `ErrorHandler\FatalError::getLastFatalError()`, which keeps only the genuinely fatal types (`E_ERROR`, `E_PARSE`, `E_CORE_ERROR`, `E_COMPILE_ERROR`, `E_USER_ERROR`) and returns `null` otherwise. `E_RECOVERABLE_ERROR` is deliberately excluded: Symfony's `ErrorHandler` turns it into a catchable `\ErrorException`, so it too can linger as a stale last error. A `null` result renders the die/exit page, which states in plain words that PHP records **no file or line for `die()`/`exit()`** — the location genuinely cannot be recovered (a shutdown function runs on an unwound stack, so `debug_backtrace()` is empty). Live-guarded by the `/deprecated-die` route in `tests/docker-validate-error-pages.sh`.
 
 ### 4.3 `sendThrowableResponse()` — Bucket A (extracted from the current catch)
 

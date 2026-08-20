@@ -2,6 +2,7 @@
 
 namespace Symfony\Component\DependencyInjection\Loader\Configurator;
 
+use FluffyDiscord\RoadRunnerBundle\ErrorHandler\DumpCapture;
 use FluffyDiscord\RoadRunnerBundle\Factory\NativeSymfonyRequestFactory;
 use FluffyDiscord\RoadRunnerBundle\Factory\Psr7SymfonyRequestFactory;
 use FluffyDiscord\RoadRunnerBundle\Factory\RPCFactory;
@@ -82,6 +83,7 @@ return static function (ContainerConfigurator $container) {
             service(SentryHubInterface::class)->nullOnInvalid(),
             null,
             service(SymfonyRequestFactoryInterface::class),
+            service(DumpCapture::class)->nullOnInvalid(),
         ])
     ;
 
@@ -98,4 +100,6 @@ return static function (ContainerConfigurator $container) {
     $container->import('centrifugo.php');
     $container->import('jobs.php');
     $container->import('locks.php');
+    $container->import('grpc.php');
+    $container->import('var_dumper.php');
 };
