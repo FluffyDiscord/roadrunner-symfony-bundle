@@ -2,6 +2,17 @@
 
 ## v7.0 → v7.1
 
+**Boot failures now answer the client** instead of killing the worker before it ever
+receives a request (RoadRunner used to return its own error with an `EOF` body). Debug gets
+the Symfony error page; in prod a kernel boot failure returns a bare 500, while a failed
+`WorkerBootingEvent` listener keeps serving — the kernel is fine, only warmup was lost.
+Everything is logged as `[roadrunner-symfony] BOOT FAILURE`.
+
+- A broken worker now answers RoadRunner's PID probe, so the pool comes up healthy instead
+  of failing at `rr serve` startup — alert on the `BOOT FAILURE` marker.
+- **Breaking:** the `protected HttpWorker::renderHtmlError()` seam was removed; override
+  `HttpWorker::getThrowableResponder()` and return a `WorkerErrorResponder` subclass instead.
+
 **`http.request_factory` — the HTTP worker now converts RoadRunner requests to Symfony
 requests directly by default**, skipping the intermediate PSR-7 object (about half the
 conversion cost per request).

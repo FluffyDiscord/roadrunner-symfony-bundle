@@ -3,6 +3,7 @@
 **Source pinned to:** commit `d0afcea` (branch `symfony81`), 2026-05-29.
 **Component:** `FluffyDiscord\RoadRunnerBundle\Worker\HttpWorker` error pipeline + new `ErrorHandler\MinimalErrorPage`.
 **Scope decision (user, 2026-05-29):** full redesign of the HTTP worker error path; custom page for uncatchable termination, Symfony renderer for catchable exceptions, bare 500 in prod; validate with PHPUnit tests *and* a real RoadRunner run.
+**Revision:** rev3 — adds **Bucket D (boot-time failure)**, §6; supersedes the rev2 rows that recorded boot-time death as "no client, 0 frames".
 **Revision:** rev2 — incorporates Gate 3 adversarial findings (3 CRITICAL / 4 HIGH / 5 MEDIUM / 2 LOW). Material changes: `responseStarted` flag for the streamed path, A-1 reframed as a validation-blocking hypothesis, one-shot shutdown registration, re-entrancy & boot-time rules, NULL-`error_get_last` handling, Sentry-on-fatal, cgroup caveat.
 
 ---
@@ -51,7 +52,7 @@
 | B (no frame started), debug | `MinimalErrorPage` (500, `text/html`), **best-effort** | ≤1 (`respond`; if it throws → `error`) | fatal details (or generic, for bare die/exit)→STDERR; **best-effort Sentry** | process exits; RR respawns |
 | B (no frame started), prod | bare 500, best-effort | ≤1 | STDERR; best-effort Sentry | exits; RR respawns |
 | B′ mid-stream | (truncated stream) | **0 added** | STDERR; best-effort Sentry | exits; RR respawns |
-| boot-time death (superseded: was "dummy early-router request" — replaced by boot warmers, see worker-warmup.md ADR-10) | (RR's error — no client) | 0 | STDERR if reachable | exits; RR respawns |
+| boot-time death — **superseded by rev3, see [§6 Bucket D](#6-bucket-d--boot-time-failure-rev3)** | (was: RR's error — no client) | (was: 0) | STDERR if reachable | exits; RR respawns |
 | C | (RR's internal error) | 0 | nothing from us | RR respawns |
 
 **Invariant I-1 (corrected):** the worker emits **one terminal frame on the non-streamed path**; **streamed responses emit one frame per chunk by design** (O8). The shutdown rescue emits a frame **only when no frame for the current request has started** (`handlingRequest && !responseStarted`) — it never appends to an in-progress or completed response.
@@ -83,7 +84,7 @@ if (!$this->shutdownRegistered) {                 // Invariant I-3 — instance 
 }
 ```
 
-Registration happens **after** `boot()` and immediately before the loop, so boot-time death is naturally a no-op (`$handlingRequest === false`). (superseded: this used to name the dummy early-router request, removed in favor of boot warmers — worker-warmup.md ADR-10; warmup runs on `WorkerBootingEvent` outside the loop and never sets `$handlingRequest`.)
+Registration happens **after** `boot()` and immediately before the loop, so the shutdown rescue is a no-op for boot-time death (`$handlingRequest === false`); boot-time death is instead handled by [§6 Bucket D](#6-bucket-d--boot-time-failure-rev3), which never uses the shutdown path. (superseded: this used to name the dummy early-router request, removed in favor of boot warmers — worker-warmup.md ADR-10; warmup runs on `WorkerBootingEvent` outside the loop and never sets `$handlingRequest`.)
 
 Per iteration: top → all three `false`; after non-null `waitRequest()` → `$handlingRequest = true`; **immediately before** `getHttpWorker()->respond(...)` (success path) and before `respond()` (catch path) → `$responseStarted = true`; after a successful normal `respond()` → `$responseSent = true`.
 
@@ -127,7 +128,7 @@ The catch block then: `$this->logError((string)$throwable)` (STDERR, replacing O
 protected function logError(string $message): void   // @fwrite(STDERR, '[roadrunner-symfony] ' . $message . "\n");
 ```
 
-`TestableHttpWorker` overrides it to capture messages. Three `protected` seams exist purely for isolation in tests — `registerShutdown(callable)` (intercept registration instead of polluting the PHPUnit process), `logError(string)` (capture instead of STDERR), and `renderHtmlError(\Throwable): FlattenException` (simulate the Symfony renderer failing → exercises the MinimalErrorPage fallback for TC-08). **STDERR-interleaving note (MEDIUM):** STDERR is shared with `StdoutHandler`'s re-streamed app output (O9); under fatals, lines may interleave — hence the fixed `[roadrunner-symfony]` prefix. Non-corrupting (STDERR ≠ relay), but interleaving is possible.
+`TestableHttpWorker` overrides it to capture messages. Three `protected` seams exist purely for isolation in tests (rev3: `renderHtmlError` superseded by §6.6's `getThrowableResponder()`) — `registerShutdown(callable)` (intercept registration instead of polluting the PHPUnit process), `logError(string)` (capture instead of STDERR), and `renderHtmlError(\Throwable): FlattenException` (simulate the Symfony renderer failing → exercises the MinimalErrorPage fallback for TC-08). **STDERR-interleaving note (MEDIUM):** STDERR is shared with `StdoutHandler`'s re-streamed app output (O9); under fatals, lines may interleave — hence the fixed `[roadrunner-symfony]` prefix. Non-corrupting (STDERR ≠ relay), but interleaving is possible.
 
 ### 4.5 `ErrorHandler\MinimalErrorPage` — self-contained renderer (new component)
 
@@ -263,7 +264,8 @@ Run 2026-05-29 against **RoadRunner v2025.1.14** (linux/amd64) + a minimal Symfo
 | die/exit/fatal, no frame started | shutdown fn + `handlingRequest && !responseStarted` | debug minimal page / prod 500 (best-effort, A-1) | `error()` if `respond` throws | details or generic→STDERR; best-effort Sentry | exits; RR respawns |
 | die/exit/fatal **mid-stream** (B′) | shutdown fn + `responseStarted` | none (no added frame) | — | STDERR; best-effort Sentry | exits; RR respawns |
 | OOM during render in handler | `message` ~ `Allowed memory size` | `memory_limit=-1`, then minimal page | RR's error (give up) | STDERR | exits |
-| fatal during boot / warmup (superseded: was "dummy request" — worker-warmup.md ADR-10) | shutdown fn + `handlingRequest===false` | none (no client) | — | STDERR if reachable | exits; RR respawns |
+| **catchable** throwable during boot / boot listeners | try/catch in `Runner::run()` / `HttpWorker::start()` ([§6](#6-bucket-d--boot-time-failure-rev3)) | debug: page · prod: bare 500 (kernel boot) or keep serving (listener) | `MinimalErrorPage` if the renderer throws | `[roadrunner-symfony] worker boot failed…`→STDERR; Sentry when the container survived | HTTP: answers one request, then exits; RR respawns |
+| **uncatchable** fatal / `die` / `exit` / `dd()` during boot | none — shutdown fn is a no-op (`handlingRequest===false`) | none (no client) | — | STDERR if reachable | exits; RR respawns ([§6.7 limits](#67-known-limits)) |
 | Cleanup (`terminate`/`reset`) throws | existing `finally` nested try/catch (`HttpWorker.php:179-189`) | — | — | STDERR (was `error()`) | `stop()` |
 | `waitRequest()` throws | existing `catch` (`HttpWorker.php:107-110`) | 418 teapot, `continue` | — | — | keep alive (unchanged) |
 
@@ -323,3 +325,224 @@ Run 2026-05-29 against **RoadRunner v2025.1.14** (linux/amd64) + a minimal Symfo
 | Worker (to redesign) | [`src/Worker/CentrifugoWorker.php`](../../src/Worker/CentrifugoWorker.php) | `start()` |
 | Frame send (respond/error/disconnect) | [`vendor/roadrunner-php/centrifugo/src/Request/AbstractRequest.php`](../../vendor/roadrunner-php/centrifugo/src/Request/AbstractRequest.php) | `:53-87` (all `final`) |
 | DI wiring | [`config/services.php`](../../config/services.php) | `:118-130` |
+
+
+---
+
+# 6. Bucket D — boot-time failure (rev3)
+
+**Source pinned to:** commit `c4be852` (branch `master`), 2026-08-18.
+**Scope decision (user, 2026-08-18):** a boot failure must show the developer what died — the bundle's rendered error page in debug — instead of RoadRunner's raw pipe error. Prod keeps serving whatever still works and screams into STDERR/Sentry.
+**Type:** Implementation.
+**Supersedes in rev2:** the §3 matrix boot-time row, the §4.1 registration note, the §4.4 seam list (`renderHtmlError` → §6.6), and the §N-1 boot rows.
+
+## 6.1 Problem & current behavior (reverse-engineered, cited)
+
+| # | Observation | Evidence |
+|---|-------------|----------|
+| D-O1 | `Runner::run()` boots the kernel **before** the container lookup that builds the worker, so every container/compile/env boot failure dies there — no worker, no relay, no frame. | `src/Runtime/Runner.php:23-28` |
+| D-O2 | `Kernel::boot()` early-returns once `$this->booted` is true, so `HttpWorker::start()`'s own `$this->kernel->boot()` is a second call that normally does nothing (Runner already booted). It is **not inert**: the early-return branch can run `services_resetter->reset()` and can throw. A first-failure therefore always surfaces in `Runner`, never at `HttpWorker.php:86`. | `vendor/symfony/http-kernel/Kernel.php:103-117`; `src/Worker/HttpWorker.php:85-91`; `docs/specs/worker-warmup.md` ADR-6 |
+| D-O3 | The `WorkerBootingEvent` dispatch — where the warmers and `DoctrinePreconnectListener` run — is unguarded in all four workers. A throwing listener propagates out of `start()`, out of `Runner::run()`, and kills the process. Each worker's eager `kernel->boot()` call is likewise unguarded. | `src/Worker/HttpWorker.php:85-93`, `src/Worker/JobsWorker.php:37-41`, `src/Worker/CentrifugoWorker.php:56-59`, `src/Worker/TemporalWorker.php:31-33` |
+| D-O4 | Measured client-visible result (real RR **2025.1.15**, Docker, `pipes` relay, `pool.debug: true`, 2026-08-18): HTTP **500** with a literal 4-byte body `EOF`, for both a throwing listener and a `ClassNotFoundError`, in debug **and** prod. RR logs `{"logger":"http","msg":"execute","error":"EOF"}` with `write_bytes: 4`. Reproduced with a harness derived from `tests/docker-validate-error-pages.sh`; that harness had no boot-failure mode and gains one in §6.9. | reproduction run 2026-08-18 |
+| D-O5 | In the same run the full Symfony trace reached **STDERR** — RR captured it under `{"logger":"server", …}` alongside the warmup lines — because the runtime installs `SymfonyErrorHandler` for uncaught throwables. Catching the throwable **removes** that line, so the catcher must re-emit it. | `vendor/symfony/runtime/SymfonyRuntime.php:157`; D-O4 run log |
+| D-O6 | The bundle's own boot listeners already swallow their own failures — "logged and swallowed; the worker always boots… all degrade to 'less warm', never to 'no worker'". Only a **third-party** listener can currently kill a worker. | `docs/specs/worker-warmup.md` ADR-5; `src/Warmup/WorkerWarmupRunner.php:32-64`; `src/Doctrine/DoctrinePreconnectListener.php:26-51` |
+| D-O7 | The debug/prod render policy already exists in one place: Symfony page in debug → `MinimalErrorPage` if the renderer throws → bare 500 in prod → `getWorker()->error()` only if `respond()` itself throws. `PSR7Worker::$chunkSize` defaults to `0`, so that path is one frame regardless of page size. | `src/Worker/HttpWorker.php:262-289`; `vendor/spiral/roadrunner-http/src/PSR7Worker.php:31` |
+| D-O8 | Several `Spiral\RoadRunner\Worker` instances **already** exist per process today whenever the optional packages are installed: `RoadRunnerWorkerInterface` is `->share(false)` and injected twice by `centrifugo.php`, and `jobs.php` declares its own; all are built eagerly because the `WorkerRegistry` definition carries `->call("registerWorker", …)` for each mode and nothing is `->lazy()`. `StdoutHandler::register()` has no idempotency guard, so their `ob_start()` handlers nest. | `config/services.php:33-34`; `config/centrifugo.php:32-45`; `config/jobs.php:36-44`; `config/jobs.php:67-70`, `config/centrifugo.php:71-74`; `vendor/spiral/roadrunner-worker/src/Internal/StdoutHandler.php:37-45` |
+| D-O9 | Those nested buffers cannot corrupt the protocol: `StreamRelay::send()` writes frames with `@fwrite($this->out, …)` — a direct stream write that PHP output buffering never sees. `ob_start()` intercepts `echo`/`print` only. So extra `Worker` **objects** are inert; what must stay unique is the number of Workers that actually *use* the relay. | `vendor/spiral/goridge/src/StreamRelay.php:108-113`; `vendor/spiral/roadrunner-worker/src/Internal/StdoutHandler.php:69-74` |
+| D-O10 | `Worker::stop()` sends a normal payload frame, not a control frame — so a boot-failure `respond()` followed by `stop()` would put two payload frames in one request cycle. (The existing `\Error` path at `HttpWorker.php:165-172` already does respond+stop by design, §3 line 50; that is out of scope for rev3.) | `vendor/spiral/roadrunner-worker/src/Worker.php:149-152` |
+
+## 6.2 Failure taxonomy (extends §2)
+
+| Bucket | Trigger | Kernel serviceable after? | Handler |
+|--------|---------|---------------------------|---------|
+| **D1 — kernel boot failure** | catchable throwable from `$kernel->boot()`, the `WorkerRegistry` lookup, or the mode's worker construction, all inside `Runner::run()` | **No** — nothing can serve | §6.4 Runner boundary |
+| **D2 — boot listener failure** | catchable throwable from a worker's eager `kernel->boot()` or its `WorkerBootingEvent` dispatch | **Yes** — the kernel booted; only warmup/preconnect work was lost | §6.5 worker boundary |
+| **D3 — uncatchable boot death** | `die()` / `exit()` / `dd()` / true fatal (`E_ERROR`, OOM) during boot or a boot listener | n/a — process is gone | **Out of scope**, §6.7 |
+
+## 6.3 Target behavior matrix
+
+| Bucket / mode | Debug (`kernel.debug=true`) | Prod | Relay frames | Log | Worker lifecycle |
+|---------------|------------------------------|------|--------------|-----|------------------|
+| D1, HTTP mode | wait for one request → Symfony `HtmlErrorRenderer` page (500) | wait for one request → bare 500, empty body | **at most 1** (`respond`); 0 if RR stops the worker before delivering a request; `error()` only if `respond()` throws | `[roadrunner-symfony] BOOT FAILURE (mode=http): <throwable>`→STDERR; Sentry per §6.4 step 6 | responds once, then **returns** — process exit closes the relay, RR respawns and retries the boot |
+| D1, non-HTTP modes (jobs/centrifuge/temporal) | — (no client to render for) | — | 0 | same line with the real mode →STDERR | `return 1` |
+| D2, HTTP | wait for one request → Symfony page (500) | **keep serving**: enter the normal request loop degraded | debug: at most 1; prod: 0 (the loop's own frames follow) | `[roadrunner-symfony] BOOT FAILURE: <throwable>`→STDERR + Sentry (the container survived, so the hub is available) | debug: responds once, then returns → RR respawns · prod: normal loop |
+| D2, non-HTTP | **keep consuming** (no page exists to render) | keep consuming | 0 | STDERR + Sentry | normal loop |
+| D3 | RR's own error (`EOF` body) | same | 0 | STDERR if the fatal handler reached it | exits; RR respawns |
+
+**Invariant D-1:** the boot path emits **at most one** frame, and only in response to a request it actually received. It never calls `stop()` after that frame — returning is sufficient, because process exit closes the relay, and `stop()` would add a second payload frame to the cycle (D-O10).
+
+**Invariant D-2:** at most one `Spiral\RoadRunner\Worker` **uses** the relay in a process. This holds by construction, not by a runtime check: the D1 fallback runs only inside `Runner::run()`'s catch, which returns immediately, and `$worker->start()` sits outside that boundary — so the fallback path and the live-worker path are mutually exclusive. Extra `Worker` objects built by the container are inert (D-O8, D-O9).
+
+**Invariant D-3:** the throwable→response policy has exactly one implementation, `WorkerErrorResponder` (D-O7). The shutdown-rescue page policy in `handleShutdown()` (`HttpWorker.php:231-241`) stays separate on purpose: it must bypass the `Response`/generator machinery in a shutdown context (§4.3).
+
+**Invariant D-4:** a caught boot throwable is always re-emitted to STDERR by the catcher, because catching it removes the runtime handler's own trace line (D-O5).
+
+**Invariant D-5:** boot handling never runs inside a `register_shutdown_function` context and never calls `waitRequest()` from one — a shutdown handler must complete promptly, and blocking there hangs the process past `pool.allocate_timeout` while RR believes the worker is alive.
+
+## 6.4 `Runner` — the D1 boundary
+
+`Runner` becomes a plain class with `private readonly` promoted properties (same reason `CentrifugoWorker` did: a `readonly class` cannot have a non-readonly test subclass — see the Centrifugo delta).
+
+```
+public function run(): int
+    $_SERVER['APP_RUNTIME_MODE'] = $this->runtimeMode;
+    try {
+        $this->kernel->boot();
+        $registry = container->get(WorkerRegistry::class);
+        $worker   = $registry->getWorker($this->mode);
+    } catch (\Throwable $bootThrowable) {
+        return $this->handleBootFailure($bootThrowable);
+    }
+    … null-worker branch (now via logError()), $worker->start(), return 0
+```
+
+The boundary spans boot **plus** the registry lookup and worker construction: for jobs and centrifugo those constructors build the RR/RPC connections (`config/jobs.php:36-44`, `config/centrifugo.php:32-45`), and a failure there is a boot failure to any operator. It deliberately does **not** wrap `$worker->start()` — that would catch request-loop failures with the relay already in use, breaking Invariant D-2.
+
+**Step 0.** The existing unsupported-mode message at `Runner.php:31` moves from `error_log()` to `$this->logError(...)`, so every Runner diagnostic carries the `[roadrunner-symfony]` prefix the docker harness asserts on.
+
+`handleBootFailure(\Throwable): int`
+1. `@ini_set('display_errors', 'stderr');` — see D-A4. Cheap, reverses nothing, and keeps any later PHP notice off the protocol channel.
+2. `$this->logError(sprintf('BOOT FAILURE (mode=%s): %s', $this->mode, $throwable));` (Invariant D-4). The uppercase marker is the greppable signal that this process serves error pages only (§6.7).
+3. Best-effort Sentry through `SentrySdk::getCurrentHub()`, behind a `class_exists` guard. **Not** through the container: `sentry-symfony` declares `Sentry\State\HubInterface` under `_defaults: public: false` (`vendor/sentry/sentry-symfony/src/Resources/config/services.yaml:1-3`), so `$container->has(HubInterface::class)` is always `false` on a compiled container and a container lookup would be silently dead code. When the SDK never initialised, the global hub has no client and the capture is a harmless no-op.
+4. `if ($this->mode !== Mode::MODE_HTTP) { return 1; }`
+5. `$worker = $this->createFallbackPsr7Worker();` — `protected` seam; default `new PSR7Worker(Worker::create(), …Psr17Factory)`, mirroring `HttpWorker::createPsr7Worker()`.
+6. `$request = $worker->getHttpWorker()->waitRequest();` inside `try/catch (\Throwable)`; on throw or `null`, return 1 without a frame.
+7. `new WorkerErrorResponder($this->kernel->isDebug())->sendThrowableResponse($worker, $throwable);` (Invariant D-3; `KernelInterface::isDebug()` at `vendor/symfony/http-kernel/KernelInterface.php:90`).
+8. `return 1;` — no `stop()` (Invariant D-1).
+
+## 6.5 `HttpWorker` / `JobsWorker` / `CentrifugoWorker` / `TemporalWorker` — the D2 boundary
+
+Each of the four workers wraps **both** its eager `kernel->boot()` block and its `WorkerBootingEvent` dispatch (D-O2, D-O3) in one `try/catch (\Throwable)`:
+
+```
+$bootThrowable = null;
+try { … eager boot …; $this->eventDispatcher->dispatch(new WorkerBootingEvent()); }
+catch (\Throwable $throwable) { $bootThrowable = $throwable; }
+
+if ($bootThrowable !== null) {
+    $this->logError('BOOT FAILURE: ' . $bootThrowable);
+    try { $this->sentryHubInterface?->captureException($bootThrowable); $this->sentryHubInterface?->getClient()?->flush(); } catch (\Throwable) {}
+
+    if ($this->shouldServeBootFailurePage()) {
+        $this->serveBootFailure($worker, $bootThrowable);
+        return;
+    }
+}
+```
+
+`HttpWorker::shouldServeBootFailurePage(): bool` returns `$this->debug`; the other three workers have no such method and always fall through to their loop — they consume tasks and RPC, not browsers, so no page exists to render (ADR-5, D-O6).
+
+`HttpWorker::serveBootFailure(PSR7Worker, \Throwable): void` — `waitRequest()` once inside `try/catch`, then `sendThrowableResponse()`, then return (Invariants D-1, D-3). In this path `start()` returns before `registerShutdown()` (`HttpWorker.php:99-104`), so no shutdown rescue is registered at all.
+
+`reportBootFailure()` and the `[roadrunner-symfony]` STDERR sink live in **one** place — the `ErrorHandler\BootFailureReporting` trait, composed into all four workers and into `Runner` (which overrides `getBootFailureLabel()` to add `(mode=…)` and `getBootFailureSentryHub()` to use the SDK hub). Each worker implements `getBootFailureSentryHub()` by returning its injected hub. The trait also owns the `@ini_set('display_errors', 'stderr')` pin (D-A4), so both the D1 and D2 frame paths get it. The four classes share no base class; the trait is the composition point that keeps the harness-greppable `BOOT FAILURE` string singular.
+
+## 6.6 `ErrorHandler\WorkerErrorResponder` — the single render policy (extracted, not new)
+
+The body of `HttpWorker::sendThrowableResponse()` (D-O7) moves verbatim into `src/ErrorHandler/WorkerErrorResponder.php`:
+
+```
+class WorkerErrorResponder
+{
+    public function __construct(private readonly bool $debug) {}
+    public function sendThrowableResponse(PSR7Worker $worker, \Throwable $throwable): void
+    protected function renderHtmlError(\Throwable $throwable): FlattenException
+}
+```
+
+The extracted policy also collapses to a **single** `respond()` call: `createErrorResponse()` picks the body (Symfony page → `MinimalErrorPage` when the renderer throws → empty in prod) and the caller sends it once, so a failing send can no longer trigger a second `respond()` (Invariant D-1; tightens §N-3's one-frame rule for Bucket A too).
+
+`HttpWorker::sendThrowableResponse()` becomes a delegation to `$this->getThrowableResponder()` — a new `protected` seam replacing the old `renderHtmlError()` one. The responder is constructed per call and holds no state, so nothing is added to the `ResetInterface` surface (G18). It stays a `protected` factory seam rather than a constructor dependency (G16) because that is this component's established test-isolation convention — `createPsr7Worker()`, `registerShutdown()` and `logError()` are the same shape (§4.4) — and because widening `HttpWorker`'s public constructor would break consumers who construct it directly.
+
+`TestableHttpWorker::$failHtmlRenderer` is re-pointed at a responder subclass so TC-08 keeps exercising the `MinimalErrorPage` fallback. Behavior is unchanged — `HttpWorkerErrorResponseTest` and `HttpWorkerExceptionTest` must pass untouched apart from that seam.
+
+## 6.7 Known limits
+
+| Limit | Why | Evidence |
+|-------|-----|----------|
+| `die()` / `exit()` / `dd()` / true fatal in a boot listener still yields RR's `EOF` body | Uncatchable by `try/catch`; the only rescue would be a **blocking** `waitRequest()` inside a shutdown handler with no request in flight — forbidden by Invariant D-5. A `dd()` left in a custom warmer is the realistic dev-time trigger. | §5 IT-REAL-6 already disproved the shutdown rescue for true fatals *with* a request in flight |
+| A boot failure slower than `pool.allocate_timeout` still yields RR's error | RR kills the worker before it reaches `waitRequest()`. A listener with a 30 s DB timeout is the realistic trigger. | RR pool config |
+| **D1 makes a broken prod deployment look healthy to RR.** Today a failing boot cannot answer RR's PID probe, so a static pool fails allocation loudly at `rr serve` startup. Under §6 the fallback answers that probe inside `waitPayload()` and then blocks in `waitRequest()`, so the pool comes up green and the only signals are the `BOOT FAILURE` STDERR line per process and the 500s themselves. | Accepted consequence of the user's 2026-08-18 choice that prod boot failures answer with a clean 500 rather than dying. Mitigated only by the uppercase greppable marker (§6.4 step 2). | `vendor/spiral/roadrunner-worker/src/Worker.php:95-118` (PID answered inside `waitPayload()`) |
+| **Under load, D1 can lose the page it exists to deliver.** With `pool.num_workers > 1` every D1 request costs a full kernel boot plus a process spawn; if boot is slower than the arrival rate, RR queues and then fails allocation at `pool.allocate_timeout` and returns its own error instead. | Same mechanism as the row above; the page is best-effort under saturation. | IT-REAL-D5 records the observed behavior at a small repeat count |
+| **Prod D2 on the Jobs worker can amplify into a requeue loop.** If the failed listener was what the handlers depend on, every task now fails and is nacked **with requeue** at full consumption speed, with no back-off and no dead-letter — where today the worker would simply have died and consumed nothing. | `docs/specs/rr-jobs-worker.md` (nack-with-requeue on any throwable); `src/Worker/JobsWorker.php:83-86,159-169` | Accepted risk, recorded 2026-08-18: consistent with "keep serving degraded"; the `BOOT FAILURE` line names the cause |
+| **`TemporalWorker` cannot honour "keep consuming" after a boot failure that broke the kernel.** Its `start()` continues into `temporalWorkerFactory->create()` and `temporalWorkerInitializer->initialize()`, which are container-dependent and unguarded; if the container is unusable those throw out of `start()` — outside `Runner`'s boundary — as an uncaught fatal. A failed *warmer* (the ADR-5 case) is unaffected. | `src/Worker/TemporalWorker.php:31-45`; the boundary excludes `$worker->start()` (Invariant D-2) | Accepted, recorded 2026-08-18 |
+| Prod D2 hides the failure from the HTTP client by design | The kernel is serviceable; availability wins. Visibility is STDERR + Sentry only. | user decision 2026-08-18; ADR-5 |
+| No respawn back-off | Under D1 the worker exits after each answered request, so churn is traffic-driven (one process per request). `install/.rr.yaml:17-18` ships `pool.debug: true`, where that is already the lifecycle. At idle this is strictly less churn than today's free-running respawn. | `install/.rr.yaml:17-18` |
+
+## 6.8 Anti-Patterns (DO NOT)
+
+| Don't | Do Instead | Why |
+|-------|-----------|-----|
+| Call `stop()` after the boot-failure response | `respond()` once, then `return` — process exit closes the relay | `stop()` is a normal payload frame, so this puts two payload frames in one cycle (D-O10) |
+| Re-implement the debug/prod render policy in a boot-specific class | Delegate to `WorkerErrorResponder` | Two copies of the policy, the `MinimalErrorPage` fallback and the frame invariant drift apart (D-O7, Invariant D-3) |
+| Guard the fallback with a runtime "does a Worker exist" check | Rely on the structural mutual exclusion of Invariant D-2 | Extra `Worker` objects already exist and are inert (D-O8, D-O9); a `$currentHttpWorker === null` check is always true on the D1 path and protects nothing |
+| Guard boot and then log nothing | Always re-emit `(string)$throwable` to STDERR | Catching removes `SymfonyErrorHandler`'s own trace line — the one thing that works today (D-O5) |
+| Take the app down in prod because a boot listener failed | Log + Sentry + keep serving | The kernel is serviceable; ADR-5 is the bundle's standing convention (D-O6) |
+| Wrap `$worker->start()` in the Runner boot boundary | Wrap only boot + registry + `getWorker()` | Request-loop failures would be caught with the relay already in use (Invariant D-2) |
+| Attempt a rescue from a shutdown handler at boot | Accept D3 as a documented limit | Blocking `waitRequest()` in shutdown can hang past `allocate_timeout` (Invariant D-5) |
+| Use `error_log()` for Runner diagnostics | `@fwrite(\STDERR, '[roadrunner-symfony] ' … )` | The docker harness asserts that literal prefix; `Runner.php:31` is the only place breaking the convention |
+| Explain the debug branch with a comment | Name it: `shouldServeBootFailurePage()` | CR1 — extract a named method instead of prose |
+
+## 6.9 Test Case Specifications
+
+### Unit (PHPUnit)
+
+| Test ID | Component | Input | Expected | Edge |
+|---------|-----------|-------|----------|------|
+| TC-D01 | `WorkerErrorResponder` | `debug=true`, `\RuntimeException('x')` | `respond` once, body contains class + message; `error()` never | — |
+| TC-D02 | `WorkerErrorResponder` | `debug=true`, renderer forced to throw | `respond` once with `MinimalErrorPage` (500, `text/html`) | — |
+| TC-D03 | `WorkerErrorResponder` | `debug=false` | `respond` once, empty body, 500 | — |
+| TC-D04 | `WorkerErrorResponder` | `respond()` throws | `getWorker()->error()` once; nothing escapes | `error()` also throws → still nothing escapes |
+| TC-D05 | `HttpWorker::start` | boot listener throws, `debug=true` | `waitRequest` called once, `respond` once with the page, `kernel->handle()` never called, `start()` returns, **no shutdown handler registered**; `logError` contains `BOOT FAILURE` | — |
+| TC-D06 | `HttpWorker::start` | boot listener throws, `debug=false` | `logError` contains `BOOT FAILURE`, Sentry captured, **loop runs**: a queued request is handled normally (200) | — |
+| TC-D07 | `Runner::run` | `kernel->boot()` throws, `mode=http` | fallback worker created once, `respond` once, returns `1` | `waitRequest()` returns `null` → no frame, returns `1`; `waitRequest()` throws → no frame, returns `1` |
+| TC-D08 | `Runner::run` | `kernel->boot()` throws, `mode=jobs` | **no** fallback worker created, `logError` names `mode=jobs`, returns `1` | — |
+| TC-D09 | `Runner::run` | worker **construction** throws during the registry lookup, `mode=http` | fallback still responds once and returns `1`; Sentry attempted (the container survived) | proves the boundary covers more than `boot()` |
+| TC-D10 | `JobsWorker` / `CentrifugoWorker` | boot listener throws | logged + Sentry, consumer loop still entered | identical in both envs |
+| TC-D11 | `Runner::run` | healthy boot | unchanged: worker started once, returns `0`; unknown mode returns `1` **via `logError()`**, not `error_log()` | regression guard for step 0 |
+
+### Integration — real RoadRunner (`tests/docker-validate-error-pages.sh`)
+
+The harness gains a `BOOT_FAIL` env var read by the test kernel, with exactly three values:
+- `none` — current behavior, all existing assertions unchanged;
+- `listener` — a `WorkerBootingEvent` listener that throws `\RuntimeException('boot listener exploded')` (D2);
+- `kernel` — the test kernel's `boot()` override throws before `parent::boot()`, so the failure lands inside `Runner::run()`'s try (D1).
+
+| Test ID | Flow | Verification |
+|---------|------|--------------|
+| IT-REAL-D1 | `BOOT_FAIL=listener`, debug | HTTP 500 and the body contains the real exception message — **not** `EOF` |
+| IT-REAL-D2 | `BOOT_FAIL=listener`, prod | `GET /ok` → **200** (degraded but serving) and `rr.log` contains `[roadrunner-symfony] BOOT FAILURE` |
+| IT-REAL-D3 | `BOOT_FAIL=kernel`, debug then prod | debug: 500 + real message · prod: 500 with a 0-byte body |
+| IT-REAL-D4 | recovery: `BOOT_FAIL=none` after a broken run | `GET /ok` → 200 |
+| IT-REAL-D5 | `BOOT_FAIL=kernel`, prod, three consecutive requests | all three return 500 and RR logs no allocation failure — records the repeat behavior the §6.7 under-load row describes |
+
+The boot-failure scenarios must skip the harness's `wait_ready()` gate: it curls `/ok` with `curl -s -o /dev/null --retry 40`, which exits 0 on a 500, so it would burn its `--max-time 40` and then pass regardless of the app being broken (`tests/docker-validate-error-pages.sh:182`).
+
+*Floors: ≥5 unit (11) and ≥3 integration (5) — met.*
+
+## 6.10 Assumptions & Open Questions
+
+| # | Assumption | If wrong, then… |
+|---|------------|-----------------|
+| D-A1 | A worker that boots, fails, and only then reaches `waitRequest()` is protocol-indistinguishable from a slow boot, so RR delivers it a request normally. | Falsified by IT-REAL-D1/D3 returning RR's `EOF` body instead of the page. Grounded in: the PHP worker answers RR's PID probe only inside `waitPayload()` (`vendor/spiral/roadrunner-worker/src/Worker.php:95-118`), which a normal boot also reaches late. |
+| D-A2 | Extracting `sendThrowableResponse()` into `WorkerErrorResponder` is behavior-preserving. | The existing `HttpWorkerErrorResponseTest` / `HttpWorkerExceptionTest` suites fail — they are the regression guard. |
+| D-A3 | `$this->debug` (`kernel.debug`, wired at `config/services.php:78`) is the right dev/prod discriminator for D2. | Same knob §A-5 already settled for Buckets A/B. |
+| D-A4 | **RESOLVED (real validation 2026-08-18, §6.11).** STDOUT is uncorrupted when the D1 fallback writes its frame. Supported, not assumed blindly: the boot throwable is **caught**, so the runtime's uncaught-exception printer never runs, and in the D-O4 run Symfony's own output went to STDERR (RR's `server` logger), not the relay. The residual risk is a PHP notice printed by `display_errors` before the frame, which §6.4 step 1 pins to `stderr`. | The client gets RR's `EOF` body instead of the page and `rr.log` shows a goridge **stdout-crc** error — the §5/IT-REAL-6 failure mode. **IT-REAL-D1 and IT-REAL-D3 are this assumption's blocking gate.** |
+
+**Irreversibility (one item):** the extraction in §6.6 **removes the `protected HttpWorker::renderHtmlError()` seam**. It is a documented test-only seam — §4.4 states the three `protected` seams "exist purely for isolation in tests" — but it is still protected API a consumer could have overridden. Mitigation: record it in `UPGRADE.md` with the replacement (override `getThrowableResponder()` and return a `WorkerErrorResponder` subclass). Nothing else on the irreversibility list is touched: no public HTTP/DI contract changes, no migration, no security-model change, no destructive operation. `Runner` losing its `readonly` modifier widens what subclasses may do; it breaks nothing.
+
+*No open question blocks execution: the two forks (D2 policy, D1 recovery mechanism) were decided by the user on 2026-08-18 and are recorded in §6.3. The operability trade-offs the prod choices carry are recorded as §6.7 limits, not as open questions.*
+
+## 6.11 Validation results (real RoadRunner)
+
+Run 2026-08-18, **RoadRunner 2025.1.15**, PHP 8.4, `pipes` relay, `pool.debug: true`, via `tests/docker-validate-error-pages.sh`. Every pre-existing Bucket A/B assertion in that harness passed unchanged in the same run.
+
+| Gate | Scenario | Result |
+|------|----------|--------|
+| IT-REAL-D1 | `BOOT_FAIL=listener`, debug | ✅ HTTP 500, 87 306-byte Symfony page containing `boot listener exploded` (was: 4-byte `EOF`) |
+| IT-REAL-D2 | `BOOT_FAIL=listener`, prod | ✅ `GET /ok` → **200** — degraded but serving; `rr.log` carries `[roadrunner-symfony] BOOT FAILURE` |
+| IT-REAL-D3 | `BOOT_FAIL=kernel`, debug | ✅ HTTP 500, 67 654-byte page containing `kernel boot exploded` |
+| IT-REAL-D3 | `BOOT_FAIL=kernel`, prod | ✅ HTTP 500, **0-byte body** (no disclosure) |
+| IT-REAL-D4 | recovery, `BOOT_FAIL=none` | ✅ 200 `OK from worker` |
+| IT-REAL-D5 | `BOOT_FAIL=kernel`, prod, 3 consecutive requests | ✅ all three 500; RR logged no allocation failure |
+
+**D-A4 resolved:** the fallback's frame is accepted by RoadRunner for both D1 and D2, in debug and prod — no goridge stdout-crc, no `EOF` body. The §5/IT-REAL-6 corruption mode does not reach this path, because the boot throwable is caught before any handler prints.
