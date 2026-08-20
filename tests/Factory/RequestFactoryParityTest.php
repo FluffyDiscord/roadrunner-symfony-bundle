@@ -7,7 +7,7 @@ use FluffyDiscord\RoadRunnerBundle\Factory\Psr7SymfonyRequestFactory;
 use FluffyDiscord\RoadRunnerBundle\Tests\BaseTestCase;
 use Nyholm\Psr7\Factory\Psr17Factory;
 use PHPUnit\Framework\Attributes\DataProvider;
-use Spiral\RoadRunner\Http\GlobalState;
+use FluffyDiscord\RoadRunnerBundle\Factory\ServerParamsFactory;
 use Spiral\RoadRunner\Http\PSR7Worker;
 use Spiral\RoadRunner\Http\Request as RoadRunnerRequest;
 use Spiral\RoadRunner\Payload;
@@ -101,7 +101,7 @@ class RequestFactoryParityTest extends BaseTestCase
     #[DataProvider('equalityFixtures')]
     public function testNativeMatchesPsr7Strategy(RoadRunnerRequest $rrRequest, array $excludedHeaders): void
     {
-        $server = GlobalState::enrichServerVars($rrRequest);
+        $server = new ServerParamsFactory()->createServerParams($rrRequest);
 
         $nativeRequest = new NativeSymfonyRequestFactory()->createRequest($rrRequest, $server);
         $psr7Request = new Psr7SymfonyRequestFactory()->createRequest($rrRequest, $server);
@@ -112,7 +112,7 @@ class RequestFactoryParityTest extends BaseTestCase
     #[DataProvider('equalityFixtures')]
     public function testPsr7StrategyMatchesLegacyChainOracle(RoadRunnerRequest $rrRequest, array $excludedHeaders): void
     {
-        $server = GlobalState::enrichServerVars($rrRequest);
+        $server = new ServerParamsFactory()->createServerParams($rrRequest);
 
         $oracleRequest = $this->createRequestThroughLegacyChain($rrRequest, $server);
         $psr7Request = new Psr7SymfonyRequestFactory()->createRequest($rrRequest, $server);
@@ -134,7 +134,7 @@ class RequestFactoryParityTest extends BaseTestCase
     public function testUnparseableUriThrowsInBothStrategies(): void
     {
         $rrRequest = self::rrRequest(uri: 'http:///nothing');
-        $server = GlobalState::enrichServerVars($rrRequest);
+        $server = new ServerParamsFactory()->createServerParams($rrRequest);
 
         try {
             new NativeSymfonyRequestFactory()->createRequest($rrRequest, $server);
@@ -158,7 +158,7 @@ class RequestFactoryParityTest extends BaseTestCase
         $rrRequest = self::rrRequest(uploads: [
             'file' => ['name' => 'delta.txt', 'error' => \UPLOAD_ERR_OK, 'tmpName' => $uploadPath, 'size' => 13, 'mime' => 'text/plain'],
         ]);
-        $server = GlobalState::enrichServerVars($rrRequest);
+        $server = new ServerParamsFactory()->createServerParams($rrRequest);
 
         $nativeFile = new NativeSymfonyRequestFactory()->createRequest($rrRequest, $server)->files->get('file');
         $psr7File = new Psr7SymfonyRequestFactory()->createRequest($rrRequest, $server)->files->get('file');
@@ -177,7 +177,7 @@ class RequestFactoryParityTest extends BaseTestCase
         $rrRequest = self::rrRequest(uploads: [
             'missing' => ['name' => 'gone.txt', 'error' => \UPLOAD_ERR_NO_FILE, 'tmpName' => '/tmp/rr-delivered-anyway', 'size' => 0, 'mime' => ''],
         ]);
-        $server = GlobalState::enrichServerVars($rrRequest);
+        $server = new ServerParamsFactory()->createServerParams($rrRequest);
 
         $nativeFile = new NativeSymfonyRequestFactory()->createRequest($rrRequest, $server)->files->get('missing');
         $psr7File = new Psr7SymfonyRequestFactory()->createRequest($rrRequest, $server)->files->get('missing');
@@ -193,7 +193,7 @@ class RequestFactoryParityTest extends BaseTestCase
     public function testDeltaD5QueryStringEncoding(): void
     {
         $rrRequest = self::rrRequest(uri: 'http://localhost/list?y[]=2&y[]=3');
-        $server = GlobalState::enrichServerVars($rrRequest);
+        $server = new ServerParamsFactory()->createServerParams($rrRequest);
 
         $nativeRequest = new NativeSymfonyRequestFactory()->createRequest($rrRequest, $server);
         $psr7Request = new Psr7SymfonyRequestFactory()->createRequest($rrRequest, $server);
@@ -210,7 +210,7 @@ class RequestFactoryParityTest extends BaseTestCase
     public function testDeltaD6HeaderValidationRelaxation(): void
     {
         $paddedRequest = self::rrRequest(headers: ['Host' => ['localhost'], 'X-Padded' => ['  padded  ']]);
-        $server = GlobalState::enrichServerVars($paddedRequest);
+        $server = new ServerParamsFactory()->createServerParams($paddedRequest);
 
         $nativeRequest = new NativeSymfonyRequestFactory()->createRequest($paddedRequest, $server);
         $psr7Request = new Psr7SymfonyRequestFactory()->createRequest($paddedRequest, $server);
@@ -233,7 +233,7 @@ class RequestFactoryParityTest extends BaseTestCase
     public function testDeltaD7HostHeaderInjection(): void
     {
         $rrRequest = self::rrRequest(uri: 'https://host.example.com:443/path', headers: ['X-Other' => ['1']]);
-        $server = GlobalState::enrichServerVars($rrRequest);
+        $server = new ServerParamsFactory()->createServerParams($rrRequest);
 
         $nativeRequest = new NativeSymfonyRequestFactory()->createRequest($rrRequest, $server);
         $psr7Request = new Psr7SymfonyRequestFactory()->createRequest($rrRequest, $server);

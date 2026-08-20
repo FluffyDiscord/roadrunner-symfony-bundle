@@ -4,7 +4,7 @@ namespace FluffyDiscord\RoadRunnerBundle\Tests\Factory;
 
 use FluffyDiscord\RoadRunnerBundle\Factory\NativeSymfonyRequestFactory;
 use FluffyDiscord\RoadRunnerBundle\Tests\BaseTestCase;
-use Spiral\RoadRunner\Http\GlobalState;
+use FluffyDiscord\RoadRunnerBundle\Factory\ServerParamsFactory;
 use Spiral\RoadRunner\Http\Request as RoadRunnerRequest;
 use Symfony\Component\HttpFoundation\File\UploadedFile;
 
@@ -23,7 +23,7 @@ class NativeSymfonyRequestFactoryTest extends BaseTestCase
     {
         $rrRequest = $this->rrRequest(uri: 'http://localhost:8080/a/b?x=1&z=abc');
 
-        $request = $this->factory->createRequest($rrRequest, GlobalState::enrichServerVars($rrRequest));
+        $request = $this->factory->createRequest($rrRequest, new ServerParamsFactory()->createServerParams($rrRequest));
 
         $this->assertSame('GET', $request->getMethod());
         $this->assertSame('localhost', $request->server->get('SERVER_NAME'));
@@ -39,7 +39,7 @@ class NativeSymfonyRequestFactoryTest extends BaseTestCase
     {
         $rrRequest = $this->rrRequest(uri: 'HTTPS://Secure.EXAMPLE.com:8443/path');
 
-        $request = $this->factory->createRequest($rrRequest, GlobalState::enrichServerVars($rrRequest));
+        $request = $this->factory->createRequest($rrRequest, new ServerParamsFactory()->createServerParams($rrRequest));
 
         $this->assertSame('on', $request->server->get('HTTPS'));
         $this->assertSame('secure.example.com', $request->server->get('SERVER_NAME'));
@@ -51,7 +51,7 @@ class NativeSymfonyRequestFactoryTest extends BaseTestCase
     {
         $rrRequest = $this->rrRequest(uri: 'https://secure.example.com/path');
 
-        $request = $this->factory->createRequest($rrRequest, GlobalState::enrichServerVars($rrRequest));
+        $request = $this->factory->createRequest($rrRequest, new ServerParamsFactory()->createServerParams($rrRequest));
 
         $this->assertSame(443, $request->server->get('SERVER_PORT'));
     }
@@ -62,14 +62,14 @@ class NativeSymfonyRequestFactoryTest extends BaseTestCase
 
         $this->expectException(\InvalidArgumentException::class);
 
-        $this->factory->createRequest($rrRequest, GlobalState::enrichServerVars($rrRequest));
+        $this->factory->createRequest($rrRequest, new ServerParamsFactory()->createServerParams($rrRequest));
     }
 
     public function testParsedJsonBodyFillsRequestBag(): void
     {
         $rrRequest = $this->rrRequest(body: '{"a":1}', parsed: true);
 
-        $request = $this->factory->createRequest($rrRequest, GlobalState::enrichServerVars($rrRequest));
+        $request = $this->factory->createRequest($rrRequest, new ServerParamsFactory()->createServerParams($rrRequest));
 
         $this->assertSame(['a' => 1], $request->request->all());
         $this->assertTrue($request->attributes->get(RoadRunnerRequest::PARSED_BODY_ATTRIBUTE_NAME));
@@ -82,7 +82,7 @@ class NativeSymfonyRequestFactoryTest extends BaseTestCase
 
         $this->expectException(\JsonException::class);
 
-        $this->factory->createRequest($rrRequest, GlobalState::enrichServerVars($rrRequest));
+        $this->factory->createRequest($rrRequest, new ServerParamsFactory()->createServerParams($rrRequest));
     }
 
     public function testNestedUploadsKeepStructureAndMoveWorksInTestMode(): void
@@ -97,7 +97,7 @@ class NativeSymfonyRequestFactoryTest extends BaseTestCase
             ],
         ]);
 
-        $request = $this->factory->createRequest($rrRequest, GlobalState::enrichServerVars($rrRequest));
+        $request = $this->factory->createRequest($rrRequest, new ServerParamsFactory()->createServerParams($rrRequest));
 
         $batch = $request->files->get('batch');
         $this->assertIsArray($batch);
