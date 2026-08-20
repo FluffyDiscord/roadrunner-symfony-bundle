@@ -249,52 +249,32 @@ response you are going to return, as `sendEarlyHints($links, $response)` does. W
 is enabled the worker writes a STDERR line naming any header this happens to, so the stale value
 does not go unnoticed.
 
-## Duplicate response headers
-
-nginx rejects an upstream response with **502 Bad Gateway** when `Content-Length` or
-`Transfer-Encoding` appears more than once (other repeated headers are only warned about). PHP-FPM
-behaves identically, so this is not RoadRunner-specific — it is what any Symfony app produces when a
-second value is appended to one of those headers, e.g. from a `kernel.response` listener running
-after `ResponseListener` has called `Response::prepare()`:
-
-```php
-$response->headers->set('Content-Length', $length, false); // second value → nginx 502
-```
-
-Because the resulting `502` gives no hint about which response caused it, the worker detects the
-situation while `kernel.debug` is enabled and writes a line to **STDERR** naming the header and its
-conflicting values. Nothing is rewritten — the response is genuinely malformed and silently
-"repairing" it would hide the bug and diverge from PHP-FPM.
-
 ## Error handling
 
-The HTTP worker turns worker-level failures into proper HTTP responses instead of leaking a raw
-RoadRunner error to the client. Behaviour depends on `kernel.debug`:
+Worker-level failures become real HTTP responses instead of RoadRunner's raw error page.
 
-| Failure | `kernel.debug = true` (dev) | `kernel.debug = false` (prod) |
-|---------|-----------------------------|-------------------------------|
-| A normal exception thrown in your code | Symfony's standard exception page (Symfony handles it; the worker forwards the response) | Symfony's standard error page |
-| An exception that escapes Symfony's handling | Symfony's `HtmlErrorRenderer` debug page | bare `500`, empty body |
-| **`die()` / `exit()` / a fatal error** (e.g. `OutOfMemoryError`, timeout) | a small built‑in HTML error page | bare `500`, empty body |
+| Failure | dev (`kernel.debug`) | prod |
+|---|---|---|
+| exception in your code | Symfony's exception page | Symfony's error page |
+| exception escaping Symfony | `HtmlErrorRenderer` page | bare `500`, empty body |
+| `die()` / `exit()` / fatal | small built-in error page | bare `500`, empty body |
 
-The last row is the important one: `die()`, `exit()` and fatal errors *cannot* be caught with
-`try/catch`, so without this the worker would simply vanish and the client would get RoadRunner's
-internal error. The bundle registers a shutdown handler that, on a best‑effort basis, still sends a
-response. The full throwable / fatal is always written to **STDERR** (which RoadRunner records as
-worker logs) and reported to Sentry if configured — never echoed to `stdout` (in `pipes` relay mode
-`stdout` *is* the protocol channel, which is why you must never `dump()`‑and‑`die()`).
+`die()`, `exit()` and fatals cannot be caught — a shutdown handler answers instead, best-effort.
+Details go to STDERR (RoadRunner worker logs) and Sentry if installed, never to `stdout` (the
+goridge protocol channel).
 
-Known limits (all best‑effort, by nature of a dying process):
+In dev the page also names **where the last `dump()`/`dd()` ran** — `file:line`, hyperlinked to your
+IDE (`framework.ide`) — since PHP records nothing for `die()`/`exit()` itself. The dump is shown on
+the page too, unless a dump server (Buggregator / `debug.dump_destination`) is configured, in which
+case it goes there. Needs `symfony/var-dumper`; never active in prod.
 
-- A genuine **out‑of‑memory** fatal may not produce the page: Symfony's own error handler can write
-  to the protocol stream first and trip RoadRunner's `stdout` CRC check. The worker is respawned and
-  the request fails — the fatal is still logged.
-- A response that has **already started streaming** (a `StreamedResponse`, or after `103` early
-  hints have begun the body) is never patched with a second frame — that would corrupt the stream.
-- `SIGKILL`, segfaults and stack overflows skip PHP shutdown entirely and cannot be handled.
+Not covered:
 
-For the richest dev experience with `die()`/`exit()`, use a socket relay (`RR_RELAY=tcp://…`/`unix://…`)
-or keep `http.pool.debug: true` (one worker per request) in development.
+- true out-of-memory — Symfony's fatal handler can trip RoadRunner's `stdout` CRC check first
+- a response already streaming — never patched with a second frame
+- `SIGKILL`, segfault, stack overflow — PHP shutdown never runs
+
+Best dev experience: socket relay (`RR_RELAY=tcp://…`/`unix://…`) or `http.pool.debug: true`.
 
 ## Sentry
 
@@ -676,6 +656,22 @@ class MyCacheWarmer implements WorkerWarmerInterface
 
 Or listen to `WorkerBootingEvent`. A throwing warmer is logged and skipped — warmup
 never prevents the worker from serving.
+
+### Warm the cache before starting workers
+
+```bash
+php bin/console cache:warmup
+rr serve
+```
+
+An unwarmed cache makes every worker warm the container at once. Symfony locks the container
+dump but not the rest of the warmup, so with `APP_DEBUG=1` the concurrent writes corrupt
+`<Container>Deprecations.log`; the `unserialize()` warning is promoted to an exception and the
+worker dies at boot. RoadRunner respawns it, it dies again — with no ready worker every request
+blocks until the client times out, so it reads as a hang rather than an error.
+
+Upstream Symfony bug, not a RoadRunner one: reproduces with concurrent `php public/index.php`.
+Unaffected: `APP_DEBUG=0`, or any already-warm cache.
 
 ## Distributed locks (symfony/lock)
 
