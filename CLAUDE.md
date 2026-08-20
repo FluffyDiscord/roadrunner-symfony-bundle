@@ -53,6 +53,11 @@ php vendor/bin/phpunit tests
   `MessageBusInterface` (passing the RR task via a `HandlerArgumentsStamp`); handlers are plain
   `#[AsMessageHandler]`. Specced in `docs/specs/jobs-message-bus.md`. `symfony/messenger` and
   `symfony/serializer` are `require-dev` + `suggest` only.
+- `src/Factory/ServerParamsFactory.php` — builds the Symfony `Request` server bag from the
+  RoadRunner request alone (method, URI, protocol, remote address, host, `HTTP_*` headers). The
+  worker's boot-time `$_SERVER` is never mixed in, so the process environment (and an `HTTP_PROXY`
+  env var posing as a request header) cannot reach the request. The `$_SERVER` superglobal itself is
+  left at its boot-time state — read request data off the `Request`.
 - `src/Http/InformationalHeaders.php` — tracks the header values already emitted in `1xx` (Early
   Hints) frames so they are not repeated in the final response. RoadRunner's Go handler `Add`s
   worker headers and keeps `1xx` headers per RFC 8297, so re-sending the bag duplicates them on the
