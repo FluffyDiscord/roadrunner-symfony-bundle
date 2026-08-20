@@ -239,6 +239,9 @@ server:
 http:
     address: "127.0.0.1:8080"
     pool:
+        # One worker on purpose. Persistent (not pool.debug) so the 1xx bookkeeping is exercised
+        # across requests, but single so the workers do not warm a cold cache concurrently --
+        # that is an upstream Symfony race that kills workers at boot, unrelated to early hints.
         num_workers: 1
 rpc:
     listen: "tcp://127.0.0.1:6001"
