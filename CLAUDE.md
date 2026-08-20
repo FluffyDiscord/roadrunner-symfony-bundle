@@ -60,6 +60,12 @@ php vendor/bin/phpunit tests
   access (same constraint as `HttpWorker::$currentHttpWorker`). Live-tested by
   `tests/docker-validate-early-hints.sh`.
 - `src/ErrorHandler/MinimalErrorPage.php` — dependency-free fallback error page.
+- `src/ErrorHandler/FatalError.php` — filters `error_get_last()` to genuinely fatal types, so a stale
+  deprecation is never reported as the cause of a `die`/`exit`.
+- `src/ErrorHandler/DumpCapture.php` — chains onto `VarDumper`'s handler to record where the last
+  `dump()`/`dd()` ran (PHP records nothing for `exit`), so the rescue page can name and IDE-link it.
+  Specced in `docs/specs/dump-capture.md`; live-tested by the `/dd` case in
+  `tests/docker-validate-error-pages.sh`.
 - `src/EventListener/CentrifugoEventRouter.php` + `src/DependencyInjection/Compiler/CentrifugoRouterPass.php`
   — compile-time routing table for `#[AsCentrifugoChannelListener]` / `#[AsCentrifugoRpcListener]`.
 - Optional **distributed locks**: when `roadrunner-php/symfony-lock-driver` is installed, `config/services.php`
