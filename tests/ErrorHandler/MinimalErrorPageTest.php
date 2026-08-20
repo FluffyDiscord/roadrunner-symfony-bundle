@@ -2,6 +2,7 @@
 
 namespace FluffyDiscord\RoadRunnerBundle\Tests\ErrorHandler;
 
+use FluffyDiscord\RoadRunnerBundle\ErrorHandler\DumpSnapshot;
 use FluffyDiscord\RoadRunnerBundle\ErrorHandler\MinimalErrorPage;
 use PHPUnit\Framework\TestCase;
 
@@ -33,6 +34,9 @@ class MinimalErrorPageTest extends TestCase
 
         $this->assertStringContainsString('500', $html);
         $this->assertStringContainsString('terminated', $html);
+        $this->assertStringContainsString('die() or exit()', $html);
+        $this->assertStringContainsString('no file or line', $html);
+        $this->assertStringNotContainsString('class="loc"', $html);
     }
 
     public function testUsesDetailWhenErrorIsNull(): void
@@ -40,6 +44,32 @@ class MinimalErrorPageTest extends TestCase
         $html = MinimalErrorPage::render(500, null, 'RuntimeException: kaboom in /app/x.php');
 
         $this->assertStringContainsString('kaboom', $html);
+    }
+
+    public function testRendersDumpSectionWithLinkAndDumpHtml(): void
+    {
+        $snapshot = new DumpSnapshot(
+            'src/Controller/X.php:42',
+            'phpstorm://open?file=/app/src/Controller/X.php&line=42',
+            '<pre class="sf-dump">dumped value</pre>',
+        );
+
+        $html = MinimalErrorPage::render(500, null, null, $snapshot);
+
+        $this->assertStringContainsString('href="phpstorm://open?file=/app/src/Controller/X.php&amp;line=42"', $html);
+        $this->assertStringContainsString('>src/Controller/X.php:42</a>', $html);
+        $this->assertStringContainsString('<pre class="sf-dump">dumped value</pre>', $html);
+    }
+
+    public function testRendersDumpDestinationInsteadOfTheDumpWhenAServerIsConfigured(): void
+    {
+        $snapshot = new DumpSnapshot('src/Controller/X.php:42', null, null, 'tcp://buggregator:9912');
+
+        $html = MinimalErrorPage::render(500, null, null, $snapshot);
+
+        $this->assertStringContainsString('src/Controller/X.php:42', $html);
+        $this->assertStringContainsString('tcp://buggregator:9912', $html);
+        $this->assertStringNotContainsString('<a href', $html);
     }
 
     public function testTruncatesOverlongMessage(): void

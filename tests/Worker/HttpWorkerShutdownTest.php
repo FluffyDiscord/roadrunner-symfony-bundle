@@ -2,6 +2,8 @@
 
 namespace FluffyDiscord\RoadRunnerBundle\Tests\Worker;
 
+use FluffyDiscord\RoadRunnerBundle\ErrorHandler\DumpCapture;
+use FluffyDiscord\RoadRunnerBundle\ErrorHandler\DumpSnapshot;
 use PHPUnit\Framework\Attributes\AllowMockObjectsWithoutExpectations;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -57,6 +59,60 @@ class HttpWorkerShutdownTest extends AbstractHttpWorkerTestCase
         $this->assertNotEmpty(
             array_filter($worker->loggedErrors, static fn(string $m): bool => str_contains($m, 'die/exit')),
         );
+    }
+
+    /** TC-D9: a captured dd() location is named on the page and hyperlinked for the IDE. */
+    public function testDieAfterADumpNamesTheDumpLocation(): void
+    {
+        $this->spiralHttpWorker
+            ->expects($this->once())
+            ->method('respond')
+            ->with(
+                Response::HTTP_INTERNAL_SERVER_ERROR,
+                $this->callback(static fn(string $body): bool => str_contains($body, 'src/Controller/DieController.php:42')
+                    && str_contains($body, 'href="phpstorm://open?file=')
+                    && str_contains($body, 'the captured dump')),
+                $this->anything(),
+                true,
+            )
+        ;
+
+        $worker = $this->makeWorker(debug: true, dumpCapture: $this->makeDumpCaptureStub());
+        $worker->callHandleShutdown($this->psr7Worker, true, false, null);
+
+        $this->assertNotEmpty(
+            array_filter(
+                $worker->loggedErrors,
+                static fn(string $m): bool => str_contains($m, '; last dump ran at src/Controller/DieController.php:42'),
+            ),
+        );
+    }
+
+    /** TC-D10: prod never leaks the captured dump. */
+    public function testProdKeepsTheEmptyBodyDespiteACapturedDump(): void
+    {
+        $this->spiralHttpWorker
+            ->expects($this->once())
+            ->method('respond')
+            ->with(Response::HTTP_INTERNAL_SERVER_ERROR, '', [], true)
+        ;
+
+        $worker = $this->makeWorker(debug: false, dumpCapture: $this->makeDumpCaptureStub());
+        $worker->callHandleShutdown($this->psr7Worker, true, false, null);
+    }
+
+    private function makeDumpCaptureStub(): DumpCapture
+    {
+        return new class(true, '/app') extends DumpCapture {
+            public function getSnapshot(): ?DumpSnapshot
+            {
+                return new DumpSnapshot(
+                    'src/Controller/DieController.php:42',
+                    'phpstorm://open?file=/app/src/Controller/DieController.php&line=42',
+                    '<pre class="sf-dump">the captured dump</pre>',
+                );
+            }
+        };
     }
 
     /** TC-03: prod fatal → empty 500 body, no information disclosure. */

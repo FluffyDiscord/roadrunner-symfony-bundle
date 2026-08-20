@@ -83,7 +83,8 @@ cat > "$CTX/app/composer.json" <<'JSON'
         "fluffydiscord/roadrunner-symfony-bundle": "*",
         "symfony/framework-bundle": "^7.4 || ^8",
         "symfony/runtime": "^7.4 || ^8",
-        "symfony/yaml": "^7.4 || ^8"
+        "symfony/yaml": "^7.4 || ^8",
+        "symfony/var-dumper": "^7.4 || ^8"
     },
     "repositories": [ { "type": "path", "url": "/bundle", "options": { "symlink": false } } ],
     "autoload": { "psr-4": { "App\\": "src/" } },
@@ -140,12 +141,24 @@ class Kernel extends BaseKernel
     public function exitAction(): Response { exit; }                                  // Bucket B: bare exit
     public function dieAction(): Response { die('DUMPED OUTPUT THAT POLLUTES STDOUT'); } // Bucket B: die w/ output
 
+    public function ddAction(): Response  // Bucket B: dd() — the dump handler knows the call site
+    {
+        dd(['dd_marker' => 'DUMPED-BY-DD']);
+    }
+
+    public function deprecatedDieAction(): Response  // Bucket B: die after a deprecation poisoned error_get_last()
+    {
+        trigger_error('stale deprecation raised long before the die()', \E_USER_DEPRECATED);
+        die;
+    }
+
     protected function configureContainer(ContainerConfigurator $c): void
     {
         $c->extension('framework', [
             'secret' => 'validation-secret', 'test' => false,
             'http_method_override' => false, 'handle_all_throwables' => true,
             'php_errors' => ['log' => true],
+            'ide' => 'phpstorm',
         ]);
 
         $c->services()
@@ -160,6 +173,8 @@ class Kernel extends BaseKernel
         $r->add('boom', '/boom')->controller([self::class, 'boom']);
         $r->add('exit', '/exit')->controller([self::class, 'exitAction']);
         $r->add('die', '/die')->controller([self::class, 'dieAction']);
+        $r->add('deprecated_die', '/deprecated-die')->controller([self::class, 'deprecatedDieAction']);
+        $r->add('dd', '/dd')->controller([self::class, 'ddAction']);
     }
 }
 PHP
@@ -181,6 +196,9 @@ cd /app
 FAIL=0
 assert() { # $1=label $2=haystack $3=needle
   if grep -qF -- "$3" <<< "$2"; then echo "  PASS: $1"; else echo "  FAIL: $1 (missing: $3)"; FAIL=1; fi  # here-string, not a pipe (avoids pipefail+SIGPIPE on large bodies)
+}
+assert_absent() { # $1=label $2=haystack $3=needle
+  if grep -qF -- "$3" <<< "$2"; then echo "  FAIL: $1 (present: $3)"; FAIL=1; else echo "  PASS: $1"; fi
 }
 gen_yaml() { # $1=debug(0|1) $2=env $3=BOOT_FAIL mode (none|listener|kernel)
   cat > /app/.rr.yaml <<YAML
@@ -215,6 +233,15 @@ assert "boom is HTTP 500" "$code" "500"
 assert "boom debug page shows the error detail" "$body" "boom: catchable exception from controller"
 code=$(get exit);  body=$(cat /tmp/b); echo "/exit -> $code"; assert "exit is HTTP 500" "$code" "500"; assert "exit shows error page (not RR raw)" "$body" "Internal Server Error"
 code=$(get die);   body=$(cat /tmp/b); echo "/die  -> $code"; assert "die is HTTP 500" "$code" "500"; assert "die shows error page" "$body" "Internal Server Error"
+code=$(get dd); body=$(cat /tmp/b); echo "/dd -> $code"
+assert "dd is HTTP 500" "$code" "500"
+assert "dd names the controller line" "$body" "src/Kernel.php:"
+assert "dd hyperlinks the location" "$body" 'href="phpstorm://open?file='
+assert "dd shows the dumped value" "$body" "DUMPED-BY-DD"
+code=$(get deprecated-die); body=$(cat /tmp/b); echo "/deprecated-die -> $code"
+assert "deprecated-die is HTTP 500" "$code" "500"
+assert "deprecated-die names die()/exit()" "$body" "die() or exit()"
+assert_absent "deprecated-die does not report the stale deprecation" "$body" "stale deprecation raised long before"
 code=$(get ok);    body=$(cat /tmp/b); echo "/ok   -> $code"; assert "recovery: ok is 200" "$code" "200"; assert "recovery body" "$body" "OK from worker"
 assert "STDERR log captured" "$(cat /app/rr.log)" "[roadrunner-symfony]"
 kill "$RR" 2>/dev/null; wait "$RR" 2>/dev/null || true
