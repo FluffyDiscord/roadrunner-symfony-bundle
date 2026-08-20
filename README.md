@@ -2,22 +2,22 @@
 
 Yet another runtime for Symfony and [RoadRunner](https://roadrunner.dev/).
 
-> Using DDEV? There's a companion [DDEV add-on](https://github.com/FluffyDiscord/ddev-roadrunner-symfony) for a one-command local setup — see [DDEV add-on](#ddev-add-on) below.
+DDEV users: see [DDEV add-on](#ddev-add-on).
 
 ## Features
 
-- [HTTP worker](#usage) — drop-in runtime; service reset runs *after* the response, off the request's critical path
-- [Worker warmup](#worker-warmup) — zero-config pre-warming; first request at steady-state speed
-- [Response & file streaming](#responsefile-streaming) — `StreamedResponse`, `StreamedJsonResponse`, `BinaryFileResponse`
+- [HTTP worker](#usage) — service reset runs *after* the response, off the request path
+- [Worker warmup](#worker-warmup) — zero-config; first request at steady-state speed
+- [Streaming](#responsefile-streaming) — `StreamedResponse`, `StreamedJsonResponse`, `BinaryFileResponse`
 - [Early Hints (103)](#early-hints-103)
-- [Graceful error handling](#error-handling) — proper HTTP responses for `die()`/`exit()`/fatals
-- [Sentry](#sentry) & [Monolog](#monolog) integration
-- [Centrifugo (websockets)](#centrifugo-websockets) — `#[AsCentrifugoChannelListener]` / `#[AsCentrifugoRpcListener]`
-- [Jobs / queues](#jobs-queues) + [typed message bus](#message-bus-dispatch-typed-messages-messenger-style) — dispatch plain objects, handle them with standard Symfony Messenger `#[AsMessageHandler]`s
-- [Key-Value cache](#configuration) — auto-registered `cache.adapter.rr_kv.*` adapters
-- [Distributed locks](#distributed-locks-symfonylock) — Symfony `LockFactory` over RR's Lock plugin
-- [Temporal](#temporal-beta-test) (beta) — workflows & activities, see the [usage guide](docs/temporal.md)
-- [PostgreSQL preconnect](#database-connections) — opens PostgreSQL Doctrine connections at worker boot so the first request skips the connection handshake
+- [Graceful error handling](#error-handling) — real HTTP responses for `die()`/`exit()`/fatals
+- [Sentry](#sentry) & [Monolog](#monolog)
+- [Centrifugo](#centrifugo-websockets) — `#[AsCentrifugoChannelListener]` / `#[AsCentrifugoRpcListener]`
+- [Jobs / queues](#jobs-queues) + [typed message bus](#message-bus-messenger-style) on Symfony Messenger
+- [Key-Value cache](#configuration) — `cache.adapter.rr_kv.*`
+- [Distributed locks](#distributed-locks) — Symfony `LockFactory` over RR's Lock plugin
+- [Temporal](#temporal-beta) (beta) — [usage guide](docs/temporal.md)
+- [PostgreSQL preconnect](#database-connections)
 
 ## Installation
 
@@ -27,9 +27,8 @@ composer require fluffydiscord/roadrunner-symfony-bundle
 
 ## Usage
 
-1. Define the environment variable `APP_RUNTIME` in `.rr.yaml` and set up `rpc` plugin:
+1. `.rr.yaml`:
 
-`.rr.yaml`
 ```yaml
 server:
     env:
@@ -39,22 +38,17 @@ rpc:
     listen: tcp://127.0.0.1:6001
 ```
 
-Don't forget to add the `RR_RPC` to your `.env` — it **must match** the `rpc.listen` address in `.rr.yaml`:
+`.env` — `RR_RPC` must match `rpc.listen`:
 
 ```dotenv
 RR_RPC=tcp://127.0.0.1:6001
 ```
 
-2. Replace `MicroKernelTrait` with `RoadRunnerMicroKernelTrait` in your `Kernel.php`:
+2. Swap the kernel trait:
 
 ```diff
-<?php
-
-namespace App\Kernel;
-
 - use Symfony\Bundle\FrameworkBundle\Kernel\MicroKernelTrait;
 + use FluffyDiscord\RoadRunnerBundle\Kernel\RoadRunnerMicroKernelTrait;
-use Symfony\Component\HttpKernel\Kernel as BaseKernel;
 
 class Kernel extends BaseKernel
 {
@@ -65,245 +59,147 @@ class Kernel extends BaseKernel
 
 ### Service reset
 
-|               | New request arrives                                  | Your app                          | After the response is sent                    |
-| ------------- | ---------------------------------------------------- | --------------------------------- | --------------------------------------------- |
-| Stock Symfony | resets services first (reset is on the request path) | handled only after reset finishes | does nothing                                  |
-| This bundle   | container already warm, handed straight to your app  | handled immediately               | `terminate()`, then `services_resetter` reset |
+|               | New request arrives                          | Your app                | After the response is sent                    |
+| ------------- | -------------------------------------------- | ----------------------- | --------------------------------------------- |
+| Stock Symfony | resets services first (on the request path)  | handled after reset     | nothing                                       |
+| This bundle   | container already warm                       | handled immediately     | `terminate()`, then `services_resetter` reset |
 
-> ⚠️ **Non‑shared services (`shared: false`).** Before Symfony 8.1 these are **not** reset even with
-> `ResetInterface` — `services_resetter` builds its own throwaway instance instead of resetting the
-> ones your app used. Starting Symfony 8.1, it's fixed.
+> Non-shared services (`shared: false`) are **not** reset before Symfony 8.1, even with `ResetInterface` — `services_resetter` resets a throwaway instance. Fixed in 8.1.
 
 #### Database connections
 
-- **PostgreSQL** — connections are opened at worker boot for you (see `doctrine.preconnect` in
-  [Configuration](#configuration)), so the first request skips the connection handshake. With the
-  native `pgsql` driver every worker always opens its own socket (it has no persistent-connection
-  support); with the PDO driver a `persistent` connection can additionally be reused across worker
-  spawns. Either way, preconnect warms the socket before the first request.
-- **MySQL / MariaDB** — listen to `WorkerRequestReceivedEvent` and reset your database connections
-  (preconnect intentionally skips non-PostgreSQL drivers).
+- **PostgreSQL** — connections opened at worker boot (`doctrine.preconnect`). Native `pgsql` driver: every worker opens its own socket (no persistent-connection support). PDO driver: a `persistent` connection is additionally reused across worker spawns.
+- **MySQL / MariaDB** — preconnect skips them; listen to `WorkerRequestReceivedEvent` and reset your connections.
 
-> The Doctrine ORM `EntityManager` identity map is cleared for you: the `doctrine` registry implements
-> `ResetInterface`, so `services_resetter` clears it between requests. The bullets above concern the
-> underlying DBAL **connection** (stale/dropped sockets), not the identity map.
+> The ORM identity map is cleared for you (`doctrine` registry implements `ResetInterface`). The above concerns the DBAL **connection**.
 
 ## Configuration
 
 `fluffy_discord_road_runner.yaml`
+
 ```yaml
 fluffy_discord_road_runner:
-  # Specify relative path from "kernel.project_dir"
-  # to your RoadRunner config file if you want to
-  # run cache:warmup without having your RoadRunner
-  # running in background, e.g. when building Docker images.
   rr_config_path: ".rr.yaml"
-    
-  # Http worker
-  # https://docs.roadrunner.dev/http/http
-  http:
-    # This decides when to boot the Symfony kernel.
-    #
-    # false (default) - before first request (worker takes some time
-    # to be ready, but app has consistent response times)
-    # true - once first request arrives (worker is ready immediately,
-    # but inconsistent response times due to kernel boot time spikes)
-    #
-    # If you use large amount of workers, you might want to set this
-    # to true or else the RR boot up might take a lot of time
-    # or just boot up using only a few "emergency" workers
-    # and then use dynamic worker scaling as described here
-    # https://docs.roadrunner.dev/php-worker/scaling
-    lazy_boot: false
 
-    # How RoadRunner requests are converted to Symfony requests.
-    #
-    # native (fastest) - build the Symfony Request directly from the
-    # RoadRunner request, skipping the intermediate PSR-7 object.
-    # Roughly halves the per-request conversion cost.
-    # psr7 - the previous behavior: build a PSR-7 request first, then
-    # convert it via symfony/psr-http-message-bridge. Use this when you
-    # decorate the conversion with a custom HttpFoundationFactoryInterface
-    # service (that service is picked up automatically).
-    # auto (default) - psr7 when a custom HttpFoundationFactoryInterface
-    # service is registered, native otherwise.
-    #
-    # The small, deliberate behavior differences of "native" (uploaded-file
-    # class/pathname, verbatim header forwarding, raw query-string encoding)
-    # are listed in UPGRADE.md.
+  http:
+    lazy_boot: false
     request_factory: auto
 
-  # Worker warmup (see "Worker warmup" section below)
   warmup:
     enabled: true
     learn: true
     learn_requests: 30
     manifest_path: null
 
-  # Centrifugo (websockets)
-  # Will activate only when "roadrunner-php/centrifugo" is installed.
-  # https://docs.roadrunner.dev/plugins/centrifuge
   centrifugo:
-    # See http section,
-    # behaves the same way.
     lazy_boot: false
 
-  # Jobs (queue consumer)
-  # Will activate only when "spiral/roadrunner-jobs" is installed.
-  # https://docs.roadrunner.dev/queues-and-jobs/overview-queues
   jobs:
-    # See http section,
-    # behaves the same way.
     lazy_boot: false
+    serializer: ~
+    default_queue: "default"
+    bus: ~
 
-  # Doctrine
-  # Will activate only when "doctrine/dbal" is installed.
   doctrine:
-    # Open PostgreSQL connections at worker boot, before the
-    # first request, so the first request skips the PostgreSQL
-    # connection handshake. Only PostgreSQL connections are
-    # touched; other drivers are ignored. Runs on every worker
-    # boot regardless of "lazy_boot". Set false to opt out
-    # (no listener is registered).
     preconnect: true
 
-  # Key-Value storage
-  # Will activate only when "spiral/roadrunner-kv" is installed.
-  # https://docs.roadrunner.dev/key-value/overview-kv
   kv:
-    # If true, bundle will automatically register
-    # all "kv" adapters in your .rr.yaml.
-    # Registered services have alias "cache.adapter.rr_kv.NAME"
     auto_register: true
-
-    # Which data serializer should be used.
-    #
-    # By default, "IgbinarySerializer" will be used
-    # if "igbinary" php extension
-    # is installed, otherwise "DefaultSerializer".
-    #
-    # You are free to create your own serializer.
-    # It needs to implement
-    # Spiral\RoadRunner\KeyValue\Serializer\SerializerInterface
     serializer: null
-
-    # Specify relative path from "kernel.project_dir"
-    # to a keypair file for end-to-end encryption.
-    # "sodium" php extension is required.
-    # https://docs.roadrunner.dev/key-value/overview-kv#end-to-end-value-encryption
     keypair_path: bin/keypair.key
-
 ```
 
+| Option | Default | Meaning |
+|---|---|---|
+| `rr_config_path` | `.rr.yaml` | Path to RR config, relative to `kernel.project_dir`. Lets `cache:warmup` run without RR running (Docker builds). |
+| `*.lazy_boot` | `false` | `false` = boot kernel before first request (slower worker ready, consistent response times). `true` = boot on first request (instant ready, boot-time spikes). Many workers → `true`, or boot a few workers + [dynamic scaling](https://docs.roadrunner.dev/php-worker/scaling). |
+| `http.request_factory` | `auto` | `native` = build the Symfony Request directly, ~halves conversion cost. `psr7` = PSR-7 then `symfony/psr-http-message-bridge`; use with a custom `HttpFoundationFactoryInterface` service (picked up automatically). `auto` = `psr7` when such a service exists, else `native`. |
+| `warmup.enabled` | `true` | Master switch for the warmup runner, built-in warmers and the recorder. See [Worker warmup](#worker-warmup). |
+| `warmup.learn` | `true` | Record which classes and cache files real responses load, replay them at every later worker boot. Covers only routes visited while learning. |
+| `warmup.learn_requests` | `30` | Stop recording after this many responses per worker process. |
+| `warmup.manifest_path` | `null` | `null` = `<kernel.cache_dir>/roadrunner/warmup.manifest.json`. Point outside the cache dir to persist learning across deploys; self-invalidates when the container build id changes. |
+| `doctrine.preconnect` | `true` | Opens PostgreSQL connections at worker boot; other drivers ignored; runs on every boot regardless of `lazy_boot`. Needs `doctrine/dbal`. |
+| `kv.auto_register` | `true` | Registers every `kv` adapter from `.rr.yaml` as `cache.adapter.rr_kv.NAME`. |
+| `kv.serializer` | `null` | `IgbinarySerializer` when the `igbinary` extension is present, else `DefaultSerializer`. Custom: implement `Spiral\RoadRunner\KeyValue\Serializer\SerializerInterface`. |
+| `kv.keypair_path` | — | Relative path to a keypair for [end-to-end encryption](https://docs.roadrunner.dev/key-value/overview-kv#end-to-end-value-encryption). Needs `sodium`. |
 
-## Running behind a load balancer/reverse proxy
-If you want to use `REMOTE_ADDR` as [trusted proxy](https://symfony.com/doc/current/deployment/proxies.html#solution-settrustedproxies), replace it with `private_ranges` instead 
-or else your trusted headers will not work.
+Each section activates only with its package installed:
 
-Symfony is using the `$_SERVER['REMOTE_ADDR']` to find out the proxy address,
-but in the context of RoadRunner, `$_SERVER` contains only environment 
-variables and the `REMOTE_ADDR` is missing. This is intentional.
+| Section | Package |
+|---|---|
+| `centrifugo` | `roadrunner-php/centrifugo` |
+| `jobs` | `spiral/roadrunner-jobs` |
+| `kv` | `spiral/roadrunner-kv` |
+| `doctrine` | `doctrine/dbal` |
+| `temporal` | `temporal/sdk` — options in [`docs/temporal.md`](docs/temporal.md) |
 
+## Behind a load balancer / reverse proxy
+
+Use `private_ranges` instead of `REMOTE_ADDR` as [trusted proxy](https://symfony.com/doc/current/deployment/proxies.html#solution-settrustedproxies). The `REMOTE_ADDR` placeholder is resolved from `$_SERVER` at container build time, where no request exists yet, so trusted headers won't work. The per-request client IP is on the `Request` (`$request->server->get('REMOTE_ADDR')`), never in `$_SERVER`.
 
 ## Response/file streaming
 
-Build-in support for Symfony's `BinaryFileResponse`, `StreamedResponse` and `StreamedJsonResponse`. Stream responses need one little 
-change to be fully streamable - you have to change their `callback` to a `\Generator` and replace all `echo` with `yield`. Look at the example:
+`BinaryFileResponse`, `StreamedResponse`, `StreamedJsonResponse` are fully supported. Although streamed callbacks must return a `\Generator` — replace `echo` with `yield`:
 
-```php
-use Symfony\Component\HttpFoundation\StreamedResponse;
-
-#[Route("/stream")]
-class MyStreamController
-{
-    public function __invoke() 
-    {
-        return new StreamedResponse(
-            function (): \Generator {
-                // replace all 'echo' or any outputs with 'yield'
-                // echo "data";
-                yield "data";
-            }
-        );
-    }
-}
+```diff
+ return new StreamedResponse(
+-    function (): void {
+-        echo "data";
++    function (): \Generator {
++        yield "data";
+     }
+ );
 ```
 
 ## Early Hints (103)
 
-Symfony's `sendEarlyHints()` works out of the box by adding `headers_send()` polyfill that Franken SAPI exposes.
+`sendEarlyHints()` works out of the box via a `headers_send()` polyfill. See [Symfony docs](https://symfony.com/doc/current/web_link.html#early-hints).
 
-More info at [Symfony docs](https://symfony.com/doc/current/web_link.html#early-hints)
-
-Headers already emitted in a `103` frame are not repeated in the final response. RoadRunner writes
-worker headers with Go's `Header().Add()`, and Go keeps the `1xx` headers in place as RFC 8297
-requires, so re-sending the whole header bag would put every hinted header on the wire twice. The
-worker tracks what each `1xx` frame emitted and sends only the values that are not on the wire yet
-— the same rule Symfony's `Response::sendHeaders()` applies on other SAPIs.
-
-One limitation is inherent to the RoadRunner protocol: it can only *add* headers, with no
-equivalent of `header_remove()`. A header whose **value changes** after the `103` was sent (typically
-when the early-hints response and the final response are different objects) therefore reaches the
-client with both the old and the new value — the stale one cannot be retracted. Send hints on the
-response you are going to return, as `sendEarlyHints($links, $response)` does. While `kernel.debug`
-is enabled the worker writes a STDERR line naming any header this happens to, so the stale value
-does not go unnoticed.
+- Headers already emitted in a `103` frame are not repeated in the final response.
+- The RR protocol can only *add* headers — no `header_remove()` equivalent. A header whose **value changes** after the `103` reaches the client with both values. Send hints on the response you return: `sendEarlyHints($links, $response)`.
+- With `kernel.debug` on, the worker writes a STDERR line naming any affected header.
 
 ## Error handling
-
-Worker-level failures become real HTTP responses instead of RoadRunner's raw error page.
 
 | Failure | dev (`kernel.debug`) | prod |
 |---|---|---|
 | exception in your code | Symfony's exception page | Symfony's error page |
 | exception escaping Symfony | `HtmlErrorRenderer` page | bare `500`, empty body |
-| `die()` / `exit()` / fatal | small built-in error page | bare `500`, empty body |
+| `die()` / `exit()` / fatal | built-in minimal error page | bare `500`, empty body |
 
-`die()`, `exit()` and fatals cannot be caught — a shutdown handler answers instead, best-effort.
-Details go to STDERR (RoadRunner worker logs) and Sentry if installed, never to `stdout` (the
-goridge protocol channel).
-
-In dev the page also names **where the last `dump()`/`dd()` ran** — `file:line`, hyperlinked to your
-IDE (`framework.ide`) — since PHP records nothing for `die()`/`exit()` itself. The dump is shown on
-the page too, unless a dump server (Buggregator / `debug.dump_destination`) is configured, in which
-case it goes there. Needs `symfony/var-dumper`; never active in prod.
+- `die()`/`exit()`/fatals are answered best-effort by a shutdown handler.
+- Details go to STDERR (RR worker logs) and Sentry if installed, never `stdout` (goridge channel).
+- Dev page names where the last `dump()`/`dd()` ran (`file:line`, hyperlinked via `framework.ide`) and shows the dump — unless a dump server (Buggregator / `debug.dump_destination`) is configured, which receives it instead. Needs `symfony/var-dumper`; never active in prod.
 
 Not covered:
 
-- true out-of-memory — Symfony's fatal handler can trip RoadRunner's `stdout` CRC check first
-- a response already streaming — never patched with a second frame
+- true out-of-memory — Symfony's fatal handler can trip RR's `stdout` CRC check first
+- an already-streaming response — never patched with a second frame
 - `SIGKILL`, segfault, stack overflow — PHP shutdown never runs
 
 Best dev experience: socket relay (`RR_RELAY=tcp://…`/`unix://…`) or `http.pool.debug: true`.
 
 ## Sentry
 
-Built in support for [Sentry](https://packagist.org/packages/sentry/sentry-symfony). Just install & configure it as you normally do.
-
 ```shell
 composer require sentry/sentry-symfony
 ```
+
+Configure as usual.
 
 ## Monolog
 
-If possible, [do not use fingers_crossed](https://symfony.com/doc/current/logging.html#logging-handler-fingers_crossed) handler. It is made to [leak memory by design](https://symfony.com/doc/current/messenger.html#stateless-worker).
-Nevertheless, this bundle is still somewhat compatible with it due to calling `ServiceResetter` after each response. If you encounter hard error,
-your logs might be missing though. Nothing to be done there.
-
-```shell
-composer require sentry/sentry-symfony
-```
+Avoid the [`fingers_crossed`](https://symfony.com/doc/current/logging.html#logging-handler-fingers_crossed) handler — it [leaks memory by design](https://symfony.com/doc/current/messenger.html#stateless-worker). It still mostly works here because `ServiceResetter` runs after each response, but logs may be missing after a hard error.
 
 ## Centrifugo (websockets)
-
-To enable [Centrifugo](https://github.com/centrifugal/centrifugo) you need to add `roadrunner-php/centrifugo` package.
 
 ```shell
 composer require roadrunner-php/centrifugo
 ```
 
-Bundle is using Symfony's Event dispatcher. You can create [event listener](https://symfony.com/doc/current/event_dispatcher.html#creating-an-event-listener) for any event extending `FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\CentrifugoEventInterface`:
-- `ConnectEvent` required :)
+Listen to any event implementing `FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\CentrifugoEventInterface`:
+
+- `ConnectEvent` (required)
 - `InvalidEvent`
 - `PublishEvent`
 - `RefreshEvent`
@@ -311,84 +207,47 @@ Bundle is using Symfony's Event dispatcher. You can create [event listener](http
 - `SubRefreshEvent`
 - `SubscribeEvent`
 
-Example usage:
-
 ```php
-<?php
-
-namespace App\EventListener;
-
-use App\Centrifuge\Event\ConnectEvent;
-use RoadRunner\Centrifugo\Payload\ConnectResponse;
-use Symfony\Component\EventDispatcher\Attribute\AsEventListener;
-
 #[AsEventListener(event: ConnectEvent::class, method: "handleConnect")]
 readonly class ChatListener
 {
     public function handleConnect(ConnectEvent $event): void
     {
-        // original Centrifugo request passed from RoadRunner
         $request = $event->getRequest();
-        
-        // auth your user or whatever you want
         $authToken = $request->getData()["authToken"] ?? null;
         $user = ...
 
-        // stop propagating to other listeners,
-        // you have successfully connected your user
         $event->stopPropagation();
 
-        // send response using the $event->setResponse($myResponse)
         $event->setResponse(new ConnectResponse(
             user: $user->getId(),
-            data: [
-                "messages" => ... // initial data client receives when connected
-            ],
+            data: ["messages" => ...],
         ));
     }
 }
 ```
 
-Be aware that if you do not set any response, bundle will send `DisconnectResponse` back by default.
+No response set → `DisconnectResponse` is sent.
 
-### Channel and RPC routing
+### `#[AsCentrifugoChannelListener]`
 
-Instead of writing a single listener and manually handle each event, you can use the dedicated routing attributes.
-
-#### `#[AsCentrifugoChannelListener]`
-
-Routes `PublishEvent`, `SubscribeEvent`, `SubRefreshEvent`, and `ConnectEvent` to specific methods based on the channel name. Supports `*` as a wildcard.
+Routes `PublishEvent`, `SubscribeEvent`, `SubRefreshEvent`, `ConnectEvent` by channel name. `*` = wildcard.
 
 ```php
-<?php
-
-namespace App\EventListener;
-
-use FluffyDiscord\RoadRunnerBundle\Attribute\AsCentrifugoChannelListener;
-use FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\PublishEvent;
-use FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\SubscribeEvent;
-
 class ChatListener
 {
-    // Event is inferred from the method's type hint.
-    // Only called for PublishEvent on channel "news".
     #[AsCentrifugoChannelListener(channel: 'news')]
-    public function onNewsPublish(PublishEvent $event): void
-    {
-        // handle publish to the "news" channel
-    }
+    public function onNewsPublish(PublishEvent $event): void {}
 
-    // Wildcard: matches "chat:general", "chat:room-42", etc.
     #[AsCentrifugoChannelListener(channel: 'chat:*', priority: 10)]
     public function onChatSubscribe(SubscribeEvent $event): void
     {
         $channel = $event->getRequest()->channel;
-        // handle subscription to any "chat:*" channel
     }
 }
 ```
 
-When placed on the **class**, you must also specify `event` and `method`:
+On a **class**, `event` and `method` are required:
 
 ```php
 #[AsCentrifugoChannelListener(channel: 'private:*', event: PublishEvent::class, method: 'handle')]
@@ -398,28 +257,18 @@ class PrivateChannelHandler
 }
 ```
 
-**Parameters:**
-
 | Parameter  | Type      | Default      | Description |
 |------------|-----------|--------------|-------------|
-| `channel`  | `string`  | *(required)* | Exact channel name or pattern with `*` wildcard (e.g. `chat:*`) |
-| `event`    | `?string` | `null`       | Event class FQCN. Optional on methods — inferred from the first parameter type hint |
-| `priority` | `int`     | `0`          | Higher = called first (within matched handlers for this channel) |
-| `method`   | `?string` | `null`       | Method to call. Auto-detected when placed on a method |
+| `channel`  | `string`  | *(required)* | Exact name or `*` pattern (`chat:*`) |
+| `event`    | `?string` | `null`       | Event FQCN; inferred from the first parameter type hint on methods |
+| `priority` | `int`     | `0`          | Higher = called first within the matched channel |
+| `method`   | `?string` | `null`       | Auto-detected when placed on a method |
 
-#### `#[AsCentrifugoRpcListener]`
+### `#[AsCentrifugoRpcListener]`
 
-Routes `RPCEvent` to a specific method based on the RPC method name.
+Routes `RPCEvent` by RPC method name.
 
 ```php
-<?php
-
-namespace App\EventListener;
-
-use FluffyDiscord\RoadRunnerBundle\Attribute\AsCentrifugoRpcListener;
-use FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\RPCEvent;
-use RoadRunner\Centrifugo\Payload\RPCResponse;
-
 class RpcHandler
 {
     #[AsCentrifugoRpcListener(rpcMethod: 'ping')]
@@ -427,37 +276,24 @@ class RpcHandler
     {
         $event->setResponse(new RPCResponse(data: ['pong' => true]));
     }
-
-    #[AsCentrifugoRpcListener(rpcMethod: 'getUserInfo')]
-    public function onGetUserInfo(RPCEvent $event): void
-    {
-        $data = $event->getRequest()->getData();
-        // ...
-    }
 }
 ```
 
-**Parameters:**
-
 | Parameter   | Type      | Default      | Description |
 |-------------|-----------|--------------|-------------|
-| `rpcMethod` | `string`  | *(required)* | Exact RPC method name (matched against `RPCEvent::getRequest()->method`) |
+| `rpcMethod` | `string`  | *(required)* | Matched against `RPCEvent::getRequest()->method` |
 | `priority`  | `int`     | `0`          | Higher = called first |
-| `method`    | `?string` | `null`       | Method to call. Auto-detected when placed on a method |
+| `method`    | `?string` | `null`       | Auto-detected when placed on a method |
 
-#### How it works
-
-The routing table is built **at container compile time** — there is no runtime overhead beyond a single hash-map lookup per request. Handlers are dispatched in priority order and respect `stopPropagation()`. The routing listeners fire at priority `-100`, after any plain `#[AsEventListener]` handlers at default priority `0`.
+Routing table is built at container compile time — one hash-map lookup per request. Handlers run in priority order and respect `stopPropagation()`. Routing listeners fire at priority `-100`, after plain `#[AsEventListener]` handlers at `0`.
 
 ## Jobs (queues)
-
-To consume [RoadRunner Jobs](https://docs.roadrunner.dev/queues-and-jobs/overview-queues) (queue tasks) add the `spiral/roadrunner-jobs` package:
 
 ```shell
 composer require spiral/roadrunner-jobs
 ```
 
-Configure a `jobs` pool in your `.rr.yaml`, for example:
+`.rr.yaml`:
 
 ```yaml
 jobs:
@@ -471,65 +307,50 @@ jobs:
   consume: ["emails"]
 ```
 
-The bundle registers a Jobs worker under RoadRunner's `jobs` mode. Listen to a single `JobsRunEvent`, dispatched once per consumed task, with a normal `#[AsEventListener]`:
+`JobsRunEvent` is dispatched once per consumed task:
 
 ```php
-<?php
-
-namespace App\EventListener;
-
-use FluffyDiscord\RoadRunnerBundle\Event\Worker\Jobs\JobsRunEvent;
-use Symfony\Component\EventDispatcher\Attribute\AsEventListener;
-
 #[AsEventListener(event: JobsRunEvent::class, method: "onJob")]
 final class JobListener
 {
     public function onJob(JobsRunEvent $event): void
     {
-        // metadata
         $event->getName();      // job name
         $event->getQueue();     // broker queue name
         $event->getPipeline();  // RoadRunner pipeline name
         $event->getId();        // task id
         $event->getHeaders();   // array<string, string[]>
 
-        // your payload (raw string — you own the format)
-        $data = json_decode($event->getPayload(), true);
-
-        // ... process the task ...
+        $data = json_decode($event->getPayload(), true); // raw string — you own the format
     }
 }
 ```
 
-**Ack / nack semantics:**
-- If your listener returns normally, the worker **acks** the task (it is removed from the queue).
-- If your listener throws any `\Throwable`, the worker **nacks with requeue** (`redelivery: true`) so the task is retried, and logs the error to STDERR / Sentry. A hard `\Error` additionally stops the worker (RoadRunner respawns it).
-- If the worker dies mid-task (`die`/`exit`/fatal), a shutdown handler best-effort requeues the task so it is not lost.
+Ack / nack:
 
-> **Poison-message caveat:** because the default for an unhandled failure is *requeue*, a task that always throws will be redelivered indefinitely. If a job can fail permanently, **catch the error inside your listener** and decide there (e.g. log + return normally to ack-and-drop, or take the task via `$event->getTask()` and call `->nack($e, redelivery: false)` yourself). A listener that takes ownership of the task (`getTask()->ack()`/`nack()`/`requeue()`) is respected — the worker will not respond a second time.
+- Listener returns normally → **ack**.
+- Listener throws `\Throwable` → **nack with requeue** (`redelivery: true`) + error logged to STDERR / Sentry. A hard `\Error` also stops the worker (RR respawns it).
+- Worker dies mid-task (`die`/`exit`/fatal) → shutdown handler best-effort requeues.
+- A listener that takes the task (`$event->getTask()->ack()`/`nack()`/`requeue()`) is respected; the worker won't respond twice.
 
-Like the other workers, `jobs` supports `lazy_boot` (see [Configuration](#configuration)); it defaults to `false`.
+> **Poison messages:** the default is requeue, so an always-throwing task is redelivered indefinitely. Catch inside the listener and ack-and-drop, or `nack($e, redelivery: false)` yourself.
 
-### Message bus (dispatch typed messages, Messenger-style)
+### Message bus (Messenger-style)
 
-On top of the raw `JobsRunEvent`, the bundle ships an optional typed layer built on **Symfony Messenger**: dispatch a **plain PHP object** to a queue and handle it with a standard `#[AsMessageHandler]` on the consumer side — no manual (de)serialization, and you reuse Messenger's routing, middleware, `debug:messenger` and profiler panel. The raw `JobsRunEvent` and RR Jobs services keep working unchanged; this layer is purely additive (a task it did not produce is left untouched for your raw listeners).
-
-It activates once `symfony/messenger` is installed:
+Optional typed layer: dispatch a plain PHP object, handle it with a standard `#[AsMessageHandler]`. Purely additive — raw `JobsRunEvent` and RR Jobs services keep working, and a task this layer did not produce is left to your raw listeners.
 
 ```shell
 composer require symfony/messenger
 ```
 
-Serialization works out of the box — by default the **igbinary** serializer is used when the `igbinary` extension is present, otherwise the zero-dependency **Native** serializer (PHP `serialize()`/`unserialize()`, which handles any serializable object including private state). For interoperable JSON payloads you can opt into the **Symfony Serializer** instead:
+Serialization: **igbinary** when the extension is present, otherwise **Native** (`serialize()`/`unserialize()`, handles any serializable object incl. private state). For JSON:
 
 ```shell
-# optional — only needed for jobs.serializer: symfony
+# only for jobs.serializer: symfony
 composer require symfony/serializer symfony/property-access
 ```
 
-> The strategy is chosen by the `jobs.serializer` config (`igbinary` / `native` / `symfony`) and recorded in the task's `x-job-serializer` header so the consumer decodes with the same one. Selecting `symfony` without `symfony/serializer` installed throws a clear error.
-
-Mark a message class with `#[AsJob]` (queue/delay/priority are optional defaults):
+> The strategy comes from `jobs.serializer` (`igbinary` / `native` / `symfony`) and is recorded in the task's `x-job-serializer` header so the consumer decodes with the same one. `symfony` without `symfony/serializer` throws a clear error.
 
 ```php
 use FluffyDiscord\RoadRunnerBundle\Job\Attribute\AsJob;
@@ -541,102 +362,71 @@ final class SendWelcomeEmail
 }
 ```
 
-Dispatch it with the `JobDispatcher` service (public; explicit arguments override the attribute defaults):
+Dispatch via the public `JobDispatcher`; explicit arguments override the attribute:
 
 ```php
-use FluffyDiscord\RoadRunnerBundle\Job\JobDispatcher;
-
 public function __construct(private JobDispatcher $jobs) {}
 
 $this->jobs->dispatch(new SendWelcomeEmail('a@b.test'));
-// or override per dispatch:
 $this->jobs->dispatch(new SendWelcomeEmail('a@b.test'), queue: 'priority', delay: 30, priority: 5);
 ```
 
-Handle it with a standard Symfony Messenger handler — `#[AsMessageHandler]` (the message class is inferred from the first parameter):
-
 ```php
-use Symfony\Component\Messenger\Attribute\AsMessageHandler;
-
 #[AsMessageHandler]
 final class SendWelcomeEmailHandler
 {
-    public function __invoke(SendWelcomeEmail $message): void
-    {
-        // ... send the email ...
-    }
+    public function __invoke(SendWelcomeEmail $message): void {}
 }
 ```
 
-Everything `#[AsMessageHandler]` already supports applies — handler priority, multiple handlers per message, `__invoke` or a named method, and `php bin/console debug:messenger` to inspect the wiring. Consumed jobs arrive on the Messenger transport named `roadrunner`, so you can scope a handler with `#[AsMessageHandler(fromTransport: 'roadrunner')]` to tell RoadRunner jobs apart from messages you dispatch through Messenger normally.
+Everything `#[AsMessageHandler]` supports applies — priorities, multiple handlers, named methods, `debug:messenger`. Consumed jobs arrive on the Messenger transport `roadrunner`; scope with `#[AsMessageHandler(fromTransport: 'roadrunner')]`.
 
-**Need the RoadRunner task** (to read headers, or ack/nack/requeue manually)? Add a second `ReceivedTaskInterface` parameter — the bundle passes the consumed task to your handler:
+Need the RR task (headers, manual ack/nack/requeue)? Add a `ReceivedTaskInterface` parameter:
 
 ```php
-use Spiral\RoadRunner\Jobs\Task\ReceivedTaskInterface;
-use Symfony\Component\Messenger\Attribute\AsMessageHandler;
-
 #[AsMessageHandler]
 final class SendWelcomeEmailHandler
 {
     public function __invoke(SendWelcomeEmail $message, ReceivedTaskInterface $task): void
     {
-        // $task->getHeaders(); $task->withDelay(30)->requeue(...); $task->nack($e, redelivery: false); ...
+        // $task->getHeaders(); $task->withDelay(30)->requeue(...); $task->nack($e, redelivery: false);
     }
 }
 ```
 
-**Ack / nack semantics** match the raw listener: if every handler returns normally the task is **acked**; if a handler throws, the worker **nacks with requeue** (`redelivery: true`) and logs the error to STDERR / Sentry; a message with **no** registered handler is logged and acked as a no-op. The poison-message caveat from the raw section applies equally — an always-throwing handler is requeued indefinitely unless you catch the error, or take ownership of the task via the `ReceivedTaskInterface` above and `nack(..., redelivery: false)` yourself.
-
-The serializer, default queue and target bus are configurable:
+Ack / nack matches the raw listener: all handlers return → **ack**; a handler throws → **nack with requeue** + STDERR / Sentry log; **no** registered handler → logged and acked as a no-op. The poison-message caveat applies equally.
 
 ```yaml
 fluffy_discord_road_runner:
   jobs:
-    serializer: ~              # default: "igbinary" if the extension is present, else "native". Or "symfony" (JSON).
-    default_queue: "default"   # used when neither a dispatch() argument nor #[AsJob(queue:)] is given; pipeline must exist in your .rr.yaml
-    bus: ~                     # service id of the Messenger bus to dispatch into (default: the application's default bus)
+    serializer: ~              # "igbinary" if the extension is present, else "native"; or "symfony" (JSON)
+    default_queue: "default"   # used when no dispatch() argument and no #[AsJob(queue:)]; pipeline must exist in .rr.yaml
+    bus: ~                     # Messenger bus service id (default: application's default bus)
 ```
 
-> **Wire-format note:** the envelope (`x-job-class` / `x-job-serializer` headers, message FQCN as the RR job name) is a stable contract — changing it would break in-flight queued tasks across an upgrade (`docs/specs/jobs-message-bus.md`).
+> **Wire format** (`x-job-class` / `x-job-serializer` headers, message FQCN as the RR job name) is a stable contract — changing it breaks in-flight queued tasks across an upgrade (`docs/specs/jobs-message-bus.md`).
 
 ## Worker warmup
 
-A fresh worker's first request is several times slower than its steady state: PHP
-compiles thousands of classes and Symfony initializes its infrastructure lazily, on
-first use. `opcache.preload` can't help — it is a no-op in `cli` workers.
+A fresh worker's first request is several times slower than steady state; `opcache.preload` is a no-op in `cli` workers. The bundle warms during worker boot, before RR marks the worker ready. Zero config:
 
-The bundle warms all of this during worker boot, before RoadRunner marks the worker
-ready. Zero config:
-
-1. **Generic warmers** — router, Doctrine metadata, event listeners, form types, Twig
-   runtimes, container preload class list. Missing dependencies are skipped.
-2. **Learned manifest** — workers record what real traffic loads
-   (`<kernel.cache_dir>/roadrunner/warmup.manifest.json`) and every next worker replays
-   it at boot. Invalidated automatically when the container is rebuilt.
+1. **Generic warmers** — router, Doctrine metadata, event listeners, form types, Twig runtimes, container preload class list. Missing dependencies are skipped.
+2. **Learned manifest** — workers record what real traffic loads (`<kernel.cache_dir>/roadrunner/warmup.manifest.json`); every next worker replays it at boot. Invalidated when the container is rebuilt.
 
 Measured on a production Sylius app: first request 252 ms → 41 ms (steady state 33–43 ms).
 
-Development (`http.pool.debug: true`): warmup and learning switch themselves off. With one
-process per request nothing warmed survives to a second request, so replaying the manifest
-only adds boot latency — and compiling cached Twig templates at boot early-binds their
-classes, which makes Twig skip its freshness check and keep serving stale templates after an
-edit. The gate is `kernel.runtime_mode.worker`, which the bundle's runtime derives from
-`pool.debug` in your `.rr.yaml`; no configuration needed.
+Development (`http.pool.debug: true`): warmup and learning switch themselves off — one process per request keeps nothing warm. Gate is `kernel.runtime_mode.worker`, derived from `pool.debug` in `.rr.yaml`.
 
-Production notes:
+Production expectations:
 
-- Run worker PHP with `display_errors=0` — warnings on stdout corrupt the worker protocol.
-- `opcache.file_cache=/some/dir` shares compiled bytecode across workers
-  (worker boot ~600 ms → ~200 ms). The bundle adapts to it automatically.
-- Warmed classes live in each worker's own opcache — budget
-  `opcache.memory_consumption` × worker count.
-- `warmup.learn_requests` (default 30) — how many responses each worker records.
-- Set `warmup.manifest_path` outside the cache dir to keep learning across deploys.
+- `display_errors=0` — warnings on stdout corrupt the worker protocol.
+- `opcache.file_cache=/some/dir` shares bytecode across workers (boot ~600 ms → ~200 ms). Adapted to automatically.
+- `warmup.learn_requests` (default 30) — responses recorded per worker.
+- `warmup.manifest_path` outside the cache dir keeps learning across deploys. 
+
+Warmed classes live in each worker's opcache — budget `opcache.memory_consumption` × worker count.
 
 ### Warming your own services
-
-Implement the interface — autoconfiguration does the rest:
 
 ```php
 use FluffyDiscord\RoadRunnerBundle\Warmup\WorkerWarmerInterface;
@@ -654,83 +444,57 @@ class MyCacheWarmer implements WorkerWarmerInterface
 }
 ```
 
-Or listen to `WorkerBootingEvent`. A throwing warmer is logged and skipped — warmup
-never prevents the worker from serving.
+Autoconfigured. Or listen to `WorkerBootingEvent`. A throwing warmer is logged and skipped in production.
 
-### Warm the cache before starting workers
+### Cold cache in dev
 
 ```bash
 php bin/console cache:warmup
 rr serve
 ```
+Suggested, not required. Sidesteps upstream Symfony bug: [symfony/symfony#65447](https://github.com/symfony/symfony/issues/65447)
 
-An unwarmed cache makes every worker warm the container at once. Symfony locks the container
-dump but not the rest of the warmup, so with `APP_DEBUG=1` the concurrent writes corrupt
-`<Container>Deprecations.log`; the `unserialize()` warning is promoted to an exception and the
-worker dies at boot. RoadRunner respawns it, it dies again — with no ready worker every request
-blocks until the client times out, so it reads as a hang rather than an error.
+- Dev only (`APP_DEBUG=1`); prod and any warm cache are unaffected.
+- Concurrent cold-cache boots corrupt `<Container>Deprecations.log` → workers die at boot and respawn, requests hang instead of erroring.
 
-Upstream Symfony bug, not a RoadRunner one: reproduces with concurrent `php public/index.php`.
-Unaffected: `APP_DEBUG=0`, or any already-warm cache.
+## Distributed locks
 
-## Distributed locks (symfony/lock)
-
-Optional. Install the bridge and you get a Symfony `LockFactory` backed by RoadRunner's Lock plugin over the same RPC connection — no extra config:
+Optional. Symfony `LockFactory` backed by RR's Lock plugin over the same RPC, no extra config:
 
 ```shell
 composer require roadrunner-php/symfony-lock-driver
 ```
 
-Add a `lock` section to your `.rr.yaml`, then autowire `LockFactory` (or `PersistingStoreInterface`) anywhere:
+Add a `lock` section to `.rr.yaml`, then autowire `LockFactory` (or `PersistingStoreInterface`):
 
 ```php
-use Symfony\Component\Lock\LockFactory;
-
 public function __construct(private LockFactory $locks) {}
 
 $lock = $this->locks->createLock('report-generation');
 if ($lock->acquire()) { /* ... */ $lock->release(); }
 ```
 
-## Temporal (beta-test)
+## Temporal (beta)
 
 > [!WARNING]
-> Temporal support is in **beta**. The overall flow and the way it's implemented might still
-> change. The goal is a nice and easy DX, which is being actively explored right now — expect
-> breaking changes until the API settles.
-
-The bundle integrates [Temporal](https://learn.temporal.io/getting_started/php/). It activates
-automatically once `temporal/sdk` is installed:
+> Beta. Flow and implementation may still change; expect breaking changes until the API settles.
 
 ```bash
 composer require temporal/sdk
 ```
 
-Assign workflows/activities to a worker's task queue with the `#[TaskQueue]` attribute, run
-them under RoadRunner's `temporal` plugin, and react to interceptor calls via Symfony events. A
-profiler tab lists the registered workers, workflows and activities.
+Activates automatically. Assign workflows/activities to a worker's task queue with `#[TaskQueue]`, run them under RR's `temporal` plugin, react to interceptor calls via Symfony events. A profiler tab lists registered workers, workflows and activities.
 
-**→ Full usage guide with copy-paste examples: [`docs/temporal.md`](docs/temporal.md)** (defining
-activities/workflows, configuration, starting a workflow, interceptor events).
+**→ [`docs/temporal.md`](docs/temporal.md)** — defining activities/workflows, configuration, starting a workflow, interceptor events.
 
 ## Developing with Symfony and RoadRunner
 
-- If possible, stop using lazy loading in your services, inject services immediately. Lazy loaded services might introduce memory leaks and make your services slower to initialize when requests arrive.
-- Do not use/create local class/array caches in your services, only if you know, what you are doing. Try to make them stateless or use [ResetInterface](https://github.com/symfony/contracts/blob/main/Service/ResetInterface.php) to clean up between requests, so state is not being shared. Mind the [non‑shared caveat](#service-reset): a `shared: false` resettable service isn't reset before Symfony 8.1.
-- Symfony forms might leak data across requests due to caching, see section bellow.
-- Simplify your `User` session serialization by taking advantage of `EquatableInterface` and a custom de/serialization logic. 
-This will prevent errors because of detached Doctrine entities and, as a side bonus, will speed up loading user from sessions.
+- Drop lazy loading; inject services immediately. Lazy services can leak memory and slow framework initialization when requests arrive.
+- No local class/array caches in services — stay stateless or implement [`ResetInterface`](https://github.com/symfony/contracts/blob/main/Service/ResetInterface.php). Mind the [`shared: false` caveat](#service-reset).
+- Forms can leak data across requests — see [OptionsResolver](#optionsresolver-forms).
+- Simplify `User` session serialization with `EquatableInterface` + custom de/serialization — avoids detached Doctrine entities and speeds up loading the user from the session.
+
 ```php
-<?php
-
-namespace App\Entity\User;
-
-use Doctrine\DBAL\Types\Types;
-use Doctrine\ORM\Mapping as ORM;
-use Symfony\Component\Security\Core\User\EquatableInterface;
-use Symfony\Component\Security\Core\User\PasswordAuthenticatedUserInterface;
-use Symfony\Component\Security\Core\User\UserInterface;
-
 class User implements UserInterface, PasswordAuthenticatedUserInterface, EquatableInterface
 {
     #[ORM\Id]
@@ -742,7 +506,6 @@ class User implements UserInterface, PasswordAuthenticatedUserInterface, Equatab
     #[ORM\Column(type: Types::TEXT)]
     private ?string $password = null;
 
-    // serialize ony these three fields
     public function __serialize(): array
     {
         return [
@@ -752,7 +515,6 @@ class User implements UserInterface, PasswordAuthenticatedUserInterface, Equatab
         ];
     }
 
-    // unserialize ony these three fields
     public function __unserialize(array $data): void
     {
         $this->id = $data["id"] ?? null;
@@ -760,7 +522,6 @@ class User implements UserInterface, PasswordAuthenticatedUserInterface, Equatab
         $this->password = $data["password"] ?? null;
     }
 
-    // check only the three serialized fields
     public function isEqualTo(mixed $user): bool
     {
         if (!$user instanceof self) {
@@ -779,66 +540,40 @@ class User implements UserInterface, PasswordAuthenticatedUserInterface, Equatab
 
 ### OptionsResolver (Forms)
 
-Symfony caches **OptionsResolver::setDefaults()** calls,
-so they resolve only once for current worker when someone uses
-them for the first time.
+`OptionsResolver::setDefaults()` is cached — it resolves once per worker, on first use. Dynamic defaults leak across requests and sessions:
 
-This may lead to sharing sensitive information across requests in the context of a single worker,
-if you do not use defaults correctly.
-
-Consider this Form, which has major flaw that will leak user email to subsequent requests
-that worker receives.
 ```php
-class MyType extends AbstractType
+// leaks the first user's email to every later request of that worker
+public function configureOptions(OptionsResolver $resolver): void
 {
-    // your buildForm() and what not
-    // ...
-    
-    // invalid use of setDefaults()
-    public function configureOptions(OptionsResolver $resolver): void
-    {
-        $resolver->setDefaults([
-            // loads current user
-            // and reuses his email forever until worker restarts
-            // everyone, even in anonymous browser tabs or different sessions,
-            // will see their email 
-            "label" => $this->security->getUser()->getEmail(),
-        ]);
-    }
+    $resolver->setDefaults([
+        "label" => $this->security->getUser()->getEmail(),
+    ]);
 }
 ```
 
-You should really use only static/stateless default values
-and dynamic options should be passed when
-`OptionsResolver` is used, or form is being created, eg:
+Keep defaults static; pass dynamic values at form creation:
 
 ```php
-// with this the user email will
-// stay within this single request
-// and won't be leaked to subsequent worker requests
 $correctForm = $this->createForm(MyType::class, options: [
     "label" => $this->getUser()->getEmail(),
 ]);
 ```
 
-## Debugging (recommendations)
+## Debugging
 
-With RoadRunner you cannot simply dump and die, because nothing will be printed.
-I would like to introduce [Buggregator](https://docs.buggregator.dev/config/var-dumper.html) to work around that. 
-As a bonus it can also work as a [mailtrap](https://docs.buggregator.dev/config/smtp.html) or testing [Sentry](https://docs.buggregator.dev/config/sentry.html) locally
+- `dd()` works in dev — the [rescue page](#error-handling) names the `file:line` it ran on and shows the dump. Needs `symfony/var-dumper`.
+- `dump()` on a *successful* response is still invisible: RoadRunner re-streams the output buffer to STDERR, so the HTML lands escaped in the worker log.
+- A dump server takes both cases over TCP — the rescue page then shows the location only and forwards the dump. [Buggregator](https://docs.buggregator.dev/config/var-dumper.html) (or any `VAR_DUMPER_SERVER`) also serves as a [mailtrap](https://docs.buggregator.dev/config/smtp.html) and a local [Sentry](https://docs.buggregator.dev/config/sentry.html).
 
 ## DDEV add-on
-
-If you develop with [DDEV](https://ddev.com/), the [`ddev-roadrunner-symfony`](https://github.com/FluffyDiscord/ddev-roadrunner-symfony)
-add-on wires RoadRunner into your DDEV project so you can get this bundle running locally in one command:
 
 ```shell
 ddev add-on get FluffyDiscord/ddev-roadrunner-symfony
 ```
 
-See the [add-on repository](https://github.com/FluffyDiscord/ddev-roadrunner-symfony) for configuration and usage details.
+See the [add-on repository](https://github.com/FluffyDiscord/ddev-roadrunner-symfony) for configuration and usage.
 
 ## Credits
 
-Inspiration taken from existing solutions like [Baldinof's Bundle](https://github.com/Baldinof/roadrunner-bundle) 
-and [Nyholm's Runtime](https://github.com/php-runtime/roadrunner-symfony-nyholm)
+Inspiration taken from [Baldinof's Bundle](https://github.com/Baldinof/roadrunner-bundle) and [Nyholm's Runtime](https://github.com/php-runtime/roadrunner-symfony-nyholm).
