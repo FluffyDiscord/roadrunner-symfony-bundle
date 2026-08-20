@@ -2,6 +2,7 @@
 
 namespace FluffyDiscord\RoadRunnerBundle\Tests\Worker;
 
+use FluffyDiscord\RoadRunnerBundle\ErrorHandler\DumpCapture;
 use FluffyDiscord\RoadRunnerBundle\ErrorHandler\WorkerErrorResponder;
 use FluffyDiscord\RoadRunnerBundle\Factory\NativeSymfonyRequestFactory;
 use FluffyDiscord\RoadRunnerBundle\Factory\SymfonyRequestFactoryInterface;
@@ -126,6 +127,7 @@ abstract class AbstractHttpWorkerTestCase extends BaseTestCase
         ?SentryHubInterface             $sentryHub = null,
         ?SymfonyRequestFactoryInterface $symfonyRequestFactory = null,
         ?HttpFoundationFactoryInterface $httpFoundationFactory = null,
+        ?DumpCapture                    $dumpCapture = null,
     ): TestableHttpWorker
     {
         $worker = new TestableHttpWorker(
@@ -137,6 +139,7 @@ abstract class AbstractHttpWorkerTestCase extends BaseTestCase
             sentryHubInterface: $sentryHub,
             httpFoundationFactory: $httpFoundationFactory,
             symfonyRequestFactory: $symfonyRequestFactory ?? new NativeSymfonyRequestFactory(),
+            dumpCapture: $dumpCapture,
         );
         $worker->injectPsr7Worker($this->psr7Worker);
         $worker->responderDebug = $debug;
