@@ -2,6 +2,7 @@
 
 namespace FluffyDiscord\RoadRunnerBundle\Worker;
 
+use FluffyDiscord\RoadRunnerBundle\ErrorHandler\BootFailureReporting;
 use FluffyDiscord\RoadRunnerBundle\Event\Worker\WorkerBootingEvent;
 use FluffyDiscord\RoadRunnerBundle\Temporal\TemporalWorkerFactoryInterface;
 use FluffyDiscord\RoadRunnerBundle\Temporal\TemporalWorkerInitializer;
@@ -14,6 +15,8 @@ use Temporal\WorkerFactory;
 
 class TemporalWorker implements WorkerInterface
 {
+    use BootFailureReporting;
+
     public function __construct(
         private readonly KernelInterface                $kernel,
         private readonly EventDispatcherInterface       $eventDispatcher,
@@ -28,9 +31,13 @@ class TemporalWorker implements WorkerInterface
 
     public function start(): void
     {
-        $this->kernel->boot();
+        try {
+            $this->kernel->boot();
 
-        $this->eventDispatcher->dispatch(new WorkerBootingEvent());
+            $this->eventDispatcher->dispatch(new WorkerBootingEvent());
+        } catch (\Throwable $bootThrowable) {
+            $this->reportBootFailure($bootThrowable);
+        }
 
         $workerFactory = $this->temporalWorkerFactory->create();
 
@@ -54,5 +61,10 @@ class TemporalWorker implements WorkerInterface
 
             throw $throwable;
         }
+    }
+
+    protected function getBootFailureSentryHub(): ?SentryHubInterface
+    {
+        return $this->sentryHubInterface;
     }
 }
