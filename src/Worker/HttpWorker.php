@@ -13,6 +13,7 @@ use FluffyDiscord\RoadRunnerBundle\ErrorHandler\WorkerErrorResponder;
 use FluffyDiscord\RoadRunnerBundle\Factory\BinaryFileResponseWrapper;
 use FluffyDiscord\RoadRunnerBundle\Factory\DefaultResponseWrapper;
 use FluffyDiscord\RoadRunnerBundle\Factory\Psr7SymfonyRequestFactory;
+use FluffyDiscord\RoadRunnerBundle\Factory\ServerParamsFactory;
 use FluffyDiscord\RoadRunnerBundle\Factory\StreamedJsonResponseWrapper;
 use FluffyDiscord\RoadRunnerBundle\Factory\StreamedResponseWrapper;
 use FluffyDiscord\RoadRunnerBundle\Factory\SymfonyRequestFactoryInterface;
@@ -20,7 +21,6 @@ use FluffyDiscord\RoadRunnerBundle\Http\InformationalHeaders;
 use Nyholm\Psr7;
 use Sentry\State\HubInterface as SentryHubInterface;
 use Spiral\RoadRunner;
-use Spiral\RoadRunner\Http\GlobalState;
 use Symfony\Bridge\PsrHttpMessage\HttpFoundationFactoryInterface;
 use Symfony\Component\EventDispatcher\EventDispatcherInterface;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
@@ -37,6 +37,7 @@ class HttpWorker implements WorkerInterface
     use BootFailureReporting;
 
     private SymfonyRequestFactoryInterface $symfonyRequestFactory;
+    private ServerParamsFactory $serverParamsFactory;
     private Psr7\Factory\Psr17Factory $psrFactory;
 
     public static ?\Spiral\RoadRunner\Http\HttpWorker $currentHttpWorker = null;
@@ -65,6 +66,7 @@ class HttpWorker implements WorkerInterface
     {
         $this->psrFactory = new Psr7\Factory\Psr17Factory();
         $this->symfonyRequestFactory = $symfonyRequestFactory ?? new Psr7SymfonyRequestFactory($httpFoundationFactory);
+        $this->serverParamsFactory = new ServerParamsFactory();
     }
 
     protected function createPsr7Worker(): RoadRunner\Http\PSR7Worker
@@ -155,7 +157,7 @@ class HttpWorker implements WorkerInterface
 
                 $this->eventDispatcher->dispatch(new WorkerRequestReceivedEvent());
 
-                $server = GlobalState::enrichServerVars($rrRequest);
+                $server = $this->serverParamsFactory->createServerParams($rrRequest);
                 $symfonyRequest = $this->symfonyRequestFactory->createRequest($rrRequest, $server);
                 $symfonyResponse = $this->kernel->handle($symfonyRequest);
 
