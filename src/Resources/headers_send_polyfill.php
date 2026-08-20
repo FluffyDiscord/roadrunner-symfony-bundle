@@ -12,13 +12,15 @@ function headers_send(int $statusCode = 200): int
         return $statusCode;
     }
 
-    /** @var array<array<string>> $headers */
+    /** @var array<string, array<string>> $headers */
     $headers = $response->headers->allPreserveCaseWithoutCookies();
-    if ($headers === []) {
+    $unsentHeaders = \FluffyDiscord\RoadRunnerBundle\Http\InformationalHeaders::getUnsentHeaders($headers);
+    if ($unsentHeaders === []) {
         return $statusCode;
     }
 
-    $rr->respond($statusCode, '', $headers, endOfStream: false);
+    $rr->respond($statusCode, '', $unsentHeaders, endOfStream: false);
+    \FluffyDiscord\RoadRunnerBundle\Http\InformationalHeaders::rememberSentHeaders($unsentHeaders);
 
     return $statusCode;
 }

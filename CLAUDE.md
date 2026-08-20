@@ -53,6 +53,12 @@ php vendor/bin/phpunit tests
   `MessageBusInterface` (passing the RR task via a `HandlerArgumentsStamp`); handlers are plain
   `#[AsMessageHandler]`. Specced in `docs/specs/jobs-message-bus.md`. `symfony/messenger` and
   `symfony/serializer` are `require-dev` + `suggest` only.
+- `src/Http/InformationalHeaders.php` — tracks the header values already emitted in `1xx` (Early
+  Hints) frames so they are not repeated in the final response. RoadRunner's Go handler `Add`s
+  worker headers and keeps `1xx` headers per RFC 8297, so re-sending the bag duplicates them on the
+  wire. Statics are forced here: the `headers_send()` polyfill is a global function with no DI
+  access (same constraint as `HttpWorker::$currentHttpWorker`). Live-tested by
+  `tests/docker-validate-early-hints.sh`.
 - `src/ErrorHandler/MinimalErrorPage.php` — dependency-free fallback error page.
 - `src/EventListener/CentrifugoEventRouter.php` + `src/DependencyInjection/Compiler/CentrifugoRouterPass.php`
   — compile-time routing table for `#[AsCentrifugoChannelListener]` / `#[AsCentrifugoRpcListener]`.

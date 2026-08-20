@@ -2,6 +2,7 @@
 
 namespace FluffyDiscord\RoadRunnerBundle\Tests;
 
+use FluffyDiscord\RoadRunnerBundle\Http\InformationalHeaders;
 use FluffyDiscord\RoadRunnerBundle\Tests\Attributes\SkipForSymfonyVersion;
 use PHPUnit\Framework\TestCase;
 
@@ -21,5 +22,12 @@ abstract class BaseTestCase extends TestCase
                 $this->markTestSkipped("Skipping test for Symfony $instance->operator $instance->version");
             }
         }
+    }
+
+    protected function tearDown(): void
+    {
+        InformationalHeaders::forgetSentHeaders();
+
+        parent::tearDown();
     }
 }
