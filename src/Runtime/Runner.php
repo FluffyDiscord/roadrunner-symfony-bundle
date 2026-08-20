@@ -4,12 +4,14 @@ namespace FluffyDiscord\RoadRunnerBundle\Runtime;
 
 use FluffyDiscord\RoadRunnerBundle\ErrorHandler\BootFailureReporting;
 use FluffyDiscord\RoadRunnerBundle\ErrorHandler\WorkerErrorResponder;
+use FluffyDiscord\RoadRunnerBundle\Grpc\GrpcResponseEncoder;
 use FluffyDiscord\RoadRunnerBundle\Worker\WorkerRegistry;
 use Nyholm\Psr7;
 use Sentry\SentrySdk;
 use Sentry\State\HubInterface as SentryHubInterface;
 use Spiral\RoadRunner;
 use Spiral\RoadRunner\Environment\Mode;
+use Spiral\RoadRunner\GRPC\StatusCode;
 use Symfony\Component\HttpKernel\KernelInterface;
 use Symfony\Component\Runtime\RunnerInterface;
 
@@ -55,6 +57,10 @@ class Runner implements RunnerInterface
     {
         $this->reportBootFailure($throwable);
 
+        if ($this->mode === Mode::MODE_GRPC) {
+            return $this->serveGrpcBootFailure($throwable);
+        }
+
         if ($this->mode !== Mode::MODE_HTTP) {
             return 1;
         }
@@ -73,6 +79,40 @@ class Runner implements RunnerInterface
         new WorkerErrorResponder($this->kernel->isDebug())->sendThrowableResponse($worker, $throwable);
 
         return 1;
+    }
+
+    protected function serveGrpcBootFailure(\Throwable $throwable): int
+    {
+        $grpcPackageInstalled = class_exists(StatusCode::class);
+
+        if (!$grpcPackageInstalled) {
+            return 1;
+        }
+
+        try {
+            $worker = $this->createFallbackRoadRunnerWorker();
+            $bootFailurePayload = $worker->waitPayload();
+        } catch (\Throwable) {
+            return 1;
+        }
+
+        if ($bootFailurePayload === null) {
+            return 1;
+        }
+
+        $message = $this->kernel->isDebug() ? 'Worker boot failed: ' . $throwable : 'Worker boot failed';
+
+        try {
+            $worker->respond(new RoadRunner\Payload('', new GrpcResponseEncoder()->encodeStatus(StatusCode::UNAVAILABLE, $message)));
+        } catch (\Throwable) {
+        }
+
+        return 1;
+    }
+
+    protected function createFallbackRoadRunnerWorker(): RoadRunner\WorkerInterface
+    {
+        return RoadRunner\Worker::create();
     }
 
     protected function getBootFailureLabel(): string

@@ -1,0 +1,118 @@
+{% extends '@WebProfiler/Profiler/layout.html.twig' %}
+
+{% block toolbar %}
+    {% if collector.hasData %}
+        {% set status_color = collector.success ? '' : 'red' %}
+        {% set icon %}
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="16 18 22 12 16 6"/>
+                <polyline points="8 6 2 12 8 18"/>
+            </svg>
+        {% endset %}
+        {% set text %}
+            <div class="sf-toolbar-info-piece">
+                <b>gRPC</b>
+                <span class="sf-toolbar-status {{ status_color }}">{{ collector.serviceName }}/{{ collector.methodName }}</span>
+            </div>
+            <div class="sf-toolbar-info-piece">
+                <b>Status</b>
+                <span class="sf-toolbar-status {{ status_color }}">{{ collector.workerStatusName }}</span>
+            </div>
+            <div class="sf-toolbar-info-piece">
+                <b>Duration</b>
+                <span>{{ collector.durationMs }} ms</span>
+            </div>
+        {% endset %}
+        {{ include('@WebProfiler/Profiler/toolbar_item.html.twig', { link: profiler_url }) }}
+    {% endif %}
+{% endblock %}
+
+{% block menu %}
+    <span class="label {{ collector.hasData and not collector.success ? 'label-status-error' : '' }}">
+        <span class="icon">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="16 18 22 12 16 6"/>
+                <polyline points="8 6 2 12 8 18"/>
+            </svg>
+        </span>
+        <strong>gRPC</strong>
+        {% if collector.hasData and not collector.success %}
+            <span class="count"><span>!</span></span>
+        {% endif %}
+    </span>
+{% endblock %}
+
+{% block panel %}
+    <h2>gRPC call</h2>
+
+    {% if not collector.hasData %}
+        <div class="empty">
+            <p>No gRPC call was processed during this request.</p>
+        </div>
+    {% else %}
+        <div class="metrics">
+            <div class="metric">
+                <span class="value">{{ collector.serviceName }}</span>
+                <span class="label">Service</span>
+            </div>
+            <div class="metric">
+                <span class="value">{{ collector.methodName }}</span>
+                <span class="label">Method</span>
+            </div>
+            <div class="metric">
+                <span class="value {{ collector.success ? 'value-good' : 'value-bad' }}">{{ collector.workerStatusName }} ({{ collector.workerStatusCode }})</span>
+                <span class="label">Worker status</span>
+            </div>
+            <div class="metric">
+                <span class="value">{{ collector.durationMs }} <span class="unit">ms</span></span>
+                <span class="label">Duration</span>
+            </div>
+            {% if collector.startedAt > 0 %}
+                <div class="metric">
+                    <span class="value">{{ collector.startedAt|date('H:i:s') }}</span>
+                    <span class="label">Started at</span>
+                </div>
+            {% endif %}
+        </div>
+
+        <p class="help">Status as classified by the worker; for unhandled throwables RoadRunner maps <code>error()</code> to the client status.</p>
+
+        <table>
+            <tbody>
+                <tr><th>Handler</th><td>{{ collector.handlerClass ?: '-' }}</td></tr>
+                <tr><th>Authenticated user</th><td>{{ collector.authenticatedUser ?? 'anonymous' }}</td></tr>
+                {% if collector.error %}
+                    <tr><th>Error</th><td class="text-danger">{{ collector.error }}</td></tr>
+                {% endif %}
+            </tbody>
+        </table>
+
+        <h3>Request</h3>
+        {% if collector.requestJson is not null %}
+            <pre class="prewrap">{{ collector.requestJson }}</pre>
+        {% else %}
+            <div class="empty"><p>No request message decoded.</p></div>
+        {% endif %}
+
+        <h3>Response</h3>
+        {% if collector.responseJson is not null %}
+            <pre class="prewrap">{{ collector.responseJson }}</pre>
+        {% else %}
+            <div class="empty"><p>No response message.</p></div>
+        {% endif %}
+
+        <h3>Metadata</h3>
+        {% if collector.metadata is empty %}
+            <div class="empty"><p>No metadata.</p></div>
+        {% else %}
+            <table>
+                <thead><tr><th>Key</th><th>Values</th></tr></thead>
+                <tbody>
+                    {% for key, values in collector.metadata %}
+                        <tr><th>{{ key }}</th><td>{{ values|join(', ') }}</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% endif %}
+    {% endif %}
+{% endblock %}

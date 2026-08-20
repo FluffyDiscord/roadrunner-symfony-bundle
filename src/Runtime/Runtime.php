@@ -43,6 +43,7 @@ class Runtime extends SymfonyRuntime
             $sectionKey = match ($rrMode) {
                 'http' => 'http',
                 'centrifuge' => 'centrifuge',
+                'grpc' => 'grpc',
                 default => null,
             };
 

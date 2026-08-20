@@ -7,6 +7,7 @@ use Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition;
 use Symfony\Component\Config\Definition\Builder\TreeBuilder;
 use Symfony\Component\Config\Definition\ConfigurationInterface;
 use Temporal\Exception\ExceptionInterceptorInterface;
+use Spiral\RoadRunner\GRPC\ServiceInterface as GrpcServiceInterface;
 use Temporal\Worker\WorkerOptions;
 
 class Configuration implements ConfigurationInterface
@@ -258,7 +259,100 @@ class Configuration implements ConfigurationInterface
             $this->addTemporalNode($builder->getRootNode());
         }
 
+        if (interface_exists(GrpcServiceInterface::class)) {
+            $this->addGrpcNode($builder->getRootNode());
+        }
+
         return $builder;
+    }
+
+    private function addGrpcNode(ArrayNodeDefinition $rootNode): void
+    {
+        $rootNode
+            ->children()
+                ->arrayNode('grpc')
+                    ->info($this->toInfo([
+                        'gRPC',
+                        'Will activate only when "spiral/roadrunner-grpc" is installed.',
+                        'https://docs.roadrunner.dev/docs/grpc/grpc',
+                    ]))
+                    ->children()
+                        ->booleanNode('tracing')
+                            ->info($this->toInfo([
+                                'Enable the bundle\'s opt-in tracing listener: logs every gRPC call',
+                                'on the "grpc" Monolog channel (metadata keys only, never values) and',
+                                'adds Sentry breadcrumbs when Sentry is present. Off by default.',
+                            ]))
+                            ->defaultFalse()
+                        ->end()
+                        ->arrayNode('profiler')
+                            ->addDefaultsIfNotSet()
+                            ->children()
+                                ->arrayNode('redacted_metadata_keys')
+                                    ->info($this->toInfo([
+                                        'Metadata keys whose values the profiler panel shows as "••••••".',
+                                        'security.metadata_key is always added.',
+                                    ]))
+                                    ->scalarPrototype()->end()
+                                    ->defaultValue(['authorization', 'proxy-authorization', 'cookie'])
+                                ->end()
+                            ->end()
+                        ->end()
+                        ->arrayNode('security')
+                            ->info($this->toInfo([
+                                'Authenticate incoming gRPC calls through Symfony Security:',
+                                'a bearer token in call metadata is resolved by your',
+                                'AccessTokenHandlerInterface (the same contract the access_token',
+                                'firewall authenticator uses) and put into the token storage,',
+                                'so handlers can use Security::getUser() and #[IsGranted].',
+                                'Requires symfony/security-bundle.',
+                            ]))
+                            ->addDefaultsIfNotSet()
+                            ->children()
+                                ->booleanNode('enabled')->defaultFalse()->end()
+                                ->scalarNode('token_handler')
+                                    ->info($this->toInfo(['Service id implementing AccessTokenHandlerInterface. Required when enabled.']))
+                                    ->defaultNull()
+                                ->end()
+                                ->scalarNode('metadata_key')
+                                    ->info($this->toInfo(['Metadata key carrying the token.']))
+                                    ->defaultValue('authorization')
+                                ->end()
+                                ->scalarNode('token_prefix')
+                                    ->info($this->toInfo(['Prefix stripped case-insensitively from the metadata value; "" for a raw token.']))
+                                    ->defaultValue('Bearer ')
+                                ->end()
+                                ->booleanNode('required')
+                                    ->info($this->toInfo([
+                                        'true: a call without the metadata key is answered UNAUTHENTICATED.',
+                                        'false: such a call runs anonymously; #[IsGranted] methods still',
+                                        'answer UNAUTHENTICATED. An invalid token is always UNAUTHENTICATED.',
+                                    ]))
+                                    ->defaultTrue()
+                                ->end()
+                                ->scalarNode('firewall_name')
+                                    ->info($this->toInfo(['Firewall name stored on the token (a label: shown in the Security profiler panel).']))
+                                    ->defaultValue('grpc')
+                                ->end()
+                                ->scalarNode('user_provider')
+                                    ->info($this->toInfo([
+                                        'Service id of a UserProviderInterface used when the token handler\'s',
+                                        'UserBadge has no user loader. Defaults to the autowired alias,',
+                                        'which exists only when exactly one provider is configured.',
+                                    ]))
+                                    ->defaultNull()
+                                ->end()
+                            ->end()
+                            ->validate()
+                                ->ifTrue(static fn (array $security): bool => $security['enabled'] === true && $security['token_handler'] === null)
+                                ->thenInvalid('fluffy_discord_road_runner.grpc.security.token_handler is required when grpc.security.enabled is true')
+                            ->end()
+                        ->end()
+                    ->end()
+                    ->addDefaultsIfNotSet()
+                ->end()
+            ->end()
+        ;
     }
 
     private function addTemporalNode(ArrayNodeDefinition $rootNode): void
