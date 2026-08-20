@@ -235,6 +235,37 @@ Symfony's `sendEarlyHints()` works out of the box by adding `headers_send()` pol
 
 More info at [Symfony docs](https://symfony.com/doc/current/web_link.html#early-hints)
 
+Headers already emitted in a `103` frame are not repeated in the final response. RoadRunner writes
+worker headers with Go's `Header().Add()`, and Go keeps the `1xx` headers in place as RFC 8297
+requires, so re-sending the whole header bag would put every hinted header on the wire twice. The
+worker tracks what each `1xx` frame emitted and sends only the values that are not on the wire yet
+— the same rule Symfony's `Response::sendHeaders()` applies on other SAPIs.
+
+One limitation is inherent to the RoadRunner protocol: it can only *add* headers, with no
+equivalent of `header_remove()`. A header whose **value changes** after the `103` was sent (typically
+when the early-hints response and the final response are different objects) therefore reaches the
+client with both the old and the new value — the stale one cannot be retracted. Send hints on the
+response you are going to return, as `sendEarlyHints($links, $response)` does. While `kernel.debug`
+is enabled the worker writes a STDERR line naming any header this happens to, so the stale value
+does not go unnoticed.
+
+## Duplicate response headers
+
+nginx rejects an upstream response with **502 Bad Gateway** when `Content-Length` or
+`Transfer-Encoding` appears more than once (other repeated headers are only warned about). PHP-FPM
+behaves identically, so this is not RoadRunner-specific — it is what any Symfony app produces when a
+second value is appended to one of those headers, e.g. from a `kernel.response` listener running
+after `ResponseListener` has called `Response::prepare()`:
+
+```php
+$response->headers->set('Content-Length', $length, false); // second value → nginx 502
+```
+
+Because the resulting `502` gives no hint about which response caused it, the worker detects the
+situation while `kernel.debug` is enabled and writes a line to **STDERR** naming the header and its
+conflicting values. Nothing is rewritten — the response is genuinely malformed and silently
+"repairing" it would hide the bug and diverge from PHP-FPM.
+
 ## Error handling
 
 The HTTP worker turns worker-level failures into proper HTTP responses instead of leaking a raw

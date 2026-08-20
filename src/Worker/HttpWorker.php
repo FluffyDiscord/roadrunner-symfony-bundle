@@ -14,6 +14,7 @@ use FluffyDiscord\RoadRunnerBundle\Factory\Psr7SymfonyRequestFactory;
 use FluffyDiscord\RoadRunnerBundle\Factory\StreamedJsonResponseWrapper;
 use FluffyDiscord\RoadRunnerBundle\Factory\StreamedResponseWrapper;
 use FluffyDiscord\RoadRunnerBundle\Factory\SymfonyRequestFactoryInterface;
+use FluffyDiscord\RoadRunnerBundle\Http\InformationalHeaders;
 use Nyholm\Psr7;
 use Sentry\State\HubInterface as SentryHubInterface;
 use Spiral\RoadRunner;
@@ -124,6 +125,8 @@ class HttpWorker implements WorkerInterface
         }
 
         while (true) {
+            InformationalHeaders::forgetSentHeaders();
+
             $symfonyRequest = null;
             $symfonyResponse = null;
             $content = null;
@@ -160,8 +163,13 @@ class HttpWorker implements WorkerInterface
                     default => DefaultResponseWrapper::wrap($symfonyResponse),
                 };
 
-                /** @var array<array<string>> $headers */
-                $headers = $symfonyResponse->headers->all();
+                /** @var array<string, array<string>> $allHeaders */
+                $allHeaders = $symfonyResponse->headers->all();
+                $headers = InformationalHeaders::getUnsentHeaders($allHeaders);
+
+                if ($this->debug) {
+                    $this->logHeadersThatReachTheClientTwice($allHeaders, $headers);
+                }
 
                 $responseStarted = true;
                 $worker->getHttpWorker()->respond(
@@ -250,10 +258,12 @@ class HttpWorker implements WorkerInterface
 
         try {
             if ($this->debug) {
+                $errorPageHeaders = InformationalHeaders::getUnsentHeaders(['Content-Type' => ['text/html; charset=utf-8']]);
+
                 $worker->getHttpWorker()->respond(
                     Response::HTTP_INTERNAL_SERVER_ERROR,
                     MinimalErrorPage::render(Response::HTTP_INTERNAL_SERVER_ERROR, $error),
-                    ['Content-Type' => ['text/html; charset=utf-8']],
+                    $errorPageHeaders,
                     true,
                 );
             } else {
@@ -307,6 +317,71 @@ class HttpWorker implements WorkerInterface
         }
 
         $this->sendThrowableResponse($worker, $throwable);
+    }
+
+    /**
+     * @param array<string, array<string>> $allHeaders
+     * @param array<string, array<string>> $unsentHeaders
+     */
+    private function logHeadersThatReachTheClientTwice(array $allHeaders, array $unsentHeaders): void
+    {
+        foreach ($this->getHeadersRejectedWhenDuplicated() as $headerName) {
+            $normalizedName = strtolower($headerName);
+            $sentAsInformationalValues = InformationalHeaders::getSentValues($normalizedName);
+            $finalValues = $unsentHeaders[$normalizedName] ?? [];
+            $wireValues = array_merge($sentAsInformationalValues, $finalValues);
+            $wireValueCount = \count($wireValues);
+
+            if ($wireValueCount < 2) {
+                continue;
+            }
+
+            $this->logError(sprintf(
+                'response sends the %s header %d times (%s); nginx rejects a duplicated %s with 502 Bad Gateway',
+                $headerName,
+                $wireValueCount,
+                implode(', ', $wireValues),
+                $headerName,
+            ));
+        }
+
+        $this->logStrandedInformationalHeaders($allHeaders);
+    }
+
+    /**
+     * @param array<string, array<string>> $allHeaders
+     */
+    private function logStrandedInformationalHeaders(array $allHeaders): void
+    {
+        $hasSentHeaders = InformationalHeaders::hasSentHeaders();
+
+        if (!$hasSentHeaders) {
+            return;
+        }
+
+        foreach (InformationalHeaders::getSentHeaderNames() as $normalizedName) {
+            $sentAsInformationalValues = InformationalHeaders::getSentValues($normalizedName);
+            $finalValues = $allHeaders[$normalizedName] ?? [];
+            $strandedValues = array_diff($sentAsInformationalValues, $finalValues);
+
+            if ($strandedValues === []) {
+                continue;
+            }
+
+            $this->logError(sprintf(
+                'the %s header changed after it was sent as an early hint; RoadRunner cannot retract a header, so the client also receives the stale value (%s)',
+                $normalizedName,
+                implode(', ', $strandedValues),
+            ));
+        }
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function getHeadersRejectedWhenDuplicated(): array
+    {
+        return ['Content-Length', 'Transfer-Encoding'];
     }
 
     protected function registerShutdown(callable $handler): void

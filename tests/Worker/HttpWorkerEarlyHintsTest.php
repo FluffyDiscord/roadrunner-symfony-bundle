@@ -204,6 +204,188 @@ class HttpWorkerEarlyHintsTest extends AbstractHttpWorkerTestCase
         $this->assertSame(500, $respondCalls[1][0]); // rescue final response after the fatal
     }
 
+    public function testHeadersAlreadySentAsEarlyHintsAreNotRepeatedInFinalResponse(): void
+    {
+        $respondCalls = [];
+        $this->spiralHttpWorker->method('respond')
+            ->willReturnCallback(function () use (&$respondCalls): void {
+                $respondCalls[] = func_get_args();
+            });
+
+        $response = new Response('ok', 200);
+        $response->headers->set('Link', '</style.css>; rel=preload');
+
+        $this->kernel->method('handle')->willReturnCallback(function () use ($response): Response {
+            $response->sendHeaders(103);
+            return $response;
+        });
+
+        $this->spiralHttpWorker->method('waitRequest')->willReturnOnConsecutiveCalls($this->rrRequest(), null);
+
+        $this->makeWorker()->start();
+
+        $informationalHeaders = $respondCalls[0][2];
+        $finalHeaders = $respondCalls[1][2];
+
+        $this->assertArrayHasKey('Link', $informationalHeaders);
+        $this->assertArrayNotHasKey('link', $finalHeaders);
+        $this->assertArrayNotHasKey('date', $finalHeaders);
+        $this->assertArrayNotHasKey('cache-control', $finalHeaders);
+    }
+
+    public function testHeaderChangedAfterEarlyHintsIsStillSentInFinalResponse(): void
+    {
+        $respondCalls = [];
+        $this->spiralHttpWorker->method('respond')
+            ->willReturnCallback(function () use (&$respondCalls): void {
+                $respondCalls[] = func_get_args();
+            });
+
+        $response = new Response('ok', 200);
+        $response->headers->set('Link', '</style.css>; rel=preload');
+
+        $this->kernel->method('handle')->willReturnCallback(function () use ($response): Response {
+            $response->sendHeaders(103);
+            $response->headers->set('Link', '</changed.css>; rel=preload');
+
+            return $response;
+        });
+
+        $this->spiralHttpWorker->method('waitRequest')->willReturnOnConsecutiveCalls($this->rrRequest(), null);
+
+        $this->makeWorker()->start();
+
+        $informationalHeaders = $respondCalls[0][2];
+        $finalHeaders = $respondCalls[1][2];
+
+        $this->assertSame(['</style.css>; rel=preload'], $informationalHeaders['Link']);
+        $this->assertSame(['</changed.css>; rel=preload'], $finalHeaders['link']);
+    }
+
+    public function testEarlyHintTrackingResetBetweenRequests(): void
+    {
+        $respondCalls = [];
+        $this->spiralHttpWorker->method('respond')
+            ->willReturnCallback(function () use (&$respondCalls): void {
+                $respondCalls[] = func_get_args();
+            });
+
+        $callCount = 0;
+        $this->kernel->method('handle')->willReturnCallback(function () use (&$callCount): Response {
+            $response = new Response('ok', 200);
+            $response->headers->set('Link', '</style.css>; rel=preload');
+
+            $callCount++;
+            if ($callCount === 1) {
+                $response->sendHeaders(103);
+            }
+
+            return $response;
+        });
+
+        $this->spiralHttpWorker->method('waitRequest')
+            ->willReturnOnConsecutiveCalls($this->rrRequest(), $this->rrRequest(), null);
+
+        $this->makeWorker()->start();
+
+        $secondFinalHeaders = end($respondCalls)[2];
+
+        $this->assertSame(['</style.css>; rel=preload'], $secondFinalHeaders['link']);
+    }
+
+    public function testStrandedEarlyHintValueLoggedInDebugMode(): void
+    {
+        $this->spiralHttpWorker->method('respond')->willReturnCallback(static function (): void {
+        });
+
+        $this->kernel->method('handle')->willReturnCallback(static function (): Response {
+            $response = new Response('ok', 200);
+            $response->headers->set('Link', '</style.css>; rel=preload');
+            $response->sendHeaders(103);
+            $response->headers->set('Link', '</changed.css>; rel=preload');
+
+            return $response;
+        });
+
+        $this->spiralHttpWorker->method('waitRequest')->willReturnOnConsecutiveCalls($this->rrRequest(), null);
+
+        $worker = $this->makeWorker(debug: true);
+        $worker->start();
+
+        $strandedWarnings = array_filter(
+            $worker->loggedErrors,
+            static fn(string $message): bool => str_contains($message, 'cannot retract'),
+        );
+
+        $this->assertNotEmpty($strandedWarnings);
+    }
+
+    public function testDuplicateContentLengthLoggedInDebugMode(): void
+    {
+        $this->spiralHttpWorker->method('respond')->willReturnCallback(static function (): void {
+        });
+
+        $response = new Response('ok', 200);
+        $response->headers->set('Content-Length', '2');
+        $response->headers->set('Content-Length', '999', false);
+
+        $this->setupSuccessfulRequest($response);
+
+        $worker = $this->makeWorker(debug: true);
+        $worker->start();
+
+        $duplicateWarnings = array_filter(
+            $worker->loggedErrors,
+            static fn(string $message): bool => str_contains($message, 'Content-Length'),
+        );
+
+        $this->assertNotEmpty($duplicateWarnings);
+    }
+
+    public function testDuplicateContentLengthAcrossEarlyHintAndFinalResponseLogged(): void
+    {
+        $this->spiralHttpWorker->method('respond')->willReturnCallback(static function (): void {
+        });
+
+        $this->kernel->method('handle')->willReturnCallback(static function (): Response {
+            $response = new Response('ok', 200);
+            $response->headers->set('Content-Length', '2');
+            $response->sendHeaders(103);
+            $response->headers->set('Content-Length', '999');
+
+            return $response;
+        });
+
+        $this->spiralHttpWorker->method('waitRequest')->willReturnOnConsecutiveCalls($this->rrRequest(), null);
+
+        $worker = $this->makeWorker(debug: true);
+        $worker->start();
+
+        $duplicateWarnings = array_filter(
+            $worker->loggedErrors,
+            static fn(string $message): bool => str_contains($message, 'Content-Length'),
+        );
+
+        $this->assertNotEmpty($duplicateWarnings);
+    }
+
+    public function testDuplicateContentLengthNotLoggedOutsideDebugMode(): void
+    {
+        $this->spiralHttpWorker->method('respond')->willReturnCallback(static function (): void {
+        });
+
+        $response = new Response('ok', 200);
+        $response->headers->set('Content-Length', '2');
+        $response->headers->set('Content-Length', '999', false);
+
+        $this->setupSuccessfulRequest($response);
+
+        $worker = $this->makeWorker(debug: false);
+        $worker->start();
+
+        $this->assertSame([], $worker->loggedErrors);
+    }
+
     public function testHeadersSendNoOpWithoutCurrentWorker(): void
     {
         HttpWorker::$currentHttpWorker = null;
