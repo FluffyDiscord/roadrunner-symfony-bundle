@@ -13,8 +13,8 @@
 # contracts and the #[AsJob] handlers. The same project then runs `php vendor/bin/phpunit tests`:
 # the unit tests run normally, and the live tests act as the client against the running worker.
 #
-# The per-feature harnesses (docker-validate-temporal.sh / -jobs.sh / -error-pages.sh) remain for
-# focused runs; this one proves the whole suite green in a single pass.
+# The per-feature harnesses (docker-validate-temporal.sh / -jobs.sh / -error-pages.sh /
+# -early-hints.sh) remain for focused runs; this one proves the whole suite green in a single pass.
 #
 # Usage:
 #   ./tests/docker-validate-all.sh            # all PHP versions in the list
