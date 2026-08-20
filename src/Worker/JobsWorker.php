@@ -3,6 +3,7 @@
 namespace FluffyDiscord\RoadRunnerBundle\Worker;
 
 use FluffyDiscord\RoadRunnerBundle\Event\Worker\Jobs\JobsRunEvent;
+use FluffyDiscord\RoadRunnerBundle\ErrorHandler\BootFailureReporting;
 use FluffyDiscord\RoadRunnerBundle\Event\Worker\WorkerBootingEvent;
 use FluffyDiscord\RoadRunnerBundle\Event\Worker\WorkerRequestReceivedEvent;
 use FluffyDiscord\RoadRunnerBundle\Event\Worker\WorkerResponseSentEvent;
@@ -18,6 +19,8 @@ use Symfony\Component\HttpKernel\RebootableInterface;
 
 class JobsWorker implements WorkerInterface
 {
+    use BootFailureReporting;
+
     private bool $shutdownRegistered = false;
 
     public function __construct(
@@ -34,11 +37,15 @@ class JobsWorker implements WorkerInterface
 
     public function start(): void
     {
-        if (!$this->lazyBoot) {
-            $this->kernel->boot();
-        }
+        try {
+            if (!$this->lazyBoot) {
+                $this->kernel->boot();
+            }
 
-        $this->eventDispatcher->dispatch(new WorkerBootingEvent());
+            $this->eventDispatcher->dispatch(new WorkerBootingEvent());
+        } catch (\Throwable $bootThrowable) {
+            $this->reportBootFailure($bootThrowable);
+        }
 
         $handlingTask = false;
         $responded = false;
@@ -178,8 +185,8 @@ class JobsWorker implements WorkerInterface
         register_shutdown_function($handler);
     }
 
-    protected function logError(string $message): void
+    protected function getBootFailureSentryHub(): ?SentryHubInterface
     {
-        @fwrite(\STDERR, '[roadrunner-symfony] ' . $message . "\n");
+        return $this->sentryHubInterface;
     }
 }

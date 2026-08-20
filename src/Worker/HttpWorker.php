@@ -2,10 +2,12 @@
 
 namespace FluffyDiscord\RoadRunnerBundle\Worker;
 
+use FluffyDiscord\RoadRunnerBundle\ErrorHandler\BootFailureReporting;
 use FluffyDiscord\RoadRunnerBundle\Event\Worker\WorkerBootingEvent;
 use FluffyDiscord\RoadRunnerBundle\Event\Worker\WorkerRequestReceivedEvent;
 use FluffyDiscord\RoadRunnerBundle\Event\Worker\WorkerResponseSentEvent;
 use FluffyDiscord\RoadRunnerBundle\ErrorHandler\MinimalErrorPage;
+use FluffyDiscord\RoadRunnerBundle\ErrorHandler\WorkerErrorResponder;
 use FluffyDiscord\RoadRunnerBundle\Factory\BinaryFileResponseWrapper;
 use FluffyDiscord\RoadRunnerBundle\Factory\DefaultResponseWrapper;
 use FluffyDiscord\RoadRunnerBundle\Factory\Psr7SymfonyRequestFactory;
@@ -17,8 +19,6 @@ use Sentry\State\HubInterface as SentryHubInterface;
 use Spiral\RoadRunner;
 use Spiral\RoadRunner\Http\GlobalState;
 use Symfony\Bridge\PsrHttpMessage\HttpFoundationFactoryInterface;
-use Symfony\Component\ErrorHandler\ErrorRenderer\HtmlErrorRenderer;
-use Symfony\Component\ErrorHandler\Exception\FlattenException;
 use Symfony\Component\EventDispatcher\EventDispatcherInterface;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\Response;
@@ -31,6 +31,8 @@ use Symfony\Component\HttpKernel\TerminableInterface;
 
 class HttpWorker implements WorkerInterface
 {
+    use BootFailureReporting;
+
     private SymfonyRequestFactoryInterface $symfonyRequestFactory;
     private Psr7\Factory\Psr17Factory $psrFactory;
 
@@ -82,15 +84,33 @@ class HttpWorker implements WorkerInterface
             require_once __DIR__ . '/../Resources/headers_send_polyfill.php';
         }
 
-        if (!$this->lazyBoot) {
-            $this->kernel->boot();
+        $bootThrowable = null;
 
-            new \ReflectionClass(StreamedJsonResponse::class);
-            new \ReflectionClass(StreamedResponse::class);
-            new \ReflectionClass(BinaryFileResponse::class);
+        try {
+            if (!$this->lazyBoot) {
+                $this->kernel->boot();
+
+                new \ReflectionClass(StreamedJsonResponse::class);
+                new \ReflectionClass(StreamedResponse::class);
+                new \ReflectionClass(BinaryFileResponse::class);
+            }
+
+            $this->eventDispatcher->dispatch(new WorkerBootingEvent());
+        } catch (\Throwable $throwable) {
+            $bootThrowable = $throwable;
         }
 
-        $this->eventDispatcher->dispatch(new WorkerBootingEvent());
+        if ($bootThrowable !== null) {
+            $this->reportBootFailure($bootThrowable);
+
+            $shouldServeBootFailurePage = $this->shouldServeBootFailurePage();
+
+            if ($shouldServeBootFailurePage) {
+                $this->serveBootFailure($worker, $bootThrowable);
+
+                return;
+            }
+        }
 
         $handlingRequest = false;
         $responseStarted = false;
@@ -261,36 +281,32 @@ class HttpWorker implements WorkerInterface
 
     protected function sendThrowableResponse(RoadRunner\Http\PSR7Worker $worker, \Throwable $throwable): void
     {
-        try {
-            if ($this->debug) {
-                try {
-                    $flattenException = $this->renderHtmlError($throwable);
-                    $worker->respond(new Psr7\Response(
-                        $flattenException->getStatusCode(),
-                        $flattenException->getHeaders(),
-                        $flattenException->getAsString(),
-                    ));
-                } catch (\Throwable) {
-                    $worker->respond(new Psr7\Response(
-                        Response::HTTP_INTERNAL_SERVER_ERROR,
-                        ['Content-Type' => 'text/html; charset=utf-8'],
-                        MinimalErrorPage::render(Response::HTTP_INTERNAL_SERVER_ERROR, null, (string)$throwable),
-                    ));
-                }
-            } else {
-                $worker->respond(new Psr7\Response(Response::HTTP_INTERNAL_SERVER_ERROR));
-            }
-        } catch (\Throwable) {
-            try {
-                $worker->getWorker()->error((string)$throwable);
-            } catch (\Throwable) {
-            }
-        }
+        $this->getThrowableResponder()->sendThrowableResponse($worker, $throwable);
     }
 
-    protected function renderHtmlError(\Throwable $throwable): FlattenException
+    protected function getThrowableResponder(): WorkerErrorResponder
     {
-        return new HtmlErrorRenderer(true)->render($throwable);
+        return new WorkerErrorResponder($this->debug);
+    }
+
+    protected function shouldServeBootFailurePage(): bool
+    {
+        return $this->debug;
+    }
+
+    protected function serveBootFailure(RoadRunner\Http\PSR7Worker $worker, \Throwable $throwable): void
+    {
+        try {
+            $bootFailureRequest = $worker->getHttpWorker()->waitRequest();
+        } catch (\Throwable) {
+            return;
+        }
+
+        if ($bootFailureRequest === null) {
+            return;
+        }
+
+        $this->sendThrowableResponse($worker, $throwable);
     }
 
     protected function registerShutdown(callable $handler): void
@@ -298,8 +314,8 @@ class HttpWorker implements WorkerInterface
         register_shutdown_function($handler);
     }
 
-    protected function logError(string $message): void
+    protected function getBootFailureSentryHub(): ?SentryHubInterface
     {
-        @fwrite(\STDERR, '[roadrunner-symfony] ' . $message . "\n");
+        return $this->sentryHubInterface;
     }
 }

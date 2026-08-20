@@ -10,6 +10,7 @@ use FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\RefreshEvent;
 use FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\RPCEvent;
 use FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\SubRefreshEvent;
 use FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\SubscribeEvent;
+use FluffyDiscord\RoadRunnerBundle\ErrorHandler\BootFailureReporting;
 use FluffyDiscord\RoadRunnerBundle\Event\Worker\WorkerBootingEvent;
 use FluffyDiscord\RoadRunnerBundle\Event\Worker\WorkerRequestReceivedEvent;
 use FluffyDiscord\RoadRunnerBundle\Event\Worker\WorkerResponseSentEvent;
@@ -33,6 +34,8 @@ use Symfony\Component\HttpKernel\RebootableInterface;
 
 class CentrifugoWorker implements WorkerInterface
 {
+    use BootFailureReporting;
+
     private bool $shutdownRegistered = false;
 
     public function __construct(
@@ -51,12 +54,16 @@ class CentrifugoWorker implements WorkerInterface
     {
         $booted = false;
 
-        if (!$this->lazyBoot) {
-            $this->kernel->boot();
-            $booted = true;
-        }
+        try {
+            if (!$this->lazyBoot) {
+                $this->kernel->boot();
+                $booted = true;
+            }
 
-        $this->eventDispatcher->dispatch(new WorkerBootingEvent());
+            $this->eventDispatcher->dispatch(new WorkerBootingEvent());
+        } catch (\Throwable $bootThrowable) {
+            $this->reportBootFailure($bootThrowable);
+        }
 
         $handlingRequest = false;
         $responded = false;
@@ -250,8 +257,8 @@ class CentrifugoWorker implements WorkerInterface
         register_shutdown_function($handler);
     }
 
-    protected function logError(string $message): void
+    protected function getBootFailureSentryHub(): ?SentryHubInterface
     {
-        @fwrite(\STDERR, '[roadrunner-symfony] ' . $message . "\n");
+        return $this->sentryHubInterface;
     }
 }
