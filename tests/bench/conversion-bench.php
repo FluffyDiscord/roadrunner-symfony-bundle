@@ -127,24 +127,31 @@ $measure('legacy chain total (enrich + map + bridge)', function () use ($rrReque
     $bridgeFactory->createRequest($mappedPsrRequest);
 });
 
+$serverParamsFactoryClass = 'FluffyDiscord\RoadRunnerBundle\Factory\ServerParamsFactory';
+$serverParamsFactory = class_exists($serverParamsFactoryClass) ? new $serverParamsFactoryClass() : null;
+
+if ($serverParamsFactory !== null) {
+    $measure('ServerParamsFactory::createServerParams', fn () => $serverParamsFactory->createServerParams($rrRequest));
+}
+
 $psr7StrategyClass = 'FluffyDiscord\RoadRunnerBundle\Factory\Psr7SymfonyRequestFactory';
 $nativeStrategyClass = 'FluffyDiscord\RoadRunnerBundle\Factory\NativeSymfonyRequestFactory';
 
-$psr7StrategyAvailable = class_exists($psr7StrategyClass);
+$psr7StrategyAvailable = class_exists($psr7StrategyClass) && $serverParamsFactory !== null;
 if ($psr7StrategyAvailable) {
     $psr7Strategy = new $psr7StrategyClass();
-    $measure('Psr7SymfonyRequestFactory (strategy, incl. enrich)', function () use ($rrRequest, $psr7Strategy): void {
-        $enrichedServer = GlobalState::enrichServerVars($rrRequest);
-        $psr7Strategy->createRequest($rrRequest, $enrichedServer);
+    $measure('Psr7SymfonyRequestFactory (strategy, incl. server params)', function () use ($rrRequest, $psr7Strategy, $serverParamsFactory): void {
+        $serverParams = $serverParamsFactory->createServerParams($rrRequest);
+        $psr7Strategy->createRequest($rrRequest, $serverParams);
     });
 }
 
-$nativeStrategyAvailable = class_exists($nativeStrategyClass);
+$nativeStrategyAvailable = class_exists($nativeStrategyClass) && $serverParamsFactory !== null;
 if ($nativeStrategyAvailable) {
     $nativeStrategy = new $nativeStrategyClass();
-    $measure('NativeSymfonyRequestFactory (strategy, incl. enrich)', function () use ($rrRequest, $nativeStrategy): void {
-        $enrichedServer = GlobalState::enrichServerVars($rrRequest);
-        $nativeStrategy->createRequest($rrRequest, $enrichedServer);
+    $measure('NativeSymfonyRequestFactory (strategy, incl. server params)', function () use ($rrRequest, $nativeStrategy, $serverParamsFactory): void {
+        $serverParams = $serverParamsFactory->createServerParams($rrRequest);
+        $nativeStrategy->createRequest($rrRequest, $serverParams);
     });
 }
 

@@ -5,7 +5,7 @@ namespace FluffyDiscord\RoadRunnerBundle\Tests\Factory;
 use FluffyDiscord\RoadRunnerBundle\Factory\Psr7SymfonyRequestFactory;
 use FluffyDiscord\RoadRunnerBundle\Tests\BaseTestCase;
 use Psr\Http\Message\ServerRequestInterface;
-use Spiral\RoadRunner\Http\GlobalState;
+use FluffyDiscord\RoadRunnerBundle\Factory\ServerParamsFactory;
 use Spiral\RoadRunner\Http\Request as RoadRunnerRequest;
 use Symfony\Bridge\PsrHttpMessage\HttpFoundationFactoryInterface;
 use Symfony\Component\HttpFoundation\Request;
@@ -50,7 +50,7 @@ class Psr7SymfonyRequestFactoryTest extends BaseTestCase
             body: '{"a":1}',
             parsed: true,
         );
-        $server = GlobalState::enrichServerVars($rrRequest);
+        $server = new ServerParamsFactory()->createServerParams($rrRequest);
 
         $factory = new Psr7SymfonyRequestFactory($spyFactory);
         $result = $factory->createRequest($rrRequest, $server);
