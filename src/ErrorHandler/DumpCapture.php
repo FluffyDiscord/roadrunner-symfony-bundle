@@ -20,6 +20,17 @@ use Symfony\Contracts\Service\ResetInterface;
  */
 class DumpCapture implements ResetInterface
 {
+    /**
+     * All handler closures ever created by any DumpCapture instance. A capture must never adopt
+     * another capture's handler as its forward target: after a kernel reboot two instances are
+     * installed back-to-back, and mutual adoption via takeHandlerOwnershipBack() makes each
+     * forward to the other — infinite recursion, OOM, and the giant exception dump lands on the
+     * goridge relay. Static because VarDumper::setHandler() is itself process-global state.
+     *
+     * @var \WeakMap<\Closure, true>|null
+     */
+    private static ?\WeakMap $captureHandlers = null;
+
     private ?\Closure $handler = null;
 
     /** @var callable|null */
@@ -81,7 +92,7 @@ class DumpCapture implements ResetInterface
 
     private function createHandler(): \Closure
     {
-        return function (mixed $variable, ?string $label = null): void {
+        $handler = function (mixed $variable, ?string $label = null): void {
             $sourceContextProvider = $this->getSourceContextProvider();
             $sourceContext = $sourceContextProvider->getContext();
             $this->recordDumpLocation($sourceContext);
@@ -89,6 +100,11 @@ class DumpCapture implements ResetInterface
             $this->forwardDump($variable, $label);
             $this->renderDump($variable, $label);
         };
+
+        self::$captureHandlers ??= new \WeakMap();
+        self::$captureHandlers[$handler] = true;
+
+        return $handler;
     }
 
     /**
@@ -157,7 +173,20 @@ class DumpCapture implements ResetInterface
             return;
         }
 
+        if ($handler instanceof \Closure && self::isCaptureHandler($handler)) {
+            return;
+        }
+
         $this->forwardHandler = $handler;
+    }
+
+    private static function isCaptureHandler(\Closure $handler): bool
+    {
+        if (self::$captureHandlers === null) {
+            return false;
+        }
+
+        return isset(self::$captureHandlers[$handler]);
     }
 
     /**
