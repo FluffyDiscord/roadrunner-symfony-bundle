@@ -29,6 +29,10 @@ class GrpcInvoker
         return $this->authorizationGuard !== null;
     }
 
+    /**
+     * @throws GRPCExceptionInterface
+     * @throws \Throwable
+     */
     public function invoke(GrpcServiceRoute $route, GrpcMethodRoute $methodRoute, ContextInterface $context, string $input): string
     {
         $method = $methodRoute->method;
@@ -46,7 +50,7 @@ class GrpcInvoker
             $body = $this->encodeResponse($route, $method, $response);
         } catch (\Throwable $throwable) {
             $durationMs = $this->elapsedMilliseconds($startedAt);
-            $this->eventDispatcher->dispatch(new GrpcCallFailedEvent($route->serviceName, $method->name, $context, $request, $throwable, self::classifyStatusCode($throwable), $durationMs));
+            $this->eventDispatcher->dispatch(new GrpcCallFailedEvent($route->serviceName, $method->name, $context, $request, $throwable, $this->classifyStatusCode($throwable), $durationMs));
 
             throw $throwable;
         }
@@ -57,7 +61,7 @@ class GrpcInvoker
         return $body;
     }
 
-    public static function classifyStatusCode(\Throwable $throwable): int
+    private function classifyStatusCode(\Throwable $throwable): int
     {
         if ($throwable instanceof GRPCExceptionInterface) {
             return $throwable->getCode();
@@ -80,10 +84,6 @@ class GrpcInvoker
             throw GrpcRequestDecodingException::create($decodingFailure->getMessage(), StatusCode::INTERNAL, $decodingFailure);
         }
 
-        if (!$request instanceof Message) {
-            throw GrpcHandlerFaultException::create(sprintf('Input type %s of %s() is not a protobuf message', $requestClass, $method->name), StatusCode::INTERNAL);
-        }
-
         return $request;
     }
 
@@ -98,7 +98,7 @@ class GrpcInvoker
         $response = $handlerCallable($context, $request);
         $expectedType = $method->outputType;
 
-        if (!$response instanceof $expectedType || !$response instanceof Message) {
+        if (!$response instanceof $expectedType) {
             throw GrpcHandlerFaultException::create(sprintf('%s::%s() must return %s, got %s', $route->service::class, $method->name, $expectedType, get_debug_type($response)), StatusCode::INTERNAL);
         }
 

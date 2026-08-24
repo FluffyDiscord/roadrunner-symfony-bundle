@@ -237,8 +237,9 @@ class GrpcWorker implements WorkerInterface
     private function dispatchFailedEvent(\Throwable $throwable, int $workerStatusCode, ?ContextInterface $context, int|float $startedAt): void
     {
         $durationMs = round((hrtime(true) - $startedAt) / 1e6, 3);
-        $serviceName = $this->currentFrame?->serviceName ?? '';
-        $methodName = $this->currentFrame?->methodName ?? '';
+        $frame = $this->currentFrame;
+        $serviceName = $frame === null ? '' : $frame->serviceName;
+        $methodName = $frame === null ? '' : $frame->methodName;
 
         try {
             $this->getRuntime()->eventDispatcher->dispatch(new GrpcCallFailedEvent($serviceName, $methodName, $context, null, $throwable, $workerStatusCode, $durationMs));
@@ -390,7 +391,8 @@ class GrpcWorker implements WorkerInterface
             @ini_set('memory_limit', '-1');
         }
 
-        $callLabel = ($this->currentFrame?->serviceName ?? 'unknown') . '/' . ($this->currentFrame?->methodName ?? 'unknown');
+        $frame = $this->currentFrame;
+        $callLabel = $frame === null ? 'unknown/unknown' : $frame->serviceName . '/' . $frame->methodName;
         $reason = $fatalMessage ?? 'die/exit';
 
         try {

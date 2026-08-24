@@ -29,7 +29,7 @@ class GrpcTracingListener
         ];
 
         $this->logger?->info('gRPC call received', $context);
-        $this->addBreadcrumb(Breadcrumb::LEVEL_INFO, 'gRPC call received', $context);
+        $this->addBreadcrumb('info', 'gRPC call received', $context);
     }
 
     public function onCallCompleted(GrpcCallCompletedEvent $event): void
@@ -41,7 +41,7 @@ class GrpcTracingListener
         ];
 
         $this->logger?->info('gRPC call completed', $context);
-        $this->addBreadcrumb(Breadcrumb::LEVEL_INFO, 'gRPC call completed', $context);
+        $this->addBreadcrumb('info', 'gRPC call completed', $context);
     }
 
     public function onCallFailed(GrpcCallFailedEvent $event): void
@@ -55,7 +55,7 @@ class GrpcTracingListener
         ];
 
         $this->logger?->warning('gRPC call failed', $context);
-        $this->addBreadcrumb(Breadcrumb::LEVEL_WARNING, 'gRPC call failed', $context);
+        $this->addBreadcrumb('warning', 'gRPC call failed', $context);
     }
 
     /**
@@ -81,6 +81,6 @@ class GrpcTracingListener
             return;
         }
 
-        $this->sentryHub->addBreadcrumb(new Breadcrumb($level, Breadcrumb::TYPE_DEFAULT, 'grpc', $message, $context));
+        $this->sentryHub->addBreadcrumb(new Breadcrumb($level, 'default', 'grpc', $message, $context));
     }
 }

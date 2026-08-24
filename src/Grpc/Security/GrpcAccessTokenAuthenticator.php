@@ -18,6 +18,9 @@ use Symfony\Component\Security\Http\Authenticator\Token\PostAuthenticationToken;
 
 class GrpcAccessTokenAuthenticator implements GrpcCallAuthenticatorInterface
 {
+    /**
+     * @param UserProviderInterface<UserInterface>|null $userProvider
+     */
     public function __construct(
         private readonly AccessTokenHandlerInterface $tokenHandler,
         private readonly TokenStorageInterface       $tokenStorage,
