@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "d180aa8978231d69b4f8782cd4d88620",
+    "content-hash": "0fb5dba326a66a3344f4d47bdd9a7a3e",
     "packages": [
         {
             "name": "composer/semver",
@@ -5709,6 +5709,53 @@
             "time": "2024-09-04T20:21:43+00:00"
         },
         {
+            "name": "phpstan/phpdoc-parser",
+            "version": "2.3.3",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/phpstan/phpdoc-parser.git",
+                "reference": "fb19eedd2bb67ff8cf7a5502ad329e701d6398a3"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/phpstan/phpdoc-parser/zipball/fb19eedd2bb67ff8cf7a5502ad329e701d6398a3",
+                "reference": "fb19eedd2bb67ff8cf7a5502ad329e701d6398a3",
+                "shasum": ""
+            },
+            "require": {
+                "php": "^7.4 || ^8.0"
+            },
+            "require-dev": {
+                "doctrine/annotations": "^2.0",
+                "nikic/php-parser": "^5.3.0",
+                "php-parallel-lint/php-parallel-lint": "^1.2",
+                "phpstan/extension-installer": "^1.0",
+                "phpstan/phpstan": "^2.0",
+                "phpstan/phpstan-phpunit": "^2.0",
+                "phpstan/phpstan-strict-rules": "^2.0",
+                "phpunit/phpunit": "^9.6",
+                "symfony/process": "^5.2"
+            },
+            "type": "library",
+            "autoload": {
+                "psr-4": {
+                    "PHPStan\\PhpDocParser\\": [
+                        "src/"
+                    ]
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "description": "PHPDoc parser with support for nullable, intersection and generic types",
+            "support": {
+                "issues": "https://github.com/phpstan/phpdoc-parser/issues",
+                "source": "https://github.com/phpstan/phpdoc-parser/tree/2.3.3"
+            },
+            "time": "2026-07-08T07:01:06+00:00"
+        },
+        {
             "name": "phpstan/phpstan",
             "version": "2.1.44",
             "dist": {
@@ -10515,6 +10562,86 @@
                 }
             ],
             "time": "2025-12-08T11:19:18+00:00"
+        },
+        {
+            "name": "typephp/typephp",
+            "version": "v0.6.0",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/typephp-php/typephp.git",
+                "reference": "ac2a84fd5d0306314edada41ee91b2cc8b1d2899"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/typephp-php/typephp/zipball/ac2a84fd5d0306314edada41ee91b2cc8b1d2899",
+                "reference": "ac2a84fd5d0306314edada41ee91b2cc8b1d2899",
+                "shasum": ""
+            },
+            "require": {
+                "nikic/php-parser": "^5.0",
+                "php": "^8.1",
+                "phpstan/phpdoc-parser": "^2.0"
+            },
+            "require-dev": {
+                "carthage-software/mago": "^1.47",
+                "friendsofphp/php-cs-fixer": "^3.95",
+                "laravel/pint": "^1.10",
+                "pestphp/pest": "^2.0 || ^3.0 || ^4.0",
+                "phpstan/extension-installer": "^1.4",
+                "phpstan/phpstan": "^2.1",
+                "phpstan/phpstan-strict-rules": "^2.0",
+                "rector/rector": "^2.6",
+                "vimeo/psalm": "^6.16"
+            },
+            "bin": [
+                "bin/typephp"
+            ],
+            "type": "library",
+            "autoload": {
+                "files": [
+                    "src/bootstrap.php"
+                ],
+                "psr-4": {
+                    "TypePHP\\": "src/"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Reymart A. Calicdan",
+                    "email": "reymart.calicdan06@gmail.com"
+                }
+            ],
+            "description": "Transparent Runtime type checker for PHP. Enforces PHPDoc annotations including generics, typed arrays, array shapes, and advanced types at runtime in development and production.",
+            "keywords": [
+                "PHPStan",
+                "array-shapes",
+                "docblock",
+                "generics",
+                "phpdoc",
+                "psalm",
+                "runtime-generics",
+                "runtime-types",
+                "strict-types",
+                "type-checker",
+                "type-safety",
+                "typed-arrays",
+                "typephp"
+            ],
+            "support": {
+                "issues": "https://github.com/typephp-php/typephp/issues",
+                "source": "https://github.com/typephp-php/typephp/tree/v0.6.0"
+            },
+            "funding": [
+                {
+                    "url": "https://github.com/rcalicdan",
+                    "type": "github"
+                }
+            ],
+            "time": "2026-08-24T05:46:11+00:00"
         }
     ],
     "aliases": [],
