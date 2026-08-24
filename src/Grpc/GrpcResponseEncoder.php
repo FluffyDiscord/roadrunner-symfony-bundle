@@ -39,11 +39,11 @@ class GrpcResponseEncoder
         $trailerCount = $trailers->count();
 
         if ($headerCount > 0) {
-            $document['headers'] = iterator_to_array($headers->getIterator());
+            $document['headers'] = $headers->packHeaders();
         }
 
         if ($trailerCount > 0) {
-            $document['trailers'] = iterator_to_array($trailers->getIterator());
+            $document['trailers'] = $trailers->packTrailers();
         }
 
         return $document;

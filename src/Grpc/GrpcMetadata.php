@@ -59,7 +59,7 @@ readonly class GrpcMetadata
     /**
      * @return array<string, list<string>>
      */
-    public function all(): array
+    public function getValues(): array
     {
         return $this->values;
     }
