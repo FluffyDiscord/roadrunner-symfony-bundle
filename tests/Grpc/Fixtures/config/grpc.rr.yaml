@@ -1,0 +1,15 @@
+version: '3'
+
+server:
+  command: "php public/index.php"
+
+grpc:
+  listen: "tcp://127.0.0.1:9001"
+  proto:
+    - "echo.proto"
+  tls:
+    cert: "${GRPC_TLS_CERT:-}"
+    key: ""
+    client_auth_type: no_client_certs
+  pool:
+    num_workers: 1
