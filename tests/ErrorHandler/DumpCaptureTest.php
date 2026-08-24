@@ -239,4 +239,27 @@ class DumpCaptureTest extends TestCase
 
         return new DumpCapture($debug, $projectDir, $fileLinkFormatter, $dumpDestination);
     }
+
+    public function testTwoCapturesInstalledAcrossARebootNeverAdoptEachOther(): void
+    {
+        $firstCapture = new DumpCapture(true, __DIR__);
+        $secondCapture = new DumpCapture(true, __DIR__);
+
+        ob_start();
+
+        try {
+            $firstCapture->installHandler();
+            \Symfony\Component\VarDumper\VarDumper::dump('before-reboot');
+
+            $secondCapture->installHandler();
+            \Symfony\Component\VarDumper\VarDumper::dump('first-after-reboot');
+            \Symfony\Component\VarDumper\VarDumper::dump('second-after-reboot');
+        } finally {
+            ob_end_clean();
+            \Symfony\Component\VarDumper\VarDumper::setHandler(null);
+        }
+
+        self::assertNotNull($secondCapture->getSnapshot(), 'the dump must be recorded, not lost in a handler loop');
+    }
+
 }
