@@ -50,7 +50,7 @@ return static function (ContainerConfigurator $container): void {
         ->set(RoadRunnerYamlConfigReader::class)
         ->args([
             param('kernel.project_dir'),
-            param('fluffy_discord.roadrunner.rr_config_path'),
+            abstract_arg('rr_config_path, injected by FluffyDiscordRoadRunnerExtension'),
         ])
     ;
 
@@ -92,7 +92,7 @@ return static function (ContainerConfigurator $container): void {
         ->args([
             service(GrpcServiceRegistry::class),
             service(RoadRunnerYamlConfigReader::class),
-            param('fluffy_discord.roadrunner.grpc.security_enabled'),
+            abstract_arg('grpc.security.enabled, injected by FluffyDiscordRoadRunnerExtension'),
         ])
     ;
 

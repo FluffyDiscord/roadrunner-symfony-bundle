@@ -58,7 +58,7 @@ return static function (ContainerConfigurator $container): void {
             service('debug.stopwatch')->nullOnInvalid(),
             service(TokenStorageInterface::class)->nullOnInvalid(),
             service(EnvironmentInterface::class),
-            param('fluffy_discord.roadrunner.grpc.redacted_metadata_keys'),
+            abstract_arg('redacted metadata keys, injected by FluffyDiscordRoadRunnerExtension'),
         ])
         ->tag('kernel.event_subscriber')
         ->tag('kernel.reset', ['method' => 'reset'])

@@ -5,6 +5,18 @@ namespace FluffyDiscord\RoadRunnerBundle\DependencyInjection;
 use FluffyDiscord\RoadRunnerBundle\Attribute\AsCentrifugoChannelListener;
 use FluffyDiscord\RoadRunnerBundle\Attribute\AsCentrifugoRpcListener;
 use FluffyDiscord\RoadRunnerBundle\Cache\KVCacheAdapter;
+use FluffyDiscord\RoadRunnerBundle\Config\RoadRunnerYamlConfigReader;
+use FluffyDiscord\RoadRunnerBundle\Event\Grpc\GrpcCallCompletedEvent;
+use FluffyDiscord\RoadRunnerBundle\Event\Grpc\GrpcCallFailedEvent;
+use FluffyDiscord\RoadRunnerBundle\Event\Grpc\GrpcCallReceivedEvent;
+use FluffyDiscord\RoadRunnerBundle\Grpc\Debug\GrpcIntrospector;
+use FluffyDiscord\RoadRunnerBundle\Grpc\Debug\GrpcSecurityFacts;
+use FluffyDiscord\RoadRunnerBundle\Grpc\GrpcInvoker;
+use FluffyDiscord\RoadRunnerBundle\Grpc\Security\GrpcAccessTokenAuthenticator;
+use FluffyDiscord\RoadRunnerBundle\Grpc\Security\GrpcAuthorizationGuard;
+use FluffyDiscord\RoadRunnerBundle\Grpc\Security\GrpcCallAuthenticatorInterface;
+use FluffyDiscord\RoadRunnerBundle\Grpc\Tracing\GrpcTracingListener;
+use FluffyDiscord\RoadRunnerBundle\Profiler\GrpcProfilerSubscriber;
 use FluffyDiscord\RoadRunnerBundle\Doctrine\DoctrinePreconnectListener;
 use FluffyDiscord\RoadRunnerBundle\Event\Worker\WorkerBootingEvent;
 use FluffyDiscord\RoadRunnerBundle\Event\Worker\WorkerResponseSentEvent;
@@ -38,7 +50,9 @@ use FluffyDiscord\RoadRunnerBundle\Worker\JobsWorker;
 use RoadRunner\Centrifugo\CentrifugoWorker as RoadRunnerCentrifugoWorker;
 use Spiral\Goridge\Exception\RelayException;
 use Spiral\Goridge\RPC\RPCInterface;
+use Spiral\RoadRunner\GRPC\ServiceInterface as GrpcServiceInterface;
 use Spiral\RoadRunner\KeyValue\Cache;
+use Symfony\Component\Config\Definition\Exception\InvalidConfigurationException;
 use Symfony\Component\Config\FileLocator;
 use Symfony\Component\DependencyInjection\ChildDefinition;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
@@ -58,13 +72,21 @@ class FluffyDiscordRoadRunnerExtension extends Extension implements PrependExten
 {
     public function prepend(ContainerBuilder $container): void
     {
-        if (!class_exists(WorkflowInterface::class) || !$container->hasExtension('monolog')) {
+        if (!$container->hasExtension('monolog')) {
             return;
         }
 
-        $container->prependExtensionConfig('monolog', [
-            'channels' => ['temporal'],
-        ]);
+        if (class_exists(WorkflowInterface::class)) {
+            $container->prependExtensionConfig('monolog', [
+                'channels' => ['temporal'],
+            ]);
+        }
+
+        if (interface_exists(GrpcServiceInterface::class)) {
+            $container->prependExtensionConfig('monolog', [
+                'channels' => ['grpc'],
+            ]);
+        }
     }
 
     public function load(array $configs, ContainerBuilder $container): void
@@ -116,7 +138,7 @@ class FluffyDiscordRoadRunnerExtension extends Extension implements PrependExten
         }
 
         $configuration = $this->getConfiguration([], $container);
-        /** @var array{http: array{lazy_boot: bool, request_factory: 'auto'|'native'|'psr7'}, warmup: array{enabled: bool, learn: bool, learn_requests: int, manifest_path: ?string}, centrifugo: array{lazy_boot: bool}, jobs: array{lazy_boot: bool, serializer: 'native'|'igbinary'|'symfony'|null, default_queue: non-empty-string, bus: ?string}, doctrine: array{preconnect: bool}, kv: array{auto_register: bool, serializer: ?string, keypair_path: ?string}, rr_config_path: ?string, temporal?: array{namespace?: string, tracing?: bool, api_key?: ?string, retryable_errors?: list<string>, default_worker_options?: array<string, mixed>, worker_options?: array<string, array<string, mixed>>}} $config */
+        /** @var array{http: array{lazy_boot: bool, request_factory: 'auto'|'native'|'psr7'}, warmup: array{enabled: bool, learn: bool, learn_requests: int, manifest_path: ?string}, centrifugo: array{lazy_boot: bool}, jobs: array{lazy_boot: bool, serializer: 'native'|'igbinary'|'symfony'|null, default_queue: non-empty-string, bus: ?string}, doctrine: array{preconnect: bool}, kv: array{auto_register: bool, serializer: ?string, keypair_path: ?string}, rr_config_path: ?string, temporal?: array{namespace?: string, tracing?: bool, api_key?: ?string, retryable_errors?: list<string>, default_worker_options?: array<string, mixed>, worker_options?: array<string, array<string, mixed>>}, grpc?: array{tracing: bool, profiler: array{redacted_metadata_keys: list<string>}, security: array{enabled: bool, token_handler: ?string, metadata_key: string, token_prefix: string, required: bool, firewall_name: string, user_provider: ?string}}} $config */
         $config = $this->processConfiguration($configuration, $configs);
 
         if ($container->hasDefinition(HttpWorker::class)) {
@@ -169,6 +191,10 @@ class FluffyDiscordRoadRunnerExtension extends Extension implements PrependExten
             $this->registerTemporalTracing($container);
         }
 
+        if (interface_exists(GrpcServiceInterface::class)) {
+            $this->registerGrpc($config['grpc'] ?? null, $config['rr_config_path'], $container);
+        }
+
         if (class_exists(\Doctrine\DBAL\Connection::class) && $config["doctrine"]["preconnect"] === true) {
             $this->registerDoctrinePreconnect($container);
         }
@@ -206,17 +232,8 @@ class FluffyDiscordRoadRunnerExtension extends Extension implements PrependExten
 
         /** @var string $projectDir */
         $projectDir = $container->getParameter("kernel.project_dir");
-        $pathname = $projectDir . "/" . $rrConfigPath;
 
-        $content = @file_get_contents($pathname);
-        if ($content === false) {
-            return [];
-        }
-
-        /** @var array<string, mixed> $parsed */
-        $parsed = Yaml::parse($content) ?? [];
-
-        return $parsed;
+        return new RoadRunnerYamlConfigReader($projectDir, $rrConfigPath)->readAll();
     }
 
     /**
@@ -298,6 +315,111 @@ class FluffyDiscordRoadRunnerExtension extends Extension implements PrependExten
         throw new TemporalAddressException(
             'RoadRunner config has no non-empty "temporal.address". Enable the "temporal" plugin with an "address" in your RoadRunner config (.rr.yaml).',
         );
+    }
+
+    /**
+     * @param array{tracing: bool, profiler: array{redacted_metadata_keys: list<string>}, security: array{enabled: bool, token_handler: ?string, metadata_key: string, token_prefix: string, required: bool, firewall_name: string, user_provider: ?string}}|null $grpcConfig
+     */
+    /**
+     * @param array{tracing: bool, profiler: array{redacted_metadata_keys: list<string>}, security: array{enabled: bool, token_handler: ?string, metadata_key: string, token_prefix: string, required: bool, firewall_name: string, user_provider: ?string}}|null $grpcConfig
+     */
+    private function registerGrpc(?array $grpcConfig, ?string $rrConfigPath, ContainerBuilder $container): void
+    {
+        $container->registerForAutoconfiguration(GrpcServiceInterface::class)
+            ->addTag('fluffy_discord.roadrunner.grpc.service');
+
+        if ($grpcConfig === null) {
+            return;
+        }
+
+        $securityConfig = $grpcConfig['security'];
+        $redactedMetadataKeys = $grpcConfig['profiler']['redacted_metadata_keys'];
+
+        if ($securityConfig['enabled']) {
+            $redactedMetadataKeys[] = $securityConfig['metadata_key'];
+        }
+
+        if ($container->hasDefinition(RoadRunnerYamlConfigReader::class)) {
+            $container->getDefinition(RoadRunnerYamlConfigReader::class)->replaceArgument(1, $rrConfigPath);
+        }
+
+        if ($container->hasDefinition(GrpcIntrospector::class)) {
+            $securityFacts = new Definition(GrpcSecurityFacts::class, [
+                $securityConfig['enabled'],
+                $securityConfig['token_handler'],
+                $securityConfig['metadata_key'],
+                $securityConfig['required'],
+            ]);
+            $container->getDefinition(GrpcIntrospector::class)->replaceArgument(2, $securityFacts);
+        }
+
+        if ($container->hasDefinition(GrpcProfilerSubscriber::class)) {
+            $container->getDefinition(GrpcProfilerSubscriber::class)->replaceArgument(6, array_values(array_unique(array_map('strtolower', $redactedMetadataKeys))));
+        }
+
+        if ($grpcConfig['tracing'] === true) {
+            $this->registerGrpcTracing($container);
+        }
+
+        if ($securityConfig['enabled']) {
+            $this->registerGrpcSecurity($securityConfig, $container);
+        }
+    }
+
+    private function registerGrpcTracing(ContainerBuilder $container): void
+    {
+        $definition = new Definition(GrpcTracingListener::class, [
+            new Reference('monolog.logger.grpc', ContainerInterface::NULL_ON_INVALID_REFERENCE),
+            new Reference(SentryHubInterface::class, ContainerInterface::NULL_ON_INVALID_REFERENCE),
+        ]);
+        $definition->addTag('kernel.event_listener', ['event' => GrpcCallReceivedEvent::class, 'method' => 'onCallReceived']);
+        $definition->addTag('kernel.event_listener', ['event' => GrpcCallCompletedEvent::class, 'method' => 'onCallCompleted']);
+        $definition->addTag('kernel.event_listener', ['event' => GrpcCallFailedEvent::class, 'method' => 'onCallFailed']);
+
+        $container->setDefinition(GrpcTracingListener::class, $definition);
+    }
+
+    /**
+     * @param array{enabled: bool, token_handler: ?string, metadata_key: string, token_prefix: string, required: bool, firewall_name: string, user_provider: ?string} $securityConfig
+     */
+    private function registerGrpcSecurity(array $securityConfig, ContainerBuilder $container): void
+    {
+        $registeredBundles = $container->hasParameter('kernel.bundles') ? $container->getParameter('kernel.bundles') : [];
+        $securityBundleRegistered = is_array($registeredBundles) && isset($registeredBundles['SecurityBundle']);
+        $securityUsable = $securityBundleRegistered && interface_exists('Symfony\\Component\\Security\\Http\\AccessToken\\AccessTokenHandlerInterface');
+
+        if (!$securityUsable) {
+            throw new InvalidConfigurationException('fluffy_discord_road_runner.grpc.security.enabled requires symfony/security-bundle and symfony/security-http');
+        }
+
+        $tokenHandlerId = $securityConfig['token_handler'];
+
+        if ($tokenHandlerId === null) {
+            throw new InvalidConfigurationException('fluffy_discord_road_runner.grpc.security.token_handler is required when grpc.security.enabled is true');
+        }
+
+        $userProviderReference = $securityConfig['user_provider'] !== null
+            ? new Reference($securityConfig['user_provider'])
+            : new Reference('Symfony\\Component\\Security\\Core\\User\\UserProviderInterface', ContainerInterface::NULL_ON_INVALID_REFERENCE);
+
+        $authenticator = new Definition(GrpcAccessTokenAuthenticator::class, [
+            new Reference($tokenHandlerId),
+            new Reference('security.token_storage'),
+            $userProviderReference,
+            new Reference('Symfony\\Component\\Security\\Core\\User\\UserCheckerInterface', ContainerInterface::NULL_ON_INVALID_REFERENCE),
+            $securityConfig['metadata_key'],
+            $securityConfig['token_prefix'],
+            $securityConfig['required'],
+            $securityConfig['firewall_name'],
+        ]);
+        $container->setDefinition(GrpcAccessTokenAuthenticator::class, $authenticator);
+        $container->setAlias(GrpcCallAuthenticatorInterface::class, GrpcAccessTokenAuthenticator::class);
+
+        $guard = new Definition(GrpcAuthorizationGuard::class, [
+            new Reference('security.authorization_checker'),
+            new Reference('security.token_storage'),
+        ]);
+        $container->setDefinition(GrpcAuthorizationGuard::class, $guard);
     }
 
     private function registerTemporalTracing(ContainerBuilder $container): void

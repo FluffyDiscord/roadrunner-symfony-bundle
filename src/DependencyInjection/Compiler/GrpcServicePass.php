@@ -38,6 +38,12 @@ class GrpcServicePass implements CompilerPassInterface
 
             foreach ($this->collectServiceInterfaces($class) as $interface) {
                 $serviceName = GrpcServiceRegistry::readServiceName($interface);
+                $alreadyRecordedByThisService = ($serviceIdsByName[$serviceName] ?? null) === $serviceId;
+
+                if ($alreadyRecordedByThisService) {
+                    continue;
+                }
+
                 $this->assertUniqueName($serviceIdsByName, $serviceName, $serviceId);
                 $serviceIdsByName[$serviceName] = $serviceId;
 
