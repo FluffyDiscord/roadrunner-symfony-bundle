@@ -254,7 +254,7 @@ class GrpcProfilerSubscriber implements EventSubscriberInterface, ResetInterface
 
         $redacted = [];
 
-        foreach ($metadata->all() as $key => $values) {
+        foreach ($metadata->getValues() as $key => $values) {
             $redacted[$key] = $this->redactValues($key, $values);
         }
 

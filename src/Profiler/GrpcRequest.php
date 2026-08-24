@@ -24,10 +24,15 @@ class GrpcRequest extends Request
 
     public function describeCall(string $serviceName, string $methodName, string $handlerClass): void
     {
-        $this->serviceName = $serviceName;
-        $this->methodName = $methodName;
+        if ($serviceName !== '') {
+            $this->serviceName = $serviceName;
+        }
 
-        if ($handlerClass !== '') {
+        if ($methodName !== '') {
+            $this->methodName = $methodName;
+        }
+
+        if ($handlerClass !== '' && $methodName !== '') {
             $this->attributes->set('_controller', $handlerClass . '::' . $methodName);
         }
     }
