@@ -2,6 +2,9 @@
 
 ## v7.1 → v7.2
 
+**New optional gRPC worker** — installing `spiral/roadrunner-grpc` registers a worker under RR's `grpc` mode: protoc-generated service interfaces implemented as Symfony services are discovered automatically (additive; nothing changes without the package). See [`docs/grpc.md`](docs/grpc.md).
+
+
 **`$request->server` is now built from the RoadRunner request alone** — it used to start as a copy of the worker's boot-time `$_SERVER`.
 
 Kept: `REQUEST_METHOD`, `REQUEST_URI`, `QUERY_STRING`, `SERVER_PROTOCOL`, `SERVER_NAME`, `SERVER_PORT`, `HTTPS`, `REMOTE_ADDR`, `REQUEST_TIME`, `REQUEST_TIME_FLOAT`, `HTTP_HOST`, `CONTENT_TYPE`, `CONTENT_LENGTH`, `HTTP_*` headers.

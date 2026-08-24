@@ -17,6 +17,7 @@ DDEV users: see [DDEV add-on](#ddev-add-on).
 - [Key-Value cache](#configuration) — `cache.adapter.rr_kv.*`
 - [Distributed locks](#distributed-locks) — Symfony `LockFactory` over RR's Lock plugin
 - [Temporal](#temporal-beta) (beta) — [usage guide](docs/temporal.md)
+- [gRPC](#grpc) — [usage guide](docs/grpc.md)
 - [PostgreSQL preconnect](#database-connections)
 
 ## Installation
@@ -486,6 +487,16 @@ composer require temporal/sdk
 Activates automatically. Assign workflows/activities to a worker's task queue with `#[TaskQueue]`, run them under RR's `temporal` plugin, react to interceptor calls via Symfony events. A profiler tab lists registered workers, workflows and activities.
 
 **→ [`docs/temporal.md`](docs/temporal.md)** — defining activities/workflows, configuration, starting a workflow, interceptor events.
+
+## gRPC
+
+```bash
+composer require spiral/roadrunner-grpc
+```
+
+Activates automatically. Implement the `protoc-gen-php-grpc` generated `*Interface` as a plain autowired Symfony service and the bundle serves it under RR's `grpc` plugin — with per-call events (decoded protobuf messages), a full Symfony profiler profile per call (logs, Doctrine, timeline + a gRPC panel with request/response JSON), an opt-in `grpc` Monolog tracing channel, `bin/console grpc:debug`, and optional authentication through your `AccessTokenHandlerInterface` (`Security::getUser()` + `#[IsGranted]` in handlers).
+
+**→ [`docs/grpc.md`](docs/grpc.md)** — install, `.rr.yaml`, generating stubs, metadata/headers, errors, security, profiler, limitations.
 
 ## Developing with Symfony and RoadRunner
 

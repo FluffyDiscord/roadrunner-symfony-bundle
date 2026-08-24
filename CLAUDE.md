@@ -64,6 +64,16 @@ php vendor/bin/phpunit tests
   wire. Statics are forced here: the `headers_send()` polyfill is a global function with no DI
   access (same constraint as `HttpWorker::$currentHttpWorker`). Live-tested by
   `tests/docker-validate-early-hints.sh`.
+- `src/Grpc/` + `src/Worker/GrpcWorker.php` — gRPC worker (`Mode::MODE_GRPC`, optional on
+  `spiral/roadrunner-grpc`): owns the RR frame loop (spiral's `final Server` offers no per-frame
+  hooks), routes to services implementing protoc-generated `*Interface`s (discovered by
+  `GrpcServicePass` via autoconfiguration on `ServiceInterface`), dispatches
+  `Event\Grpc\*` with decoded protobuf messages, synthesises a **full** Symfony profile per call
+  through FrameworkBundle's virtual-request stack (pop before `Profiler::collect()` — else
+  `DumpDataCollector` writes to the goridge relay), optional Symfony Security auth via
+  `AccessTokenHandlerInterface` + `#[IsGranted]`, `grpc:debug` command. Specced in
+  `docs/specs/rr-grpc-worker.md`; guide in `docs/grpc.md`; live-tested by
+  `tests/docker-validate-grpc.sh`.
 - `src/ErrorHandler/MinimalErrorPage.php` — dependency-free fallback error page.
 - `src/ErrorHandler/FatalError.php` — filters `error_get_last()` to genuinely fatal types, so a stale
   deprecation is never reported as the cause of a `die`/`exit`.
