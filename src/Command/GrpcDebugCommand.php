@@ -3,6 +3,7 @@
 namespace FluffyDiscord\RoadRunnerBundle\Command;
 
 use FluffyDiscord\RoadRunnerBundle\Grpc\Debug\GrpcIntrospector;
+use FluffyDiscord\RoadRunnerBundle\Grpc\Debug\GrpcSecurityFacts;
 use FluffyDiscord\RoadRunnerBundle\Grpc\Debug\GrpcServerFacts;
 use FluffyDiscord\RoadRunnerBundle\Grpc\Debug\GrpcServiceDebugRow;
 use Symfony\Component\Console\Attribute\AsCommand;
@@ -26,6 +27,7 @@ class GrpcDebugCommand extends Command
         $io = new SymfonyStyle($input, $output);
 
         $this->renderServer($io, $this->introspector->getServerFacts());
+        $this->renderSecurity($io, $this->introspector->getSecurityFacts());
 
         $rows = $this->introspector->describe();
 
@@ -71,7 +73,24 @@ class GrpcDebugCommand extends Command
             ['TLS' => $facts->tlsEnabled ? 'on' : 'off'],
             ['client_auth_type' => $facts->clientAuthType ?? '-'],
             ['proto' => $facts->protoFiles === [] ? '-' : implode(', ', $facts->protoFiles)],
-            ['security' => $this->introspector->isSecurityEnabled() ? 'enabled (fluffy_discord_road_runner.grpc.security)' : 'disabled'],
+        );
+    }
+
+    private function renderSecurity(SymfonyStyle $io, GrpcSecurityFacts $facts): void
+    {
+        $io->section('Security (fluffy_discord_road_runner.grpc.security)');
+
+        if (!$facts->enabled) {
+            $io->text('disabled');
+
+            return;
+        }
+
+        $io->definitionList(
+            ['enabled' => 'yes'],
+            ['token_handler' => $facts->tokenHandlerId ?? '-'],
+            ['metadata_key' => $facts->metadataKey ?? '-'],
+            ['required' => $facts->required === true ? 'yes' : 'no'],
         );
     }
 

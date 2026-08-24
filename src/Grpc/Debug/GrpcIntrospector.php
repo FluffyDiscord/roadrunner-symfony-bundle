@@ -3,6 +3,7 @@
 namespace FluffyDiscord\RoadRunnerBundle\Grpc\Debug;
 
 use FluffyDiscord\RoadRunnerBundle\Config\RoadRunnerYamlConfigReader;
+use FluffyDiscord\RoadRunnerBundle\Grpc\GrpcAccessAttributeReader;
 use FluffyDiscord\RoadRunnerBundle\Grpc\GrpcServiceDescriptor;
 use FluffyDiscord\RoadRunnerBundle\Grpc\GrpcServiceRegistry;
 use Spiral\RoadRunner\GRPC\Exception\GRPCExceptionInterface;
@@ -14,7 +15,7 @@ class GrpcIntrospector
     public function __construct(
         private readonly GrpcServiceRegistry        $serviceRegistry,
         private readonly RoadRunnerYamlConfigReader $configReader,
-        private readonly bool                       $securityEnabled,
+        private readonly GrpcSecurityFacts          $securityFacts,
     )
     {
     }
@@ -42,7 +43,12 @@ class GrpcIntrospector
 
     public function isSecurityEnabled(): bool
     {
-        return $this->securityEnabled;
+        return $this->securityFacts->enabled;
+    }
+
+    public function getSecurityFacts(): GrpcSecurityFacts
+    {
+        return $this->securityFacts;
     }
 
     /**
@@ -78,31 +84,16 @@ class GrpcIntrospector
     }
 
     /**
-     * @param \ReflectionClass<object> $handlerReflection
+     * @param \ReflectionClass<covariant object> $handlerReflection
      * @return list<string>
      */
     private function describeAccessAttributes(\ReflectionMethod $interfaceMethod, \ReflectionClass $handlerReflection): array
     {
-        $attributeClassExists = class_exists(IsGranted::class);
-
-        if (!$attributeClassExists) {
-            return [];
-        }
-
-        $hasHandlerMethod = $handlerReflection->hasMethod($interfaceMethod->getName());
-        $reflections = [$handlerReflection];
-
-        if ($hasHandlerMethod) {
-            $reflections[] = $handlerReflection->getMethod($interfaceMethod->getName());
-        }
-
-        $reflections[] = $interfaceMethod;
+        $enforcedAttributes = new GrpcAccessAttributeReader()->read($handlerReflection, $interfaceMethod);
         $described = [];
 
-        foreach ($reflections as $reflection) {
-            foreach ($reflection->getAttributes(IsGranted::class) as $reflectionAttribute) {
-                $described[] = $this->describeAttribute($reflectionAttribute->newInstance());
-            }
+        foreach ($enforcedAttributes as $enforcedAttribute) {
+            $described[] = $this->describeAttribute($enforcedAttribute);
         }
 
         return array_values(array_unique($described));
