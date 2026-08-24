@@ -6,7 +6,10 @@
 #   - PHP extensions ext-grpc + ext-igbinary installed (clears the grpc/igbinary skips);
 #   - a real Temporal dev server (`temporal server start-dev`);
 #   - a real RoadRunner server running http + jobs + temporal pools from ONE server.command;
-#   - the gates exported: TEMPORAL_LIVE=1 and RR_JOBS_LIVE=1.
+#   - grpcurl + a real RR `grpc` pool serving the committed Echo contract;
+#   - the gates exported: TEMPORAL_LIVE=1, RR_JOBS_LIVE=1 and RR_GRPC_LIVE=1 (the flag-flip /
+#     profiler gRPC cases need RR_GRPC_LIVE_FULL and stay in docker-validate-grpc.sh — this app
+#     runs prod-mode and shares one pool config across all tests).
 #
 # The container's composer project IS the bundle itself (so autoload-dev exposes the committed
 # tests/Temporal/Live/Workflow/* contracts), plus a small App\ worker layer that IMPLEMENTS those
@@ -75,6 +78,7 @@ cp -r src "$CTX/src"
 cp -r config "$CTX/config"
 cp -r tests "$CTX/tests"
 mkdir -p "$CTX/app/app-src" "$CTX/app/public" "$CTX/app/var"
+cp tests/Grpc/Live/proto/echo.proto "$CTX/app/echo.proto"
 
 # =============================================================================
 # 2. Test app — an App\ worker layer that implements the bundle's Live\Workflow
@@ -330,6 +334,107 @@ final class RawTaskListener
 }
 PHP
 
+cat > "$CTX/app/app-src/GrpcEchoService.php" <<'PHP'
+<?php
+namespace App;
+
+use FluffyDiscord\RoadRunnerBundle\Tests\Grpc\Live\Generated\CrashRequest;
+use FluffyDiscord\RoadRunnerBundle\Tests\Grpc\Live\Generated\EchoInterface;
+use FluffyDiscord\RoadRunnerBundle\Tests\Grpc\Live\Generated\FailRequest;
+use FluffyDiscord\RoadRunnerBundle\Tests\Grpc\Live\Generated\PingRequest;
+use FluffyDiscord\RoadRunnerBundle\Tests\Grpc\Live\Generated\PingResponse;
+use FluffyDiscord\RoadRunnerBundle\Tests\Grpc\Live\Generated\WhoAmIRequest;
+use FluffyDiscord\RoadRunnerBundle\Tests\Grpc\Live\Generated\WhoAmIResponse;
+use Spiral\RoadRunner\GRPC\ContextInterface;
+use Spiral\RoadRunner\GRPC\Exception\GRPCException;
+use Spiral\RoadRunner\GRPC\ResponseHeaders;
+use Spiral\RoadRunner\GRPC\StatusCode;
+use Symfony\Bundle\SecurityBundle\Security;
+use Symfony\Component\Security\Http\Attribute\IsGranted;
+
+class GrpcEchoService implements EchoInterface
+{
+    public function __construct(private readonly Security $security)
+    {
+    }
+
+    public function Ping(ContextInterface $ctx, PingRequest $in): PingResponse
+    {
+        $headers = $ctx->getValue(ResponseHeaders::class);
+        if ($headers instanceof ResponseHeaders) {
+            $headers->set('x-echo', '1');
+        }
+
+        return new PingResponse()->setMessage($in->getMessage())->setPid(getmypid() ?: 0);
+    }
+
+    public function Fail(ContextInterface $ctx, FailRequest $in): PingResponse
+    {
+        throw GRPCException::create('boom', StatusCode::INVALID_ARGUMENT);
+    }
+
+    public function Crash(ContextInterface $ctx, CrashRequest $in): PingResponse
+    {
+        throw new \RuntimeException('crash');
+    }
+
+    #[IsGranted('ROLE_USER')]
+    public function WhoAmI(ContextInterface $ctx, WhoAmIRequest $in): WhoAmIResponse
+    {
+        return new WhoAmIResponse()->setUser($this->security->getUser()?->getUserIdentifier() ?? 'anonymous');
+    }
+}
+PHP
+
+cat > "$CTX/app/app-src/GrpcEventMarkerListener.php" <<'PHP'
+<?php
+namespace App;
+
+use FluffyDiscord\RoadRunnerBundle\Event\Grpc\GrpcCallCompletedEvent;
+use FluffyDiscord\RoadRunnerBundle\Event\Grpc\GrpcCallReceivedEvent;
+use FluffyDiscord\RoadRunnerBundle\Grpc\GrpcMetadata;
+use Symfony\Component\EventDispatcher\Attribute\AsEventListener;
+
+class GrpcEventMarkerListener
+{
+    private const MARKER_FILE = '/tmp/grpc-live-events.log';
+
+    #[AsEventListener]
+    public function onReceived(GrpcCallReceivedEvent $event): void
+    {
+        $metadataKeys = GrpcMetadata::fromContext($event->context)->getKeys();
+        file_put_contents(self::MARKER_FILE, $event::class . ' ' . implode(',', $metadataKeys) . "\n", FILE_APPEND);
+    }
+
+    #[AsEventListener]
+    public function onCompleted(GrpcCallCompletedEvent $event): void
+    {
+        file_put_contents(self::MARKER_FILE, $event::class . "\n", FILE_APPEND);
+    }
+}
+PHP
+
+cat > "$CTX/app/app-src/LiveTokenHandler.php" <<'PHP'
+<?php
+namespace App;
+
+use Symfony\Component\Security\Core\Exception\BadCredentialsException;
+use Symfony\Component\Security\Http\AccessToken\AccessTokenHandlerInterface;
+use Symfony\Component\Security\Http\Authenticator\Passport\Badge\UserBadge;
+
+class LiveTokenHandler implements AccessTokenHandlerInterface
+{
+    public function getUserBadgeFrom(string $accessToken): UserBadge
+    {
+        if ($accessToken !== 'live-token') {
+            throw new BadCredentialsException('secret internal reason the client must never see');
+        }
+
+        return new UserBadge('alice');
+    }
+}
+PHP
+
 cat > "$CTX/app/app-src/Kernel.php" <<'PHP'
 <?php
 namespace App;
@@ -350,7 +455,7 @@ class Kernel extends BaseKernel
 
     public function registerBundles(): iterable
     {
-        return [new FrameworkBundle(), new FluffyDiscordRoadRunnerBundle()];
+        return [new FrameworkBundle(), new \Symfony\Bundle\SecurityBundle\SecurityBundle(), new FluffyDiscordRoadRunnerBundle()];
     }
 
     public function health(): Response { return new Response('OK pid=' . getmypid()); }
@@ -381,8 +486,27 @@ class Kernel extends BaseKernel
             'php_errors' => ['log' => true],
         ]);
 
-        // Autoconfigure so #[TaskQueue] workflows/activities, #[AsMessageHandler] and #[AsEventListener]
-        // are all picked up by the bundle's compile-time scans.
+        $c->extension('security', [
+            'providers' => [
+                'app_users' => [
+                    'memory' => ['users' => ['alice' => ['password' => null, 'roles' => ['ROLE_USER']]]],
+                ],
+            ],
+            'firewalls' => ['dummy' => ['security' => false]],
+        ]);
+
+        $c->extension('fluffy_discord_road_runner', [
+            'grpc' => [
+                'security' => [
+                    'enabled' => true,
+                    'token_handler' => \App\LiveTokenHandler::class,
+                    'required' => false,
+                ],
+            ],
+        ]);
+
+        // Autoconfigure so #[TaskQueue] workflows/activities, #[AsMessageHandler], #[AsEventListener]
+        // and gRPC ServiceInterface implementations are all picked up by the bundle's compile-time scans.
         $services = $c->services()->defaults()->autowire()->autoconfigure();
         $services->load('App\\', '../app-src/');
     }
@@ -437,6 +561,12 @@ temporal:
     address: "127.0.0.1:7233"
     activities:
         num_workers: 1
+grpc:
+    listen: "tcp://127.0.0.1:9001"
+    proto:
+        - "echo.proto"
+    pool:
+        num_workers: 1
 logs:
     mode: production
     level: error
@@ -460,6 +590,8 @@ export TEMPORAL_INTERCEPTOR_MARKER="/app/var/interceptor-marker"
 export RR_JOBS_LIVE=1
 export JOBS_VAR_DIR="/app/var"
 export JOBS_HTTP_BASE="http://127.0.0.1:8080"
+export RR_GRPC_LIVE=1
+export RR_GRPC_ADDRESS="127.0.0.1:9001"
 
 dump_logs() {
   echo "----- temporal server log -----"; tail -n 60 var/temporal.log 2>/dev/null || true
@@ -565,7 +697,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends git unzip curl 
  # grpc's memory-hungry C++ TUs from OOM-ing the box), then strip debug symbols (grpc/grpc#23626).
  && MAKEFLAGS="-j$(nproc | awk '{print ($1>8)?8:$1}')" pecl install igbinary grpc \
  && docker-php-ext-enable igbinary grpc \
- && strip --strip-debug "$(php-config --extension-dir)/grpc.so"
+ && strip --strip-debug "$(php-config --extension-dir)/grpc.so" \
+ && ARCH=$(dpkg --print-architecture | sed 's/amd64/x86_64/; s/arm64/arm64/') \
+ && curl -fsSL "https://github.com/fullstorydev/grpcurl/releases/download/v1.9.3/grpcurl_1.9.3_linux_${ARCH}.tar.gz" \
+    | tar -xz -C /usr/local/bin grpcurl
 COPY --from=temporalio/temporal:latest /usr/local/bin/temporal /usr/local/bin/temporal
 COPY --from=composer:2 /usr/bin/composer /usr/local/bin/composer
 WORKDIR /app

@@ -34,11 +34,13 @@ matching `@group *-live` test as the assertion. Optional arg = PHP version (defa
 ./tests/docker-validate-all.sh                  # whole suite in one container: real RR http+jobs+temporal
 ./tests/docker-validate-jobs.sh                 # Jobs message bus + queue-consumer worker
 ./tests/docker-validate-temporal.sh             # Temporal (real dev server; image installs ext-grpc)
+./tests/docker-validate-grpc.sh                 # gRPC worker (real RR grpc pool; grpcurl as the client)
 ./tests/docker-validate-doctrine-preconnect.sh  # PostgreSQL boot preconnect (real PostgreSQL)
 ./tests/docker-validate-error-pages.sh          # graceful die()/exit()/fatal handling
 
 ./tests/docker-validate-temporal.sh "8.4"       # e.g. single PHP version
 ```
+- `docker-validate-all.sh` runs `grpc-live` basic flows only (prod-mode shared app); `docker-validate-grpc.sh` covers boot-failure flag flips, the profiler and required-auth.
 - `docker-validate-all.sh` excludes `doctrine-preconnect-live` (no PostgreSQL in that image); run
   `docker-validate-doctrine-preconnect.sh` for it.
 - Speed up the build by reusing a local `rr` binary: `RR_BIN=$(command -v rr) ./tests/docker-validate-*.sh`.
@@ -48,4 +50,5 @@ matching `@group *-live` test as the assertion. Optional arg = PHP version (defa
 |-------|--------|
 | `jobs-live` | `docker-validate-jobs.sh`, `docker-validate-all.sh` |
 | `temporal-live` | `docker-validate-temporal.sh`, `docker-validate-all.sh` |
+| `grpc-live` | `docker-validate-grpc.sh` (full), `docker-validate-all.sh` (basic flows — the flag-flip/profiler cases need `RR_GRPC_LIVE_FULL`) |
 | `doctrine-preconnect-live` | `docker-validate-doctrine-preconnect.sh` |
