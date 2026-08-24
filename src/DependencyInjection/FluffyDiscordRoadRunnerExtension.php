@@ -320,9 +320,6 @@ class FluffyDiscordRoadRunnerExtension extends Extension implements PrependExten
     /**
      * @param array{tracing: bool, profiler: array{redacted_metadata_keys: list<string>}, security: array{enabled: bool, token_handler: ?string, metadata_key: string, token_prefix: string, required: bool, firewall_name: string, user_provider: ?string}}|null $grpcConfig
      */
-    /**
-     * @param array{tracing: bool, profiler: array{redacted_metadata_keys: list<string>}, security: array{enabled: bool, token_handler: ?string, metadata_key: string, token_prefix: string, required: bool, firewall_name: string, user_provider: ?string}}|null $grpcConfig
-     */
     private function registerGrpc(?array $grpcConfig, ?string $rrConfigPath, ContainerBuilder $container): void
     {
         $container->registerForAutoconfiguration(GrpcServiceInterface::class)
