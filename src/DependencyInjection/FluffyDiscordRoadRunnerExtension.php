@@ -237,7 +237,7 @@ class FluffyDiscordRoadRunnerExtension extends Extension implements PrependExten
     }
 
     /**
-     * @param array{rr_config_path: ?string} $config
+     * @param array{rr_config_path: ?string, ...} $config
      * @return array<string, mixed>
      */
     private function getRoadRunnerConfig(ContainerBuilder $container, array $config): array
@@ -273,7 +273,7 @@ class FluffyDiscordRoadRunnerExtension extends Extension implements PrependExten
     }
 
     /**
-     * @param array{rr_config_path: ?string, temporal?: array{namespace?: string, tracing?: bool, api_key?: ?string, retryable_errors?: list<string>, default_worker_options?: array<string, mixed>, worker_options?: array<string, array<string, mixed>>}} $config
+     * @param array{rr_config_path: ?string, temporal?: array{namespace?: string, tracing?: bool, api_key?: ?string, retryable_errors?: list<string>, default_worker_options?: array<string, mixed>, worker_options?: array<string, array<string, mixed>>}, ...} $config
      */
     private function setTemporalParameters(array $config, ContainerBuilder $container): void
     {
@@ -294,7 +294,7 @@ class FluffyDiscordRoadRunnerExtension extends Extension implements PrependExten
     }
 
     /**
-     * @param array{rr_config_path: ?string} $config
+     * @param array{rr_config_path: ?string, ...} $config
      */
     private function resolveTemporalAddress(array $config, ContainerBuilder $container): string
     {

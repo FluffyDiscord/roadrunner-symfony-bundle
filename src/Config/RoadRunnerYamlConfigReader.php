@@ -39,8 +39,10 @@ readonly class RoadRunnerYamlConfigReader
             return [];
         }
 
-        /** @var array<string, mixed> $parsed */
-        return $this->expandEnvironmentPlaceholders($parsed);
+        $expanded = $this->expandEnvironmentPlaceholders($parsed);
+
+        /** @var array<string, mixed> $expanded */
+        return $expanded;
     }
 
     /**
@@ -60,8 +62,8 @@ readonly class RoadRunnerYamlConfigReader
     }
 
     /**
-     * @param array<string, mixed> $values
-     * @return array<string, mixed>
+     * @param array<array-key, mixed> $values
+     * @return array<array-key, mixed>
      */
     private function expandEnvironmentPlaceholders(array $values): array
     {
@@ -77,7 +79,6 @@ readonly class RoadRunnerYamlConfigReader
     private function expandValue(mixed $value): mixed
     {
         if (is_array($value)) {
-            /** @var array<string, mixed> $value */
             return $this->expandEnvironmentPlaceholders($value);
         }
 
