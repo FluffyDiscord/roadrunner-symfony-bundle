@@ -65,19 +65,12 @@ class GrpcRoutingTable
 
         $interfaceReflection = new \ReflectionClass($descriptor->interface);
         $handlerReflection = new \ReflectionClass($service);
-        $handlerClassAttributes = self::readAccessAttributes($handlerReflection);
+        $accessAttributeReader = new GrpcAccessAttributeReader();
         $methods = [];
 
         foreach ($interfaceReflection->getMethods(\ReflectionMethod::IS_PUBLIC) as $interfaceMethod) {
             $method = self::parseMethod($descriptor, $interfaceMethod);
-            $handlerMethod = $handlerReflection->getMethod($interfaceMethod->getName());
-            $methodAttributes = self::readAccessAttributes($handlerMethod);
-
-            if ($methodAttributes === []) {
-                $methodAttributes = self::readAccessAttributes($interfaceMethod);
-            }
-
-            $accessAttributes = array_merge($handlerClassAttributes, $methodAttributes);
+            $accessAttributes = $accessAttributeReader->read($handlerReflection, $interfaceMethod);
             self::assertSupportedAccessAttributes($descriptor, $interfaceMethod, $accessAttributes);
 
             $methods[$method->name] = new GrpcMethodRoute($method, $accessAttributes);
@@ -93,27 +86,6 @@ class GrpcRoutingTable
         } catch (GRPCExceptionInterface $invalidSignature) {
             throw new GrpcServiceConfigurationException(sprintf('%s::%s() is not a valid gRPC method: %s', $descriptor->interface, $interfaceMethod->getName(), $invalidSignature->getMessage()), previous: $invalidSignature);
         }
-    }
-
-    /**
-     * @param \ReflectionClass<object>|\ReflectionMethod $reflection
-     * @return list<IsGranted>
-     */
-    private static function readAccessAttributes(\ReflectionClass|\ReflectionMethod $reflection): array
-    {
-        $attributeClassExists = class_exists(IsGranted::class);
-
-        if (!$attributeClassExists) {
-            return [];
-        }
-
-        $attributes = [];
-
-        foreach ($reflection->getAttributes(IsGranted::class) as $reflectionAttribute) {
-            $attributes[] = $reflectionAttribute->newInstance();
-        }
-
-        return $attributes;
     }
 
     /**
