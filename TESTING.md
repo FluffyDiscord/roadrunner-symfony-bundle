@@ -10,8 +10,25 @@
 php vendor/bin/phpstan analyse --no-progress --memory-limit=1G   # level max; --memory-limit=1G is required
 php vendor/bin/phpunit tests                                     # pass `tests` explicitly — there is no phpunit.xml
 ```
-Expected: PHPStan **0 errors**; PHPUnit **all green, ~11 skipped**. The skips are the `*-live`
+Expected: PHPStan **0 errors**; PHPUnit **all green, ~18 skipped**. The skips are the `*-live`
 groups and Symfony-version-gated tests — they only run inside the Docker scripts below. This is normal.
+
+The PHPUnit run is type-enforced: `typephp/typephp` rewrites `src/**` at include time and checks
+every `@param`/`@return`/`@var` contract at runtime — that is why it takes ~15s. Config:
+`typephp.php` (root); `tests/**` is excluded (TypePHP cannot resolve PHPUnit mock intersection
+types or group-namespace aliases).
+
+```bash
+TYPEPHP_DISABLE=1 php vendor/bin/phpunit tests   # unenforced, ~0.5s — triage a suspect failure
+```
+
+- `tests/TypePhpEnforcementTest.php` fails if enforcement is off — needed because TypePHP's
+  tooling opt-out is a **substring** match over argv and the script path: `--filter
+  …Directory…` disables it (`rector` ⊂ `directory`), as does a checkout path containing
+  `composer`, `phpstan`, `pint` or `mago` (upstream typephp-php/typephp#47).
+- An **anonymous class is not a valid `class-string`** to TypePHP (upstream #46): a test double
+  whose `::class` reaches a `class-string` contract must be a named fixture — see
+  `tests/Grpc/Fixtures/FaultingEchoService.php`, `tests/Temporal/Fixtures/DefaultQueueWorker.php`.
 
 ## Run one test / file
 ```bash

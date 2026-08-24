@@ -39,6 +39,27 @@ php vendor/bin/phpunit tests
   real fixtures around a mocked goridge `WorkerInterface` and drive the loop through
   `waitRequest()` / `registerShutdown()` / `logError()` seams on testable subclasses.
 
+### Runtime docblock enforcement — TypePHP
+
+`typephp/typephp` (require-dev, pinned `0.6.0`) boots from composer autoload and rewrites `src/**`
+at include time, so a full `php vendor/bin/phpunit tests` enforces the bundle's own
+`@param`/`@return`/`@var` contracts at runtime (~15s instead of ~0.5s). Config: `typephp.php`.
+Operational details in `TESTING.md`.
+
+- **Keep `cache => false`.** The transform cache is `sys_get_temp_dir()/typephp-cache`, created
+  `0777`, keyed by path+mtime with no ownership check — on a shared `/tmp` a pre-planted file is
+  executed in place of your source. `typephp.php` cannot carry the reason (CR1), so it lives here.
+- **Globs must stay absolute** (`__DIR__ . '/src/**'`). TypePHP index-merges user lists over its
+  defaults (upstream typephp-php/typephp#48), so relative patterns leak `app/**`, `internals/**`
+  and `tests/**` back into `include`; only a longer absolute exclude wins the specificity tie.
+- Never silence a violation with `@typephp-ignore` on a `src/` method — that drops all runtime
+  checks there. Fix the docblock if it is wrong, or the test if the contract is right.
+- An **anonymous class is not a valid `class-string`** to TypePHP (upstream #46). A test double
+  whose `::class` reaches a `class-string` contract must be a named fixture.
+- Enforcement is host + `docker-test-symfony.sh` only. `docker-bench.sh` and the path-repo live
+  scripts never install it; `docker-validate-all.sh` — the one run with zero skips — sets
+  `TYPEPHP_DISABLE=1`, so the exhaustive suite is unenforced. PHPStan is unaffected.
+
 ## Layout
 
 - `src/Worker/` — `HttpWorker`, `CentrifugoWorker`, `JobsWorker` (graceful error handling:
