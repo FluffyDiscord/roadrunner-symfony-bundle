@@ -704,6 +704,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends git unzip curl 
 COPY --from=temporalio/temporal:latest /usr/local/bin/temporal /usr/local/bin/temporal
 COPY --from=composer:2 /usr/bin/composer /usr/local/bin/composer
 WORKDIR /app
+# TypePHP's stream wrapper replaces the native file:// handler and this image runs the real
+# `rr serve`, so enforcement is off here and the workers under test stay untouched. typephp.php is
+# deliberately NOT copied in: drop this line and TypePHP boots with its DEFAULT globs, transforming
+# tests/ as well, inside the very workers this harness validates.
+ENV TYPEPHP_DISABLE=1
 COPY composer.json ./
 COPY src/ src/
 COPY config/ config/

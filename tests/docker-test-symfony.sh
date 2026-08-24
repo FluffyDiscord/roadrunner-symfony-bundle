@@ -42,7 +42,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends git unzip \
 COPY --from=composer:2 /usr/bin/composer /usr/local/bin/composer
 
 WORKDIR /app
-COPY composer.json ./
+COPY composer.json typephp.php ./
 COPY src/ src/
 COPY tests/ tests/
 COPY config/ config/
