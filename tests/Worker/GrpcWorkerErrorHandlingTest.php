@@ -8,6 +8,7 @@ use FluffyDiscord\RoadRunnerBundle\Grpc\GrpcWorkerRuntimeFactory;
 use FluffyDiscord\RoadRunnerBundle\Tests\Grpc\Live\Generated\CrashRequest;
 use FluffyDiscord\RoadRunnerBundle\Tests\Grpc\Live\Generated\EchoInterface;
 use FluffyDiscord\RoadRunnerBundle\Tests\Grpc\Fixtures\EchoService;
+use FluffyDiscord\RoadRunnerBundle\Tests\Grpc\Fixtures\FaultingEchoService;
 use FluffyDiscord\RoadRunnerBundle\Tests\Grpc\Live\Generated\FailRequest;
 use FluffyDiscord\RoadRunnerBundle\Tests\Grpc\Live\Generated\PingRequest;
 use FluffyDiscord\RoadRunnerBundle\Tests\Grpc\Live\Generated\PingResponse;
@@ -172,13 +173,7 @@ class GrpcWorkerErrorHandlingTest extends AbstractGrpcWorkerTestCase
     /** TC-11 edge — a handler fault is a gRPC INTERNAL status AND a server-side incident */
     public function testHandlerFaultAnswersInternalStatusLogsCapturesAndReboots(): void
     {
-        $liar = new class extends EchoService {
-            public function Ping(\Spiral\RoadRunner\GRPC\ContextInterface $ctx, \FluffyDiscord\RoadRunnerBundle\Tests\Grpc\Live\Generated\PingRequest $in): \FluffyDiscord\RoadRunnerBundle\Tests\Grpc\Live\Generated\PingResponse
-            {
-                throw \FluffyDiscord\RoadRunnerBundle\Exception\Grpc\GrpcHandlerFaultException::create('handler fault', \Spiral\RoadRunner\GRPC\StatusCode::INTERNAL);
-            }
-        };
-        $this->registerRuntimeFactory($this->eventDispatcher, $liar);
+        $this->registerRuntimeFactory($this->eventDispatcher, new FaultingEchoService());
 
         $responses = [];
         $this->rrWorker->method('respond')->willReturnCallback(static function (\Spiral\RoadRunner\Payload $payload) use (&$responses): void {

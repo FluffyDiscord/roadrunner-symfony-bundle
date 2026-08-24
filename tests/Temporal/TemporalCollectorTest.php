@@ -5,8 +5,8 @@ namespace FluffyDiscord\RoadRunnerBundle\Tests\Temporal;
 use FluffyDiscord\RoadRunnerBundle\DataCollector\TemporalCollector;
 use FluffyDiscord\RoadRunnerBundle\Temporal\Debug\TemporalIntrospector;
 use FluffyDiscord\RoadRunnerBundle\Temporal\TemporalWorkerInitializer;
-use FluffyDiscord\RoadRunnerBundle\Temporal\TemporalWorkerInterface;
 use FluffyDiscord\RoadRunnerBundle\Tests\BaseTestCase;
+use FluffyDiscord\RoadRunnerBundle\Tests\Temporal\Fixtures\DefaultQueueWorker;
 use FluffyDiscord\RoadRunnerBundle\Tests\Temporal\Fixtures\GreetingActivity;
 use FluffyDiscord\RoadRunnerBundle\Tests\Temporal\Fixtures\GreetingWorkflow;
 use PHPUnit\Framework\Attributes\AllowMockObjectsWithoutExpectations;
@@ -16,7 +16,6 @@ use Symfony\Component\HttpKernel\DependencyInjection\ServicesResetterInterface;
 use Symfony\Component\HttpKernel\KernelInterface;
 use Temporal\Exception\ExceptionInterceptor;
 use Temporal\Interceptor\SimplePipelineProvider;
-use Temporal\Worker\WorkerOptions;
 
 /**
  * TC-15 — the profiler data collector.
@@ -31,17 +30,7 @@ class TemporalCollectorTest extends BaseTestCase
 
     private function initializerWith(callable $configure): TemporalWorkerInitializer
     {
-        $bundleWorker = new class implements TemporalWorkerInterface {
-            public function getTaskQueue(): string
-            {
-                return 'default';
-            }
-
-            public function getWorkerOptions(): WorkerOptions
-            {
-                return WorkerOptions::new();
-            }
-        };
+        $bundleWorker = new DefaultQueueWorker();
 
         $initializer = new TemporalWorkerInitializer(
             $this->createMock(KernelInterface::class),

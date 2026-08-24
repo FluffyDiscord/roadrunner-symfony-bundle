@@ -11,10 +11,6 @@ class GrpcWorkerShutdownTest extends AbstractGrpcWorkerTestCase
 {
     public function testShutdownDuringAnUnansweredFrameSendsAnErrorWithTheCallLabel(): void
     {
-        $dyingService = new class extends \FluffyDiscord\RoadRunnerBundle\Tests\Grpc\Fixtures\EchoService {
-        };
-        $this->registerRuntimeFactory($this->eventDispatcher, $dyingService);
-
         $worker = $this->makeWorker([$this->makeFramePayload('bundle.test.Echo', 'Ping')]);
         $this->rrWorker->method('respond')->willReturnCallback(function () use ($worker): void {
             $worker->callHandleShutdown(['message' => 'Allowed memory size of 1 bytes exhausted', 'file' => 'x.php', 'line' => 1]);

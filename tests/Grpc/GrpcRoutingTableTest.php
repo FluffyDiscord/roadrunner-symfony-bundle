@@ -7,10 +7,13 @@ use FluffyDiscord\RoadRunnerBundle\Grpc\GrpcRoutingTable;
 use FluffyDiscord\RoadRunnerBundle\Grpc\GrpcServiceRegistry;
 use FluffyDiscord\RoadRunnerBundle\Tests\BaseTestCase;
 use FluffyDiscord\RoadRunnerBundle\Tests\Grpc\Fixtures\EchoService;
+use FluffyDiscord\RoadRunnerBundle\Tests\Grpc\Fixtures\ExpressionAccessEchoService;
 use FluffyDiscord\RoadRunnerBundle\Tests\Grpc\Fixtures\ExtendedEchoService;
 use FluffyDiscord\RoadRunnerBundle\Tests\Grpc\Fixtures\GuardedEchoService;
 use FluffyDiscord\RoadRunnerBundle\Tests\Grpc\Fixtures\InvalidSignatureInterface;
 use FluffyDiscord\RoadRunnerBundle\Tests\Grpc\Fixtures\InvalidSignatureService;
+use FluffyDiscord\RoadRunnerBundle\Tests\Grpc\Fixtures\OverriddenAccessEchoService;
+use FluffyDiscord\RoadRunnerBundle\Tests\Grpc\Fixtures\UnsupportedSubjectEchoService;
 use FluffyDiscord\RoadRunnerBundle\Tests\Grpc\Live\Generated\EchoInterface;
 use FluffyDiscord\RoadRunnerBundle\Tests\Grpc\Live\Generated\PingRequest;
 use FluffyDiscord\RoadRunnerBundle\Tests\Grpc\Live\Generated\PingResponse;
@@ -85,13 +88,7 @@ class GrpcRoutingTableTest extends BaseTestCase
 
     public function testExpressionAccessAttributeIsRejectedAtBuildTime(): void
     {
-        $handler = new class extends GuardedEchoService {
-            #[\Symfony\Component\Security\Http\Attribute\IsGranted(new \Symfony\Component\ExpressionLanguage\Expression('is_granted("ROLE_USER")'))]
-            public function WhoAmI(\Spiral\RoadRunner\GRPC\ContextInterface $ctx, \FluffyDiscord\RoadRunnerBundle\Tests\Grpc\Live\Generated\WhoAmIRequest $in): \FluffyDiscord\RoadRunnerBundle\Tests\Grpc\Live\Generated\WhoAmIResponse
-            {
-                return new \FluffyDiscord\RoadRunnerBundle\Tests\Grpc\Live\Generated\WhoAmIResponse();
-            }
-        };
+        $handler = new ExpressionAccessEchoService();
 
         $this->expectException(GrpcServiceConfigurationException::class);
         $this->expectExceptionMessageMatches('/string attribute/');
@@ -101,13 +98,7 @@ class GrpcRoutingTableTest extends BaseTestCase
 
     public function testUnsupportedSubjectIsRejectedAtBuildTime(): void
     {
-        $handler = new class extends GuardedEchoService {
-            #[\Symfony\Component\Security\Http\Attribute\IsGranted('VIEW', 'somethingElse')]
-            public function WhoAmI(\Spiral\RoadRunner\GRPC\ContextInterface $ctx, \FluffyDiscord\RoadRunnerBundle\Tests\Grpc\Live\Generated\WhoAmIRequest $in): \FluffyDiscord\RoadRunnerBundle\Tests\Grpc\Live\Generated\WhoAmIResponse
-            {
-                return new \FluffyDiscord\RoadRunnerBundle\Tests\Grpc\Live\Generated\WhoAmIResponse();
-            }
-        };
+        $handler = new UnsupportedSubjectEchoService();
 
         $this->expectException(GrpcServiceConfigurationException::class);
 
@@ -116,13 +107,7 @@ class GrpcRoutingTableTest extends BaseTestCase
 
     public function testHandlerMethodAttributeWinsOverTheInterfaceAttribute(): void
     {
-        $handler = new class extends GuardedEchoService {
-            #[\Symfony\Component\Security\Http\Attribute\IsGranted('ROLE_OVERRIDE')]
-            public function WhoAmI(\Spiral\RoadRunner\GRPC\ContextInterface $ctx, \FluffyDiscord\RoadRunnerBundle\Tests\Grpc\Live\Generated\WhoAmIRequest $in): \FluffyDiscord\RoadRunnerBundle\Tests\Grpc\Live\Generated\WhoAmIResponse
-            {
-                return new \FluffyDiscord\RoadRunnerBundle\Tests\Grpc\Live\Generated\WhoAmIResponse();
-            }
-        };
+        $handler = new OverriddenAccessEchoService();
 
         $table = GrpcRoutingTable::fromRegistry($this->buildRegistry('app.override', $handler, EchoInterface::class));
 

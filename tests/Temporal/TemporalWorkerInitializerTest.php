@@ -7,6 +7,7 @@ use FluffyDiscord\RoadRunnerBundle\Temporal\DefaultTemporalWorker;
 use FluffyDiscord\RoadRunnerBundle\Temporal\TemporalWorkerInitializer;
 use FluffyDiscord\RoadRunnerBundle\Temporal\TemporalWorkerInterface;
 use FluffyDiscord\RoadRunnerBundle\Tests\BaseTestCase;
+use FluffyDiscord\RoadRunnerBundle\Tests\Temporal\Fixtures\DefaultQueueWorker;
 use FluffyDiscord\RoadRunnerBundle\Tests\Temporal\Fixtures\GreetingActivity;
 use FluffyDiscord\RoadRunnerBundle\Tests\Temporal\Fixtures\GreetingWorkflow;
 use PHPUnit\Framework\Attributes\AllowMockObjectsWithoutExpectations;
@@ -16,7 +17,6 @@ use Temporal\DataConverter\DataConverter;
 use Temporal\Exception\ExceptionInterceptor;
 use Temporal\Interceptor\SimplePipelineProvider;
 use Temporal\Worker\Transport\RPCConnectionInterface;
-use Temporal\Worker\WorkerOptions;
 use Temporal\WorkerFactory;
 
 /**
@@ -36,17 +36,7 @@ class TemporalWorkerInitializerTest extends BaseTestCase
 
     private function defaultQueueWorker(): TemporalWorkerInterface
     {
-        return new class implements TemporalWorkerInterface {
-            public function getTaskQueue(): string
-            {
-                return 'default';
-            }
-
-            public function getWorkerOptions(): WorkerOptions
-            {
-                return WorkerOptions::new();
-            }
-        };
+        return new DefaultQueueWorker();
     }
 
     /**
