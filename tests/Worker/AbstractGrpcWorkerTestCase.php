@@ -14,6 +14,7 @@ use FluffyDiscord\RoadRunnerBundle\Tests\Grpc\Live\Generated\EchoInterface;
 use FluffyDiscord\RoadRunnerBundle\Worker\GrpcWorker;
 use PHPUnit\Framework\MockObject\MockObject;
 use Sentry\State\HubInterface as SentryHubInterface;
+use Spiral\RoadRunner\GRPC\ServiceInterface;
 use Spiral\RoadRunner\Payload;
 use Spiral\RoadRunner\WorkerInterface as RrWorkerInterface;
 use Symfony\Component\DependencyInjection\Container;
@@ -95,11 +96,14 @@ abstract class AbstractGrpcWorkerTestCase extends BaseTestCase
         $this->registerRuntimeFactory($this->eventDispatcher);
     }
 
-    protected function registerRuntimeFactory(EventDispatcher $eventDispatcher, ?object $handler = null): void
+    /**
+     * @param class-string<ServiceInterface> $interface
+     */
+    protected function registerRuntimeFactory(EventDispatcher $eventDispatcher, ?object $handler = null, string $interface = EchoInterface::class): void
     {
         $handler ??= new EchoService();
         $registry = new GrpcServiceRegistry(new ServiceLocator(['app.echo' => static fn (): object => $handler]));
-        $registry->addService(EchoInterface::class, 'app.echo', $handler::class);
+        $registry->addService($interface, 'app.echo', $handler::class);
 
         $factory = new GrpcWorkerRuntimeFactory(
             $eventDispatcher,

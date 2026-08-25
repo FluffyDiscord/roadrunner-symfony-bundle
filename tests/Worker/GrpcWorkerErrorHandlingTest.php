@@ -9,6 +9,8 @@ use FluffyDiscord\RoadRunnerBundle\Tests\Grpc\Live\Generated\CrashRequest;
 use FluffyDiscord\RoadRunnerBundle\Tests\Grpc\Live\Generated\EchoInterface;
 use FluffyDiscord\RoadRunnerBundle\Tests\Grpc\Fixtures\EchoService;
 use FluffyDiscord\RoadRunnerBundle\Tests\Grpc\Fixtures\FaultingEchoService;
+use FluffyDiscord\RoadRunnerBundle\Tests\Grpc\Fixtures\UndecodableRequestEchoInterface;
+use FluffyDiscord\RoadRunnerBundle\Tests\Grpc\Fixtures\UndecodableRequestEchoService;
 use FluffyDiscord\RoadRunnerBundle\Tests\Grpc\Live\Generated\FailRequest;
 use FluffyDiscord\RoadRunnerBundle\Tests\Grpc\Live\Generated\PingRequest;
 use FluffyDiscord\RoadRunnerBundle\Tests\Grpc\Live\Generated\PingResponse;
@@ -197,7 +199,12 @@ class GrpcWorkerErrorHandlingTest extends AbstractGrpcWorkerTestCase
         self::assertStringContainsString('handler fault', implode("\n", $worker->loggedErrors));
     }
 
-    /** TC-07 third variant — an undecodable request body is a quiet INTERNAL client error */
+    /**
+     * TC-07 third variant — a request body the message type refuses to parse is a quiet INTERNAL
+     * client error. The refusal comes from the fixture message rather than from a byte string a
+     * given protobuf release happens to reject, so the case cannot quietly stop testing itself
+     * when the wire parser grows more tolerant.
+     */
     public function testUndecodableRequestBodyAnswersInternalWithoutRebootOrSentry(): void
     {
         $responses = [];
@@ -207,10 +214,12 @@ class GrpcWorkerErrorHandlingTest extends AbstractGrpcWorkerTestCase
         $sentryHub = $this->createMock(\Sentry\State\HubInterface::class);
         $sentryHub->expects($this->never())->method('captureException');
         $this->kernel->expects($this->never())->method('reboot');
+
+        $handler = new UndecodableRequestEchoService();
+        $this->registerRuntimeFactory($this->eventDispatcher, $handler, UndecodableRequestEchoInterface::class);
         $this->recordDispatchedEvents();
 
-        $undecodableBody = "\xff\xff\xff\xff\xff";
-        $worker = $this->makeWorker([$this->makeFramePayload('bundle.test.Echo', 'Ping', $undecodableBody)], sentryHub: $sentryHub);
+        $worker = $this->makeWorker([$this->makeFramePayload('bundle.test.UndecodableEcho', 'Ping', 'any-non-empty-body')], sentryHub: $sentryHub);
         $worker->start();
 
         self::assertCount(1, $responses);
@@ -219,6 +228,8 @@ class GrpcWorkerErrorHandlingTest extends AbstractGrpcWorkerTestCase
         $status = new Status();
         $status->mergeFromString(base64_decode((string) $document['error']));
         self::assertSame(StatusCode::INTERNAL, $status->getCode());
+
+        self::assertFalse($handler->wasCalled);
 
         $failedEvents = array_values(array_filter($this->dispatchedEvents, static fn (object $event): bool => $event instanceof GrpcCallFailedEvent));
         self::assertCount(1, $failedEvents);
