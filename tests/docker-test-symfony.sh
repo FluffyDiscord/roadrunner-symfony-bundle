@@ -6,6 +6,11 @@
 # pins the symfony/* packages to each version, and runs `phpunit tests/`. The build context is the
 # repo root directly (no temp dir) — only the Dockerfile is generated.
 #
+# composer.lock is copied in and the update is restricted to symfony/*, so Symfony is the only axis
+# that moves: every other dependency sits at the version the host runs, and a red cell here means a
+# real PHP/Symfony incompatibility rather than an unrelated package that drifted overnight. To test
+# against current upstream instead, `composer update` on the host first and re-run.
+#
 # Usage:
 #   ./tests/docker-test-symfony.sh                 # full matrix (all PHP x all Symfony)
 #   ./tests/docker-test-symfony.sh "8.4"           # only PHP 8.4, all Symfony
@@ -42,7 +47,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends git unzip \
 COPY --from=composer:2 /usr/bin/composer /usr/local/bin/composer
 
 WORKDIR /app
-COPY composer.json typephp.php ./
+COPY composer.json composer.lock typephp.php ./
 COPY src/ src/
 COPY tests/ tests/
 COPY config/ config/
@@ -58,7 +63,7 @@ RUN composer config minimum-stability dev \
       "symfony/event-dispatcher:^${SYMFONY_VERSION}" \
       "symfony/expression-language:^${SYMFONY_VERSION}" \
       "symfony/mime:^${SYMFONY_VERSION}" \
- && composer update --prefer-dist --no-interaction --no-progress
+ && composer update "symfony/*" --with-all-dependencies --prefer-dist --no-interaction --no-progress
 
 CMD ["vendor/bin/phpunit", "tests/"]
 DOCKERFILE
