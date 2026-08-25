@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "0fb5dba326a66a3344f4d47bdd9a7a3e",
+    "content-hash": "d50200dd8c4bd2785887a175847d8663",
     "packages": [
         {
             "name": "composer/semver",
@@ -10565,16 +10565,16 @@
         },
         {
             "name": "typephp/typephp",
-            "version": "v0.6.0",
+            "version": "v0.6.2",
             "source": {
                 "type": "git",
                 "url": "https://github.com/typephp-php/typephp.git",
-                "reference": "ac2a84fd5d0306314edada41ee91b2cc8b1d2899"
+                "reference": "41ad8cacf26c4752382f75cd42b95308a774f78e"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/typephp-php/typephp/zipball/ac2a84fd5d0306314edada41ee91b2cc8b1d2899",
-                "reference": "ac2a84fd5d0306314edada41ee91b2cc8b1d2899",
+                "url": "https://api.github.com/repos/typephp-php/typephp/zipball/41ad8cacf26c4752382f75cd42b95308a774f78e",
+                "reference": "41ad8cacf26c4752382f75cd42b95308a774f78e",
                 "shasum": ""
             },
             "require": {
@@ -10633,7 +10633,7 @@
             ],
             "support": {
                 "issues": "https://github.com/typephp-php/typephp/issues",
-                "source": "https://github.com/typephp-php/typephp/tree/v0.6.0"
+                "source": "https://github.com/typephp-php/typephp/tree/v0.6.2"
             },
             "funding": [
                 {
@@ -10641,7 +10641,7 @@
                     "type": "github"
                 }
             ],
-            "time": "2026-08-24T05:46:11+00:00"
+            "time": "2026-08-24T17:30:49+00:00"
         }
     ],
     "aliases": [],
