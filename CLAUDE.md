@@ -4,7 +4,9 @@ RoadRunner runtime bundle for Symfony (HTTP + Centrifugo + Jobs + Temporal worke
 
 ## Quality checks
 
-Run both before committing. As of the latest cleanup, **both are green**: PHPStan
+Run PHPStan and PHPUnit before committing; both are green as of the latest cleanup. The
+benchmark and the Docker harnesses below are situational — run them when you touch what they
+cover, not on every change.
 
 ### Benchmarks — `tests/docker-bench.sh`
 
@@ -41,21 +43,24 @@ php vendor/bin/phpunit tests
 
 ### Runtime docblock enforcement — TypePHP
 
-`typephp/typephp` (require-dev, pinned `0.6.0`) boots from composer autoload and rewrites `src/**`
+`typephp/typephp` (require-dev, pinned `0.6.2`) boots from composer autoload and rewrites `src/**`
 at include time, so a full `php vendor/bin/phpunit tests` enforces the bundle's own
-`@param`/`@return`/`@var` contracts at runtime (~15s instead of ~0.5s). Config: `typephp.php`.
+`@param`/`@return`/`@var` contracts at runtime (~9s instead of ~0.5s). Config: `typephp.php`.
 Operational details in `TESTING.md`.
 
-- **Keep `cache => false`.** The transform cache is `sys_get_temp_dir()/typephp-cache`, created
-  `0777`, keyed by path+mtime with no ownership check — on a shared `/tmp` a pre-planted file is
-  executed in place of your source. `typephp.php` cannot carry the reason (CR1), so it lives here.
-- **Globs must stay absolute** (`__DIR__ . '/src/**'`). TypePHP index-merges user lists over its
-  defaults (upstream typephp-php/typephp#48), so relative patterns leak `app/**`, `internals/**`
-  and `tests/**` back into `include`; only a longer absolute exclude wins the specificity tie.
+- **Stay on `0.6.2` or newer.** `0.6.0` mis-handled three things this repo depends on, all fixed in
+  `0.6.2` (upstream typephp-php/typephp#46, #47, #48): user `include`/`exclude` lists are now
+  replaced wholesale instead of index-merged over the defaults, the tooling opt-out matches the
+  argv[0] basename exactly instead of scanning argv and the script path for substrings, and an
+  anonymous class passes a `class-string` contract.
+- **`cache => false` is a speed call, not a security one.** `0.6.2` hardened the transform cache
+  (per-euid directory, `0700`/`0600`, symlink and ownership checks), so it is safe to enable — it
+  is simply not worth it: transformation is not the bottleneck, and caching it saves ~5% of the
+  suite. Runtime checking is the rest.
+- Globs are absolute (`__DIR__ . '/src/**'`) so they do not depend on the caller's working
+  directory. `include` names `src/**` and nothing else, which is why no `exclude` list is needed.
 - Never silence a violation with `@typephp-ignore` on a `src/` method — that drops all runtime
   checks there. Fix the docblock if it is wrong, or the test if the contract is right.
-- An **anonymous class is not a valid `class-string`** to TypePHP (upstream #46). A test double
-  whose `::class` reaches a `class-string` contract must be a named fixture.
 - Enforcement is host + `docker-test-symfony.sh` only. `docker-bench.sh` and the path-repo live
   scripts never install it; `docker-validate-all.sh` — the one run with zero skips — sets
   `TYPEPHP_DISABLE=1`, so the exhaustive suite is unenforced. PHPStan is unaffected.

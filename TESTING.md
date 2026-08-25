@@ -13,22 +13,24 @@ php vendor/bin/phpunit tests                                     # pass `tests` 
 Expected: PHPStan **0 errors**; PHPUnit **all green, ~18 skipped**. The skips are the `*-live`
 groups and Symfony-version-gated tests — they only run inside the Docker scripts below. This is normal.
 
-The PHPUnit run is type-enforced: `typephp/typephp` rewrites `src/**` at include time and checks
-every `@param`/`@return`/`@var` contract at runtime — that is why it takes ~15s. Config:
-`typephp.php` (root); `tests/**` is excluded (TypePHP cannot resolve PHPUnit mock intersection
-types or group-namespace aliases).
+The PHPUnit run is type-enforced: `typephp/typephp` (pinned `0.6.2`) rewrites `src/**` at include
+time and checks every `@param`/`@return`/`@var` contract at runtime — that is why it takes ~9s.
+Config: `typephp.php` (root). `include` names `src/**` and nothing else, so `tests/**` is never
+rewritten (TypePHP cannot resolve PHPUnit mock intersection types or group-namespace aliases).
 
 ```bash
 TYPEPHP_DISABLE=1 php vendor/bin/phpunit tests   # unenforced, ~0.5s — triage a suspect failure
 ```
 
-- `tests/TypePhpEnforcementTest.php` fails if enforcement is off — needed because TypePHP's
-  tooling opt-out is a **substring** match over argv and the script path: `--filter
-  …Directory…` disables it (`rector` ⊂ `directory`), as does a checkout path containing
-  `composer`, `phpstan`, `pint` or `mago` (upstream typephp-php/typephp#47).
-- An **anonymous class is not a valid `class-string`** to TypePHP (upstream #46): a test double
-  whose `::class` reaches a `class-string` contract must be a named fixture — see
-  `tests/Grpc/Fixtures/FaultingEchoService.php`, `tests/Temporal/Fixtures/DefaultQueueWorker.php`.
+- `tests/TypePhpEnforcementTest.php` fails if enforcement is off, so a run that silently stops
+  checking cannot pass as green. `0.6.0` made that easy to trip: its tooling opt-out was a
+  substring match over argv and the script path, so `--filter …Directory…` disabled it
+  (`rector` ⊂ `directory`), as did a checkout path containing `composer` or `phpstan`. `0.6.2`
+  matches the argv[0] basename exactly (upstream typephp-php/typephp#47) — keep the guard anyway,
+  it also catches a stray `TYPEPHP_DISABLE` in the environment.
+- Test doubles reaching a `class-string` contract may be anonymous again as of `0.6.2` (upstream
+  #46). The named fixtures under `tests/Grpc/Fixtures/` and `tests/Temporal/Fixtures/` stay — they
+  are reused across tests — but a new one-off double no longer has to be a named class.
 
 ## Run one test / file
 ```bash
@@ -43,6 +45,10 @@ Runs `phpunit tests` across versions:
 ./tests/docker-test-symfony.sh "8.4"           # one PHP version
 ./tests/docker-test-symfony.sh "8.4 8.5" "7.4" # narrow PHP and Symfony
 ```
+Symfony is the only axis that moves: `composer.lock` is copied into the image and the update is
+restricted to `symfony/*`, so every other dependency sits at the version the host runs. A red cell
+therefore means a real PHP/Symfony incompatibility, not an unrelated package that drifted
+overnight. To test against current upstream instead, `composer update` on the host and re-run.
 
 ## Live end-to-end (Docker, real services)
 Each builds a Symfony app on the bundle, starts the real dependency + `rr serve`, and runs the
