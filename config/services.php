@@ -100,6 +100,5 @@ return static function (ContainerConfigurator $container) {
     $container->import('centrifugo.php');
     $container->import('jobs.php');
     $container->import('locks.php');
-    $container->import('grpc.php');
     $container->import('var_dumper.php');
 };

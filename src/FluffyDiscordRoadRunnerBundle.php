@@ -3,12 +3,10 @@
 namespace FluffyDiscord\RoadRunnerBundle;
 
 use FluffyDiscord\RoadRunnerBundle\DependencyInjection\Compiler\CentrifugoRouterPass;
-use FluffyDiscord\RoadRunnerBundle\DependencyInjection\Compiler\GrpcServicePass;
 use FluffyDiscord\RoadRunnerBundle\DependencyInjection\Compiler\DumpDestinationPass;
 use FluffyDiscord\RoadRunnerBundle\DependencyInjection\Compiler\RequestFactoryPass;
 use FluffyDiscord\RoadRunnerBundle\DependencyInjection\Compiler\TemporalWorkerPass;
 use RoadRunner\Centrifugo\CentrifugoWorker as RoadRunnerCentrifugoWorker;
-use Spiral\RoadRunner\GRPC\ServiceInterface as GrpcServiceInterface;
 use Symfony\Component\DependencyInjection\Compiler\PassConfig;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\HttpKernel\Bundle\Bundle;
@@ -33,10 +31,6 @@ final class FluffyDiscordRoadRunnerBundle extends Bundle
 
         if (class_exists(WorkflowInterface::class)) {
             $container->addCompilerPass(new TemporalWorkerPass(), PassConfig::TYPE_BEFORE_OPTIMIZATION);
-        }
-
-        if (interface_exists(GrpcServiceInterface::class)) {
-            $container->addCompilerPass(new GrpcServicePass(), PassConfig::TYPE_BEFORE_OPTIMIZATION);
         }
     }
 

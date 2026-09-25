@@ -61,15 +61,14 @@ to VarDumper's own default via F4's dance. Consequence: Buggregator, the web pro
 collector, and `VAR_DUMPER_FORMAT=cli` keep working exactly as before. A dump is never swallowed and
 never duplicated.
 
-**ADR-2b — never adopt another capture's handler (added 2026-08-20, found live by the gRPC worker).**
+**ADR-2b — never adopt another capture's handler (added 2026-08-20, found live).**
 After a kernel reboot the new container's `DumpCapture` instance installs alongside the old one; the
 re-assert of ADR-3 then makes each instance adopt the *other* as its forward target
 (`takeHandlerOwnershipBack()` returns the other capture's closure), and the second dump after the
 reboot recurses H2→H1→H2→… until OOM — whose giant exception dump lands on the goridge STDOUT relay
 (`goridge_frame_receive: validation failed`). Every capture-created closure is recorded in a static
 `WeakMap`; `adoptForwardHandler()` refuses any closure found there, so a capture's forward target is
-always a non-capture handler (or the default). Regression: `DumpCaptureTest::testTwoCapturesInstalledAcrossARebootNeverAdoptEachOther`;
-reproduced live by `tests/docker-validate-grpc.sh` IT-04 (crash → reboot → second dump).
+always a non-capture handler (or the default). Regression: `DumpCaptureTest::testTwoCapturesInstalledAcrossARebootNeverAdoptEachOther`.
 
 **ADR-3 — re-assert the handler per request *and* after every forward.** On
 `WorkerRequestReceivedEvent`: `$previous = VarDumper::setHandler($ours); if ($previous !== $ours) { $this->forwardHandler = $previous; }`,
