@@ -36,6 +36,7 @@ Gone: env vars, `argv`, `SCRIPT_NAME`, `SCRIPT_FILENAME`, `PHP_SELF`, `DOCUMENT_
 - Logged as `[roadrunner-symfony] BOOT FAILURE` — alert on that marker.
 - A broken worker answers RoadRunner's PID probe, so the pool starts healthy instead of failing at `rr serve`.
 - **Breaking:** `protected HttpWorker::renderHtmlError()` removed. Override `HttpWorker::getThrowableResponder()`, return a `WorkerErrorResponder` subclass.
+- **Breaking:** `Runtime\Runner` is no longer a `readonly` class — a `readonly` subclass must drop the modifier.
 
 ## v7.0 → v7.1
 
