@@ -33,12 +33,7 @@ abstract class RefusableEvent extends Event implements CentrifugoEventInterface
     private function refuse(Refusal $refusal): void
     {
         $this->assertNotRefused();
-
-        $response = $this->getResponse();
-
-        if ($response !== null) {
-            throw new \LogicException(sprintf('The %s already has a response; it cannot also be refused.', static::class));
-        }
+        $this->setResponse(null);
 
         $this->refusal = $refusal;
         $this->stopPropagation();

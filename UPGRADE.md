@@ -14,7 +14,6 @@
 
 - Relied on the implicit accept → set it explicitly: `$event->setResponse(new PublishResponse())`.
 - Refusing by throwing → use `$event->reject($code, $message)` or `$event->disconnect($code, $reason)` instead. Throwing still works but counts as a crash (Sentry, error log, kernel reboot). See [Refusing a request](README.md#refusing-a-request).
-- `setResponse()` after a refusal, or a refusal after `setResponse()`, throws `LogicException`.
 
 ### `$request->server`
 

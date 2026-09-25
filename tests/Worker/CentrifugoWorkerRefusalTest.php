@@ -9,7 +9,9 @@ use PHPUnit\Framework\Attributes\AllowMockObjectsWithoutExpectations;
 use PHPUnit\Framework\Attributes\DataProvider;
 use RoadRunner\Centrifugal\Proxy\DTO\V1 as DTO;
 use RoadRunner\Centrifugo\Payload\ConnectResponse;
+use RoadRunner\Centrifugo\Payload\PublishResponse;
 use RoadRunner\Centrifugo\Payload\RPCResponse;
+use RoadRunner\Centrifugo\Payload\SubscribeResponse;
 use Sentry\State\HubInterface as SentryHubInterface;
 use Spiral\RoadRunner\Payload;
 use Symfony\Component\HttpKernel\KernelInterface;
@@ -47,10 +49,10 @@ class CentrifugoWorkerRefusalTest extends AbstractCentrifugoWorkerTestCase
 
     public static function refusableRequestProvider(): iterable
     {
-        yield 'connect'   => ['makeConnect', DTO\ConnectResponse::class];
-        yield 'publish'   => ['makePublish', DTO\PublishResponse::class];
-        yield 'subscribe' => ['makeSubscribe', DTO\SubscribeResponse::class];
-        yield 'rpc'       => ['makeRpc', DTO\RPCResponse::class];
+        yield 'connect'   => ['makeConnect', DTO\ConnectResponse::class, new ConnectResponse(user: '42')];
+        yield 'publish'   => ['makePublish', DTO\PublishResponse::class, new PublishResponse()];
+        yield 'subscribe' => ['makeSubscribe', DTO\SubscribeResponse::class, new SubscribeResponse()];
+        yield 'rpc'       => ['makeRpc', DTO\RPCResponse::class, new RPCResponse(data: ['pong' => true])];
     }
 
     /**
@@ -108,6 +110,10 @@ class CentrifugoWorkerRefusalTest extends AbstractCentrifugoWorkerTestCase
     public static function failureHandlingProvider(): iterable
     {
         yield 'refusal is ordinary control flow' => [static fn(RefusableEvent $event) => $event->reject(1000, 'slow down'), 0];
+        yield 'refusal after a response is ordinary control flow' => [static function (RefusableEvent $event): void {
+            $event->setResponse(new RPCResponse(data: ['pong' => true]));
+            $event->reject(1000, 'slow down');
+        }, 0];
         yield 'exception still takes the failure path' => [static fn(RefusableEvent $event) => throw new \RuntimeException('boom'), 1];
     }
 
@@ -130,18 +136,45 @@ class CentrifugoWorkerRefusalTest extends AbstractCentrifugoWorkerTestCase
         $this->assertCount($expectedFailures, $worker->loggedErrors);
     }
 
-    public function testRpcRejectedAfterClearingResponseSendsOnlyTheRefusal(): void
+    public static function refusalAfterResponseProvider(): iterable
     {
-        $this->answerWith(static function (RefusableEvent $event): void {
-            $event->setResponse(new RPCResponse(data: ['pong' => true]));
-            $event->setResponse(null);
-            $event->reject(429, 'too many requests');
-        });
+        foreach (self::refusableRequestProvider() as $name => [$makeRequest, $responseDtoClass, $response]) {
+            yield $name . ' rejected after a response' => [
+                $makeRequest,
+                $responseDtoClass,
+                static function (RefusableEvent $event) use ($response): void {
+                    $event->setResponse($response);
+                    $event->reject(1000, 'slow down', true);
+                },
+                ['error', 1000, 'slow down', true],
+            ];
+            yield $name . ' disconnected after a response' => [
+                $makeRequest,
+                $responseDtoClass,
+                static function (RefusableEvent $event) use ($response): void {
+                    $event->setResponse($response);
+                    $event->disconnect(4501, 'banned');
+                },
+                ['disconnect', 4501, 'banned'],
+            ];
+        }
+    }
 
-        $this->makeWorker(requests: [$this->makeRpc()])->start();
+    /**
+     * @param class-string<Message> $responseDtoClass
+     * @param list<mixed>           $expectedFrame
+     */
+    #[DataProvider('refusalAfterResponseProvider')]
+    public function testRefusalAfterResponseSendsOnlyTheRefusal(string $makeRequest, string $responseDtoClass, \Closure $respondThenRefuse, array $expectedFrame): void
+    {
+        $this->answerWith($respondThenRefuse);
+
+        $worker = $this->makeWorker(requests: [$this->{$makeRequest}()]);
+        $worker->start();
 
         $this->assertCount(1, $this->frames);
-        $this->assertSame(['error', 429, 'too many requests', false], $this->describeFrame($this->frames[0], DTO\RPCResponse::class));
+        $this->assertSame($expectedFrame, $this->describeFrame($this->frames[0], $responseDtoClass));
+        $this->assertSame([], $worker->loggedErrors);
     }
 
     private function answerWith(\Closure $listener): void

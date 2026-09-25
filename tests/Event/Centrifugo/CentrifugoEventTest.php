@@ -177,14 +177,6 @@ class CentrifugoEventTest extends BaseTestCase
     public static function conflictingAnswerProvider(): iterable
     {
         foreach (self::refusableEventProvider() as $name => [$eventClass, $responseClass]) {
-            yield $name . ': response then reject' => [$eventClass, [
-                static fn($event) => $event->setResponse(new $responseClass()),
-                static fn($event) => $event->reject(403, 'forbidden'),
-            ]];
-            yield $name . ': response then disconnect' => [$eventClass, [
-                static fn($event) => $event->setResponse(new $responseClass()),
-                static fn($event) => $event->disconnect(4500, 'forbidden'),
-            ]];
             yield $name . ': reject then response' => [$eventClass, [
                 static fn($event) => $event->reject(403, 'forbidden'),
                 static fn($event) => $event->setResponse(new $responseClass()),
@@ -196,6 +188,10 @@ class CentrifugoEventTest extends BaseTestCase
             yield $name . ': reject then disconnect' => [$eventClass, [
                 static fn($event) => $event->reject(403, 'forbidden'),
                 static fn($event) => $event->disconnect(4500, 'forbidden'),
+            ]];
+            yield $name . ': disconnect then reject' => [$eventClass, [
+                static fn($event) => $event->disconnect(4500, 'forbidden'),
+                static fn($event) => $event->reject(403, 'forbidden'),
             ]];
         }
     }
@@ -214,15 +210,35 @@ class CentrifugoEventTest extends BaseTestCase
         $conflictingStep($event);
     }
 
-    public function testClearedResponseCanBeRejected(): void
+    public static function refusalAfterResponseProvider(): iterable
     {
-        $event = new PublishEvent($this->makeRequest(PublishEvent::class));
-        $event->setResponse(new PublishResponse());
-        $event->setResponse(null);
+        foreach (self::refusableEventProvider() as $name => [$eventClass, $responseClass]) {
+            yield $name . ': rejected' => [
+                $eventClass,
+                $responseClass,
+                static fn($event) => $event->reject(403, 'forbidden'),
+                new Refusal(RefusalType::Error, 403, 'forbidden'),
+            ];
+            yield $name . ': disconnected' => [
+                $eventClass,
+                $responseClass,
+                static fn($event) => $event->disconnect(4500, 'forbidden'),
+                new Refusal(RefusalType::Disconnect, 4500, 'forbidden'),
+            ];
+        }
+    }
 
-        $event->reject(403, 'forbidden');
+    #[DataProvider('refusalAfterResponseProvider')]
+    public function testRefusalReplacesEarlierResponse(string $eventClass, string $responseClass, \Closure $refuse, Refusal $expectedRefusal): void
+    {
+        $event = new $eventClass($this->makeRequest($eventClass));
+        $event->setResponse(new $responseClass());
 
-        self::assertNotNull($event->getRefusal());
+        $refuse($event);
+
+        self::assertNull($event->getResponse());
+        self::assertEquals($expectedRefusal, $event->getRefusal());
+        self::assertTrue($event->isPropagationStopped());
     }
 
     public static function refusalCodeProvider(): iterable

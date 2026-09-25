@@ -234,7 +234,7 @@ readonly class ChatListener
 }
 ```
 
-**Nobody answered → denied.** Every request needs a listener that calls `setResponse()`, `reject()` or `disconnect()`:
+**Nobody answered → denied** (since v8, see [UPGRADE](UPGRADE.md#v7--v8)). Every request needs a listener that calls `setResponse()`, `reject()` or `disconnect()`:
 
 | Request | Default when unanswered |
 |---|---|
@@ -254,7 +254,8 @@ $event->disconnect(4501, 'banned');                // code 4000–4999, reason �
 
 - `4000–4499` = client reconnects, `4500–4999` = client stays disconnected ([Centrifugo codes](https://centrifugal.dev/docs/server/proxy#return-custom-disconnect)).
 - Refused request: one frame, no Sentry event, no error log, no kernel reboot.
-- `setResponse()` after a refusal, or a refusal after `setResponse()` → `LogicException`.
+- Refusal wins: drops a response an earlier listener set.
+- `setResponse()` after a refusal, or a second refusal → `LogicException`.
 - Refresh / SubRefresh can't be refused with an error — Centrifugo ignores it. Expire instead: `$event->setResponse(new RefreshResponse(expired: true))`.
 - Never call `$event->getRequest()->error()` yourself — the worker answers too, and the client gets two frames.
 - Throwing still works, but is treated as a crash: Sentry, error log, kernel reboot, `500`.
