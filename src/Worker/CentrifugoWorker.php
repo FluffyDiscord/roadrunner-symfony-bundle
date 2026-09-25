@@ -7,6 +7,9 @@ use FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\ConnectEvent;
 use FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\InvalidEvent;
 use FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\PublishEvent;
 use FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\RefreshEvent;
+use FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\RefusableEvent;
+use FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\Refusal;
+use FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\RefusalType;
 use FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\RPCEvent;
 use FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\SubRefreshEvent;
 use FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\SubscribeEvent;
@@ -19,12 +22,8 @@ use FluffyDiscord\RoadRunnerBundle\Event\Worker\WorkerResponseSentEvent;
 use FluffyDiscord\RoadRunnerBundle\Exception\NoCentrifugoResponseProvidedException;
 use FluffyDiscord\RoadRunnerBundle\Exception\UnsupportedCentrifugoRequestTypeException;
 use RoadRunner\Centrifugo\CentrifugoWorker as RoadRunnerCentrifugoWorker;
-use RoadRunner\Centrifugo\Payload\ConnectResponse;
-use RoadRunner\Centrifugo\Payload\PublishResponse;
 use RoadRunner\Centrifugo\Payload\RefreshResponse;
-use RoadRunner\Centrifugo\Payload\RPCResponse;
 use RoadRunner\Centrifugo\Payload\SubRefreshResponse;
-use RoadRunner\Centrifugo\Payload\SubscribeResponse;
 use RoadRunner\Centrifugo\Request;
 use Sentry\State\HubInterface as SentryHubInterface;
 use Spiral\RoadRunner\Environment\Mode;
@@ -111,17 +110,7 @@ class CentrifugoWorker implements WorkerInterface
                 $processedEvent = $this->eventDispatcher->dispatch($event);
 
                 if (!$event instanceof InvalidEvent) {
-                    $response = $processedEvent->getResponse() ?? match ($event::class) {
-                        ConnectEvent::class => new ConnectResponse(),
-                        PublishEvent::class => new PublishResponse(),
-                        RefreshEvent::class => new RefreshResponse(),
-                        SubRefreshEvent::class => new SubRefreshResponse(),
-                        SubscribeEvent::class => new SubscribeResponse(),
-                        RPCEvent::class => new RPCResponse(),
-                        default => throw new NoCentrifugoResponseProvidedException(sprintf('No supported default response found for request type: %s', $request::class)),
-                    };
-
-                    $request->respond($response);
+                    $this->answer($request, $processedEvent);
                     $responded = true;
                 }
 
@@ -172,6 +161,41 @@ class CentrifugoWorker implements WorkerInterface
                 $currentRequest = null;
             }
         }
+    }
+
+    private function answer(Request\RequestInterface $request, CentrifugoEventInterface $event): void
+    {
+        $refusal = $event instanceof RefusableEvent ? $event->getRefusal() : null;
+        $response = $event->getResponse();
+
+        match (true) {
+            $refusal !== null  => $refusal->sendTo($request),
+            $response !== null => $request->respond($response),
+            default            => $this->denyByDefault($request),
+        };
+    }
+
+    private function denyByDefault(Request\RequestInterface $request): void
+    {
+        match (true) {
+            $request instanceof Request\Connect    => $this->getDefaultDenyDisconnect()->sendTo($request),
+            $request instanceof Request\Publish,
+            $request instanceof Request\Subscribe,
+            $request instanceof Request\RPC        => $this->getDefaultDenyError()->sendTo($request),
+            $request instanceof Request\Refresh    => $request->respond(new RefreshResponse(expired: true)),
+            $request instanceof Request\SubRefresh => $request->respond(new SubRefreshResponse(expired: true)),
+            default                                => throw new NoCentrifugoResponseProvidedException(sprintf('No default denial for request type: %s', $request::class)),
+        };
+    }
+
+    private function getDefaultDenyError(): Refusal
+    {
+        return new Refusal(RefusalType::Error, 403, 'forbidden');
+    }
+
+    private function getDefaultDenyDisconnect(): Refusal
+    {
+        return new Refusal(RefusalType::Disconnect, 4500, 'forbidden');
     }
 
     /**

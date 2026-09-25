@@ -5,9 +5,8 @@ namespace FluffyDiscord\RoadRunnerBundle\Event\Centrifugo;
 use RoadRunner\Centrifugo\Payload\PublishResponse;
 use RoadRunner\Centrifugo\Payload\ResponseInterface;
 use RoadRunner\Centrifugo\Request\Publish;
-use Symfony\Contracts\EventDispatcher\Event;
 
-class PublishEvent extends Event implements CentrifugoEventInterface
+class PublishEvent extends RefusableEvent
 {
     private ?PublishResponse $response = null;
 
@@ -29,6 +28,8 @@ class PublishEvent extends Event implements CentrifugoEventInterface
 
     public function setResponse(PublishResponse|ResponseInterface|null $response): self
     {
+        $this->assertNotRefused();
+
         if ($response !== null && !$response instanceof PublishResponse) {
             throw new \InvalidArgumentException(sprintf('A listener for %s must call setResponse() with a %s, got %s.', self::class, PublishResponse::class, $response::class));
         }

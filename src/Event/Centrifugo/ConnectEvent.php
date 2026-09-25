@@ -5,9 +5,8 @@ namespace FluffyDiscord\RoadRunnerBundle\Event\Centrifugo;
 use RoadRunner\Centrifugo\Payload\ConnectResponse;
 use RoadRunner\Centrifugo\Payload\ResponseInterface;
 use RoadRunner\Centrifugo\Request\Connect;
-use Symfony\Contracts\EventDispatcher\Event;
 
-class ConnectEvent extends Event implements CentrifugoEventInterface
+class ConnectEvent extends RefusableEvent
 {
     private ?ConnectResponse $response = null;
 
@@ -29,6 +28,8 @@ class ConnectEvent extends Event implements CentrifugoEventInterface
 
     public function setResponse(ConnectResponse|ResponseInterface|null $response): self
     {
+        $this->assertNotRefused();
+
         if ($response !== null && !$response instanceof ConnectResponse) {
             throw new \InvalidArgumentException(sprintf('A listener for %s must call setResponse() with a %s, got %s.', self::class, ConnectResponse::class, $response::class));
         }

@@ -4,12 +4,14 @@ namespace FluffyDiscord\RoadRunnerBundle\Tests\EventListener;
 
 use FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\ConnectEvent;
 use FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\PublishEvent;
+use FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\RefusableEvent;
 use FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\RPCEvent;
 use FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\SubRefreshEvent;
 use FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\SubscribeEvent;
 use FluffyDiscord\RoadRunnerBundle\EventListener\CentrifugoEventRouter;
 use FluffyDiscord\RoadRunnerBundle\Tests\BaseTestCase;
 use PHPUnit\Framework\Attributes\AllowMockObjectsWithoutExpectations;
+use PHPUnit\Framework\Attributes\DataProvider;
 use RoadRunner\Centrifugo\Request\Connect;
 use RoadRunner\Centrifugo\Request\Publish;
 use RoadRunner\Centrifugo\Request\RPC;
@@ -185,6 +187,53 @@ class CentrifugoEventRouterTest extends BaseTestCase
         ]);
 
         $router->onPublish($this->publishEvent('news'));
+
+        $this->assertSame(['first'], $calls);
+    }
+
+    public static function refusalProvider(): iterable
+    {
+        yield 'publish rejected'       => ['publish', static fn(RefusableEvent $event) => $event->reject(1000, 'slow down')];
+        yield 'rpc disconnected'       => ['rpc', static fn(RefusableEvent $event) => $event->disconnect(4501, 'banned')];
+        yield 'connect rejected'       => ['connect', static fn(RefusableEvent $event) => $event->reject(403, 'forbidden')];
+        yield 'subscribe disconnected' => ['subscribe', static fn(RefusableEvent $event) => $event->disconnect(4000, 'retry')];
+    }
+
+    #[DataProvider('refusalProvider')]
+    public function testRefusalHaltsHandlerChain(string $route, \Closure $refuse): void
+    {
+        $calls = [];
+        $first = new class($calls, $refuse) {
+            public function __construct(private array &$calls, private \Closure $refuse) {}
+            public function handle(RefusableEvent $event): void {
+                $this->calls[] = 'first';
+                ($this->refuse)($event);
+            }
+        };
+        $second = new class($calls) {
+            public function __construct(private array &$calls) {}
+            public function handle(object $event): void { $this->calls[] = 'second'; }
+        };
+        $handlers = [['first_svc', 'handle', 10], ['second_svc', 'handle', 5]];
+
+        $router = $this->makeRouter([
+            'channels' => [
+                PublishEvent::class   => ['exact' => ['news' => $handlers], 'wildcard' => []],
+                ConnectEvent::class   => ['exact' => ['news' => $handlers], 'wildcard' => []],
+                SubscribeEvent::class => ['exact' => ['news' => $handlers], 'wildcard' => []],
+            ],
+            'rpc' => ['exact' => ['ping' => $handlers]],
+        ], [
+            'first_svc'  => fn() => $first,
+            'second_svc' => fn() => $second,
+        ]);
+
+        match ($route) {
+            'publish'   => $router->onPublish($this->publishEvent('news')),
+            'rpc'       => $router->onRpc($this->rpcEvent('ping')),
+            'connect'   => $router->onConnect($this->connectEvent(['news'])),
+            'subscribe' => $router->onSubscribe($this->subscribeEvent('news')),
+        };
 
         $this->assertSame(['first'], $calls);
     }

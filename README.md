@@ -208,16 +208,23 @@ Listen to any event implementing `FluffyDiscord\RoadRunnerBundle\Event\Centrifug
 - `SubscribeEvent`
 
 ```php
+use FluffyDiscord\RoadRunnerBundle\Event\Centrifugo\ConnectEvent;
+use RoadRunner\Centrifugo\Payload\ConnectResponse;
+use Symfony\Component\EventDispatcher\Attribute\AsEventListener;
+
 #[AsEventListener(event: ConnectEvent::class, method: "handleConnect")]
 readonly class ChatListener
 {
     public function handleConnect(ConnectEvent $event): void
     {
-        $request = $event->getRequest();
-        $authToken = $request->getData()["authToken"] ?? null;
+        $authToken = $event->getRequest()->getData()["authToken"] ?? null;
         $user = ...
 
-        $event->stopPropagation();
+        if ($user === null) {
+            $event->disconnect(4501, 'unauthorized');
+
+            return;
+        }
 
         $event->setResponse(new ConnectResponse(
             user: $user->getId(),
@@ -227,7 +234,30 @@ readonly class ChatListener
 }
 ```
 
-No response set → `DisconnectResponse` is sent.
+**Nobody answered → denied.** Every request needs a listener that calls `setResponse()`, `reject()` or `disconnect()`:
+
+| Request | Default when unanswered |
+|---|---|
+| Connect | disconnect `4500 forbidden` (client does not reconnect) |
+| Publish, Subscribe, RPC | error `403 forbidden` |
+| Refresh, SubRefresh | result `expired: true` (client disconnected) |
+
+### Refusing a request
+
+`ConnectEvent`, `PublishEvent`, `SubscribeEvent` and `RPCEvent` refuse without throwing. Both stop propagation; no later listener runs.
+
+```php
+$event->reject(429, 'too many requests');          // error, code 400–1999
+$event->reject(1000, 'try later', temporary: true); // client may retry
+$event->disconnect(4501, 'banned');                // code 4000–4999, reason ≤ 32 bytes
+```
+
+- `4000–4499` = client reconnects, `4500–4999` = client stays disconnected ([Centrifugo codes](https://centrifugal.dev/docs/server/proxy#return-custom-disconnect)).
+- Refused request: one frame, no Sentry event, no error log, no kernel reboot.
+- `setResponse()` after a refusal, or a refusal after `setResponse()` → `LogicException`.
+- Refresh / SubRefresh can't be refused with an error — Centrifugo ignores it. Expire instead: `$event->setResponse(new RefreshResponse(expired: true))`.
+- Never call `$event->getRequest()->error()` yourself — the worker answers too, and the client gets two frames.
+- Throwing still works, but is treated as a crash: Sentry, error log, kernel reboot, `500`.
 
 ### `#[AsCentrifugoChannelListener]`
 

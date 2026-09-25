@@ -1,6 +1,22 @@
 # Upgrade guide
 
-## v7.1 → v7.2
+## v7 → v8
+
+### Centrifugo
+
+**Breaking: an unanswered Centrifugo request is now denied.** It used to be accepted — anonymous connect, publish passed through, refresh never expired.
+
+| Request | Before | Now |
+|---|---|---|
+| Connect | accepted, user `''` | disconnect `4500 forbidden` |
+| Publish, Subscribe, RPC | accepted | error `403 forbidden` |
+| Refresh, SubRefresh | accepted, no expiry | `expired: true` |
+
+- Relied on the implicit accept → set it explicitly: `$event->setResponse(new PublishResponse())`.
+- Refusing by throwing → use `$event->reject($code, $message)` or `$event->disconnect($code, $reason)` instead. Throwing still works but counts as a crash (Sentry, error log, kernel reboot). See [Refusing a request](README.md#refusing-a-request).
+- `setResponse()` after a refusal, or a refusal after `setResponse()`, throws `LogicException`.
+
+### `$request->server`
 
 **`$request->server` is now built from the RoadRunner request alone** — it used to start as a copy of the worker's boot-time `$_SERVER`.
 
@@ -12,8 +28,6 @@ Gone: env vars, `argv`, `SCRIPT_NAME`, `SCRIPT_FILENAME`, `PHP_SELF`, `DOCUMENT_
 - `HTTP_*` env vars (`HTTP_PROXY`) no longer turn into request headers.
 - `getBaseUrl()` / `getScriptName()` now always return `''`.
 
-## v7.0 → v7.1
-
 ### Boot failures
 
 **A boot failure now answers the client** instead of killing the worker before its first request (RoadRunner returned its own error with an `EOF` body).
@@ -23,6 +37,8 @@ Gone: env vars, `argv`, `SCRIPT_NAME`, `SCRIPT_FILENAME`, `PHP_SELF`, `DOCUMENT_
 - Logged as `[roadrunner-symfony] BOOT FAILURE` — alert on that marker.
 - A broken worker answers RoadRunner's PID probe, so the pool starts healthy instead of failing at `rr serve`.
 - **Breaking:** `protected HttpWorker::renderHtmlError()` removed. Override `HttpWorker::getThrowableResponder()`, return a `WorkerErrorResponder` subclass.
+
+## v7.0 → v7.1
 
 ### `http.request_factory`
 

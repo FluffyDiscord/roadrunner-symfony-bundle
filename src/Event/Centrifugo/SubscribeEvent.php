@@ -5,9 +5,8 @@ namespace FluffyDiscord\RoadRunnerBundle\Event\Centrifugo;
 use RoadRunner\Centrifugo\Payload\ResponseInterface;
 use RoadRunner\Centrifugo\Payload\SubscribeResponse;
 use RoadRunner\Centrifugo\Request\Subscribe;
-use Symfony\Contracts\EventDispatcher\Event;
 
-class SubscribeEvent extends Event implements CentrifugoEventInterface
+class SubscribeEvent extends RefusableEvent
 {
     private ?SubscribeResponse $response = null;
 
@@ -29,6 +28,8 @@ class SubscribeEvent extends Event implements CentrifugoEventInterface
 
     public function setResponse(SubscribeResponse|ResponseInterface|null $response): self
     {
+        $this->assertNotRefused();
+
         if ($response !== null && !$response instanceof SubscribeResponse) {
             throw new \InvalidArgumentException(sprintf('A listener for %s must call setResponse() with a %s, got %s.', self::class, SubscribeResponse::class, $response::class));
         }
