@@ -134,7 +134,9 @@ class GrpcWorker implements WorkerInterface
 
             $hadUnhandledThrowable = $this->reportGrpcExceptionIfServerFault($grpcException);
 
-            $this->answer(new Payload('', $this->responseEncoder->encodeError($grpcException, $responseHeaders, $responseTrailers)));
+            $clientMessage = $this->describeGrpcException($grpcException);
+            $shouldMask = $this->shouldMaskGrpcException($grpcException);
+            $this->answer(new Payload('', $this->responseEncoder->encodeError($grpcException, $clientMessage, $shouldMask, $responseHeaders, $responseTrailers)));
         } catch (\Throwable $throwable) {
             $hadUnhandledThrowable = true;
 
@@ -219,19 +221,30 @@ class GrpcWorker implements WorkerInterface
 
     private function reportGrpcExceptionIfServerFault(GRPCExceptionInterface $grpcException): bool
     {
+        $isServerFault = $this->isServerFault($grpcException);
+
+        if (!$isServerFault) {
+            return false;
+        }
+
+        $this->logError((string)$grpcException);
+
         if ($grpcException instanceof GrpcHandlerFaultException) {
             $this->captureException($grpcException);
-            $this->logError((string)$grpcException);
 
             return true;
         }
 
         if ($grpcException instanceof GrpcSecurityConfigurationException) {
             $this->captureException($grpcException);
-            $this->logError((string)$grpcException);
         }
 
         return false;
+    }
+
+    private function isServerFault(GRPCExceptionInterface $grpcException): bool
+    {
+        return $grpcException->getCode() === StatusCode::INTERNAL;
     }
 
     private function dispatchFailedEvent(\Throwable $throwable, int $workerStatusCode, ?ContextInterface $context, int|float $startedAt): void
@@ -375,6 +388,33 @@ class GrpcWorker implements WorkerInterface
         return 'Worker boot failed';
     }
 
+    private function shouldMaskGrpcException(GRPCExceptionInterface $grpcException): bool
+    {
+        $isServerFault = $this->isServerFault($grpcException);
+
+        return $isServerFault && !$this->debug;
+    }
+
+    private function describeGrpcException(GRPCExceptionInterface $grpcException): string
+    {
+        $shouldMask = $this->shouldMaskGrpcException($grpcException);
+
+        if ($shouldMask) {
+            return 'Internal server error';
+        }
+
+        return $grpcException->getMessage();
+    }
+
+    private function describeShutdown(string $callLabel, string $reason): string
+    {
+        if ($this->debug) {
+            return sprintf('Worker terminated during gRPC call %s: %s', $callLabel, $reason);
+        }
+
+        return sprintf('Worker terminated during gRPC call %s', $callLabel);
+    }
+
     /**
      * @param array{message?: string, file?: string, line?: int}|null $error
      */
@@ -396,7 +436,7 @@ class GrpcWorker implements WorkerInterface
         $reason = $fatalMessage ?? 'die/exit';
 
         try {
-            $this->rrWorker->error(sprintf('Worker terminated during gRPC call %s: %s', $callLabel, $reason));
+            $this->rrWorker->error($this->describeShutdown($callLabel, $reason));
         } catch (\Throwable) {
         }
 

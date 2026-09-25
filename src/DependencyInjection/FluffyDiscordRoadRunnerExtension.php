@@ -346,6 +346,7 @@ class FluffyDiscordRoadRunnerExtension extends Extension implements PrependExten
                 $securityConfig['token_handler'],
                 $securityConfig['metadata_key'],
                 $securityConfig['required'],
+                null,
             ]);
             $container->getDefinition(GrpcIntrospector::class)->replaceArgument(2, $securityFacts);
         }
@@ -403,7 +404,7 @@ class FluffyDiscordRoadRunnerExtension extends Extension implements PrependExten
             new Reference($tokenHandlerId),
             new Reference('security.token_storage'),
             $userProviderReference,
-            new Reference('Symfony\\Component\\Security\\Core\\User\\UserCheckerInterface', ContainerInterface::NULL_ON_INVALID_REFERENCE),
+            new Reference('security.user_checker'),
             $securityConfig['metadata_key'],
             $securityConfig['token_prefix'],
             $securityConfig['required'],

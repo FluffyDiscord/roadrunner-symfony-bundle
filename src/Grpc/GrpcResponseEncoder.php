@@ -16,10 +16,12 @@ class GrpcResponseEncoder
         return $this->encodeDocument($this->buildHeaderDocument($headers, $trailers));
     }
 
-    public function encodeError(GRPCExceptionInterface $exception, ResponseHeaders $headers, ResponseTrailers $trailers): string
+    public function encodeError(GRPCExceptionInterface $exception, string $clientMessage, bool $dropDetails, ResponseHeaders $headers, ResponseTrailers $trailers): string
     {
+        $details = $dropDetails ? [] : $exception->getDetails();
+
         $document = $this->buildHeaderDocument($headers, $trailers);
-        $document['error'] = $this->encodeStatusMessage($exception->getCode(), $exception->getMessage(), $exception->getDetails());
+        $document['error'] = $this->encodeStatusMessage($exception->getCode(), $clientMessage, $details);
 
         return $this->encodeDocument($document);
     }

@@ -9,6 +9,7 @@ readonly class GrpcSecurityFacts
         public ?string $tokenHandlerId,
         public ?string $metadataKey,
         public ?bool   $required,
+        public ?string $userCheckerId = null,
     )
     {
     }

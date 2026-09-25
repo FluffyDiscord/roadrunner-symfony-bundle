@@ -199,6 +199,65 @@ class GrpcWorkerErrorHandlingTest extends AbstractGrpcWorkerTestCase
         self::assertStringContainsString('handler fault', implode("\n", $worker->loggedErrors));
     }
 
+    public function testHandlerFaultDoesNotSendTheServerFaultMessageToTheClientInProduction(): void
+    {
+        $this->registerRuntimeFactory($this->eventDispatcher, new FaultingEchoService());
+
+        $responses = [];
+        $this->rrWorker->method('respond')->willReturnCallback(static function (\Spiral\RoadRunner\Payload $payload) use (&$responses): void {
+            $responses[] = $payload;
+        });
+
+        $worker = $this->makeWorker([$this->makeFramePayload('bundle.test.Echo', 'Ping')]);
+        $worker->start();
+
+        $document = json_decode($responses[0]->header, true);
+        self::assertIsArray($document);
+        $status = new Status();
+        $status->mergeFromString(base64_decode((string) $document['error']));
+        self::assertSame('Internal server error', $status->getMessage());
+        self::assertStringNotContainsString('handler fault', $status->getMessage());
+        self::assertStringNotContainsString(FaultingEchoService::class, $status->getMessage());
+        self::assertStringContainsString('handler fault', implode("\n", $worker->loggedErrors));
+    }
+
+    public function testHandlerFaultSendsTheServerFaultMessageToTheClientInDebug(): void
+    {
+        $this->registerRuntimeFactory($this->eventDispatcher, new FaultingEchoService());
+
+        $responses = [];
+        $this->rrWorker->method('respond')->willReturnCallback(static function (\Spiral\RoadRunner\Payload $payload) use (&$responses): void {
+            $responses[] = $payload;
+        });
+
+        $worker = $this->makeWorker([$this->makeFramePayload('bundle.test.Echo', 'Ping')], debug: true);
+        $worker->start();
+
+        $document = json_decode($responses[0]->header, true);
+        self::assertIsArray($document);
+        $status = new Status();
+        $status->mergeFromString(base64_decode((string) $document['error']));
+        self::assertStringContainsString('handler fault', $status->getMessage());
+    }
+
+    public function testAnIntentionalStatusKeepsItsMessageInProduction(): void
+    {
+        $responses = [];
+        $this->rrWorker->method('respond')->willReturnCallback(static function (\Spiral\RoadRunner\Payload $payload) use (&$responses): void {
+            $responses[] = $payload;
+        });
+
+        $worker = $this->makeWorker([$this->makeFramePayload('bundle.test.Missing', 'Ping')]);
+        $worker->start();
+
+        $document = json_decode($responses[0]->header, true);
+        self::assertIsArray($document);
+        $status = new Status();
+        $status->mergeFromString(base64_decode((string) $document['error']));
+        self::assertSame(StatusCode::NOT_FOUND, $status->getCode());
+        self::assertStringContainsString('bundle.test.Missing', $status->getMessage());
+    }
+
     /**
      * TC-07 third variant — a request body the message type refuses to parse is a quiet INTERNAL
      * client error. The refusal comes from the fixture message rather than from a byte string a
@@ -228,6 +287,9 @@ class GrpcWorkerErrorHandlingTest extends AbstractGrpcWorkerTestCase
         $status = new Status();
         $status->mergeFromString(base64_decode((string) $document['error']));
         self::assertSame(StatusCode::INTERNAL, $status->getCode());
+        self::assertSame('Internal server error', $status->getMessage());
+        self::assertNotSame([], $worker->loggedErrors, 'a masked INTERNAL must still be diagnosable from the log');
+        self::assertStringContainsString('GrpcRequestDecodingException', implode("\n", $worker->loggedErrors));
 
         self::assertFalse($handler->wasCalled);
 

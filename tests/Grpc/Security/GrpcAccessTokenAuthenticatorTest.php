@@ -13,6 +13,7 @@ use Symfony\Component\Security\Core\Exception\BadCredentialsException;
 use Symfony\Component\Security\Core\Exception\DisabledException;
 use Symfony\Component\Security\Core\Exception\UserNotFoundException;
 use Symfony\Component\Security\Core\User\InMemoryUser;
+use Symfony\Component\Security\Core\User\InMemoryUserChecker;
 use Symfony\Component\Security\Core\User\UserCheckerInterface;
 use Symfony\Component\Security\Core\User\UserInterface;
 use Symfony\Component\Security\Core\User\UserProviderInterface;
@@ -44,7 +45,7 @@ class GrpcAccessTokenAuthenticatorTest extends BaseTestCase
             tokenHandler: $tokenHandler,
             tokenStorage: $this->tokenStorage,
             userProvider: $userProvider,
-            userChecker: $userChecker,
+            userChecker: $userChecker ?? new InMemoryUserChecker(),
             metadataKey: 'authorization',
             tokenPrefix: $tokenPrefix,
             required: $required,

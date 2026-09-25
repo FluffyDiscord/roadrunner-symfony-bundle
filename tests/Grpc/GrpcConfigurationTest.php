@@ -37,6 +37,14 @@ class GrpcConfigurationTest extends BaseTestCase
         self::assertSame(['authorization', 'proxy-authorization', 'cookie'], $config['grpc']['profiler']['redacted_metadata_keys']);
     }
 
+    public function testAnEmptyFirewallNameIsRejectedByTheSchema(): void
+    {
+        $this->expectException(InvalidConfigurationException::class);
+        $this->expectExceptionMessageMatches('/cannot contain an empty value/');
+
+        $this->processConfiguration(['grpc' => ['security' => ['enabled' => true, 'token_handler' => 'app.token_handler', 'firewall_name' => '']]]);
+    }
+
     public function testSecurityEnabledWithoutTokenHandlerIsRejected(): void
     {
         $this->expectException(InvalidConfigurationException::class);
@@ -87,6 +95,31 @@ class GrpcConfigurationTest extends BaseTestCase
         self::assertSame('app.token_handler', $securityFactsDefinition->getArgument(1));
         $configReaderPath = $container->getDefinition(\FluffyDiscord\RoadRunnerBundle\Config\RoadRunnerYamlConfigReader::class)->getArgument(1);
         self::assertSame('temporal.rr.yaml', $configReaderPath);
+    }
+
+    public function testTheUserCheckerPassReadsTheArgumentsTheExtensionActuallyBuilt(): void
+    {
+        $container = $this->loadExtension(['grpc' => ['security' => ['enabled' => true, 'token_handler' => 'app.token_handler', 'firewall_name' => 'main']]]);
+        $container->setParameter('security.firewalls', ['main']);
+        $container->setAlias('security.user_checker.main', new \Symfony\Component\DependencyInjection\Alias('app.account_status_checker', false));
+
+        new \FluffyDiscord\RoadRunnerBundle\DependencyInjection\Compiler\GrpcUserCheckerPass()->process($container);
+
+        $checkerReference = $container->getDefinition(GrpcAccessTokenAuthenticator::class)->getArgument(3);
+        self::assertSame('security.user_checker.main', (string)$checkerReference);
+
+        $securityFactsDefinition = $container->getDefinition(\FluffyDiscord\RoadRunnerBundle\Grpc\Debug\GrpcIntrospector::class)->getArgument(2);
+        self::assertSame('security.user_checker.main', $securityFactsDefinition->getArgument(4));
+    }
+
+    public function testAFirewallNameMatchingNoFirewallFailsTheBuild(): void
+    {
+        $container = $this->loadExtension(['grpc' => ['security' => ['enabled' => true, 'token_handler' => 'app.token_handler']]]);
+
+        $this->expectException(InvalidConfigurationException::class);
+        $this->expectExceptionMessageMatches('/matches no security firewall/');
+
+        new \FluffyDiscord\RoadRunnerBundle\DependencyInjection\Compiler\GrpcUserCheckerPass()->process($container);
     }
 
     public function testSecurityEnabledWithoutTheSecurityExtensionFailsWithGuidance(): void

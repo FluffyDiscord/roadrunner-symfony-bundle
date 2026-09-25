@@ -91,6 +91,7 @@ class GrpcDebugCommand extends Command
             ['token_handler' => $facts->tokenHandlerId ?? '-'],
             ['metadata_key' => $facts->metadataKey ?? '-'],
             ['required' => $facts->required === true ? 'yes' : 'no'],
+            ['user_checker' => $facts->userCheckerId ?? '-'],
         );
     }
 

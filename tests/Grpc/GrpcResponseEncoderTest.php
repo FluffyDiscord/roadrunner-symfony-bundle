@@ -45,7 +45,7 @@ class GrpcResponseEncoderTest extends BaseTestCase
     {
         $exception = GRPCException::create('boom', StatusCode::INVALID_ARGUMENT);
 
-        $encoded = $this->encoder->encodeError($exception, new ResponseHeaders(['x-echo' => '1']), new ResponseTrailers());
+        $encoded = $this->encoder->encodeError($exception, 'boom', false, new ResponseHeaders(['x-echo' => '1']), new ResponseTrailers());
         $document = json_decode($encoded, true);
 
         self::assertIsArray($document);
@@ -54,6 +54,36 @@ class GrpcResponseEncoderTest extends BaseTestCase
         $status->mergeFromString(base64_decode((string) $document['error']));
         self::assertSame(StatusCode::INVALID_ARGUMENT, $status->getCode());
         self::assertSame('boom', $status->getMessage());
+    }
+
+    public function testAMaskedErrorDropsTheDetails(): void
+    {
+        $detail = new Status(['code' => StatusCode::INTERNAL, 'message' => 'App\Handler::Greet() got null']);
+        $exception = GRPCException::create('App\Handler::Greet() must return Reply, got null', StatusCode::INTERNAL, null, [$detail]);
+
+        $encoded = $this->encoder->encodeError($exception, 'Internal server error', true, new ResponseHeaders(), new ResponseTrailers());
+        $document = json_decode($encoded, true);
+
+        self::assertIsArray($document);
+        $status = new Status();
+        $status->mergeFromString(base64_decode((string) $document['error']));
+        self::assertSame(StatusCode::INTERNAL, $status->getCode());
+        self::assertSame('Internal server error', $status->getMessage());
+        self::assertCount(0, $status->getDetails());
+    }
+
+    public function testAnUnmaskedErrorKeepsTheDetails(): void
+    {
+        $detail = new Status(['code' => StatusCode::INVALID_ARGUMENT, 'message' => 'name is required']);
+        $exception = GRPCException::create('boom', StatusCode::INVALID_ARGUMENT, null, [$detail]);
+
+        $encoded = $this->encoder->encodeError($exception, 'boom', false, new ResponseHeaders(), new ResponseTrailers());
+        $document = json_decode($encoded, true);
+
+        self::assertIsArray($document);
+        $status = new Status();
+        $status->mergeFromString(base64_decode((string) $document['error']));
+        self::assertCount(1, $status->getDetails());
     }
 
     public function testEncodeStatusBuildsUnavailableError(): void

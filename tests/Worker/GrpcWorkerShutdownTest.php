@@ -26,8 +26,28 @@ class GrpcWorkerShutdownTest extends AbstractGrpcWorkerTestCase
 
         self::assertCount(1, $errors);
         self::assertStringContainsString('Worker terminated during gRPC call bundle.test.Echo/Ping', $errors[0]);
-        self::assertStringContainsString('Allowed memory size', $errors[0]);
+        self::assertStringNotContainsString('Allowed memory size', $errors[0]);
         self::assertStringContainsString('fatal: Allowed memory size', implode("\n", $worker->loggedErrors));
+    }
+
+    public function testShutdownInDebugSendsTheFatalReasonToTheClient(): void
+    {
+        $worker = $this->makeWorker([$this->makeFramePayload('bundle.test.Echo', 'Ping')], debug: true);
+        $this->rrWorker->method('respond')->willReturnCallback(function () use ($worker): void {
+            $worker->callHandleShutdown(['message' => 'Allowed memory size of 1 bytes exhausted', 'file' => 'x.php', 'line' => 1]);
+            throw new \RuntimeException('simulated death mid-respond');
+        });
+
+        $errors = [];
+        $this->rrWorker->method('error')->willReturnCallback(static function (string $message) use (&$errors): void {
+            $errors[] = $message;
+        });
+
+        $worker->start();
+
+        self::assertCount(1, $errors);
+        self::assertStringContainsString('Worker terminated during gRPC call bundle.test.Echo/Ping', $errors[0]);
+        self::assertStringContainsString('Allowed memory size', $errors[0]);
     }
 
     public function testShutdownAfterARespondedFrameIsANoOp(): void

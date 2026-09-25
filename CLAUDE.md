@@ -62,7 +62,7 @@ Operational details in `TESTING.md`.
 - Never silence a violation with `@typephp-ignore` on a `src/` method — that drops all runtime
   checks there. Fix the docblock if it is wrong, or the test if the contract is right.
 - Enforcement is host + `docker-test-symfony.sh` only. `docker-bench.sh` and the path-repo live
-  scripts never install it; `docker-validate-all.sh` — the one run with zero skips — sets
+  scripts never install it; `docker-validate-all.sh` — the broadest run (3 net skips: the two `RR_GRPC_LIVE_FULL` gRPC-live cases and the TypePHP enforcement test) — sets
   `TYPEPHP_DISABLE=1`, so the exhaustive suite is unenforced. PHPStan is unaffected.
 
 ## Layout

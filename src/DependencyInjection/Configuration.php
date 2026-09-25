@@ -331,8 +331,13 @@ class Configuration implements ConfigurationInterface
                                     ->defaultTrue()
                                 ->end()
                                 ->scalarNode('firewall_name')
-                                    ->info($this->toInfo(['Firewall name stored on the token (a label: shown in the Security profiler panel).']))
+                                    ->info($this->toInfo([
+                                        'Firewall name stored on the token (shown in the Security profiler panel).',
+                                        'Must name a configured security firewall: its user_checker is reused for',
+                                        'gRPC calls. A name matching no firewall fails the container build.',
+                                    ]))
                                     ->defaultValue('grpc')
+                                    ->cannotBeEmpty()
                                 ->end()
                                 ->scalarNode('user_provider')
                                     ->info($this->toInfo([

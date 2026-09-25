@@ -4,6 +4,8 @@ namespace FluffyDiscord\RoadRunnerBundle;
 
 use FluffyDiscord\RoadRunnerBundle\DependencyInjection\Compiler\CentrifugoRouterPass;
 use FluffyDiscord\RoadRunnerBundle\DependencyInjection\Compiler\GrpcServicePass;
+use FluffyDiscord\RoadRunnerBundle\DependencyInjection\Compiler\GrpcUserCheckerPass;
+use FluffyDiscord\RoadRunnerBundle\DependencyInjection\Compiler\JobRoutingListenerPass;
 use FluffyDiscord\RoadRunnerBundle\DependencyInjection\Compiler\DumpDestinationPass;
 use FluffyDiscord\RoadRunnerBundle\DependencyInjection\Compiler\RequestFactoryPass;
 use FluffyDiscord\RoadRunnerBundle\DependencyInjection\Compiler\TemporalWorkerPass;
@@ -22,6 +24,7 @@ final class FluffyDiscordRoadRunnerBundle extends Bundle
         parent::build($container);
 
         $container->addCompilerPass(new RequestFactoryPass(), PassConfig::TYPE_BEFORE_OPTIMIZATION);
+        $container->addCompilerPass(new JobRoutingListenerPass(), PassConfig::TYPE_BEFORE_OPTIMIZATION);
 
         if (class_exists(RoadRunnerCentrifugoWorker::class)) {
             $container->addCompilerPass(new CentrifugoRouterPass(), PassConfig::TYPE_BEFORE_REMOVING);
@@ -37,6 +40,7 @@ final class FluffyDiscordRoadRunnerBundle extends Bundle
 
         if (interface_exists(GrpcServiceInterface::class)) {
             $container->addCompilerPass(new GrpcServicePass(), PassConfig::TYPE_BEFORE_OPTIMIZATION);
+            $container->addCompilerPass(new GrpcUserCheckerPass(), PassConfig::TYPE_BEFORE_OPTIMIZATION);
         }
     }
 

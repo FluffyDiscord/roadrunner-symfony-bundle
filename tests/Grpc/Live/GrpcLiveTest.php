@@ -158,6 +158,12 @@ class GrpcLiveTest extends BaseTestCase
         [$pingExit, $pingOutput] = $this->grpcurl('bundle.test.Echo/Ping', '{"message":"authed"}', ['-H', 'authorization: Bearer live-token']);
         self::assertSame(0, $pingExit, $pingOutput);
 
+        [$bannedExit, $bannedOutput] = $this->grpcurl('bundle.test.Echo/WhoAmI', '{}', ['-H', 'authorization: Bearer banned-token']);
+        self::assertNotSame(0, $bannedExit, 'the firewall UserCheckerInterface must reject a disabled account over gRPC');
+        self::assertStringContainsString('Unauthenticated', $bannedOutput);
+        self::assertStringContainsString('Invalid credentials', $bannedOutput);
+        self::assertStringNotContainsString('"user": "banned"', $bannedOutput);
+
         if (getenv('RR_GRPC_LIVE_FULL') !== '1') {
             return;
         }

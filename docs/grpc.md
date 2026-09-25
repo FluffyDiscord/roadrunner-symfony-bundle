@@ -104,7 +104,9 @@ throw GRPCException::create('unknown greeting id', StatusCode::NOT_FOUND);
 Any other exception is logged to STDERR, reported to Sentry (when installed), and the
 client receives a non-OK status — the worker keeps serving. With `APP_DEBUG=1` the
 client receives the full stack trace (like the HTML debug error page); remember that
-gRPC clients are usually other services. A kernel boot failure answers calls with
+gRPC clients are usually other services. Statuses you throw deliberately keep their
+message in production, but anything coded `INTERNAL` is treated as a server-side defect
+and reaches the client as `Internal server error` — the real message stays in the log. A kernel boot failure answers calls with
 `UNAVAILABLE` while RoadRunner respawns the worker and boot is retried.
 
 ## 7. Events
@@ -131,6 +133,7 @@ fluffy_discord_road_runner:
         security:
             enabled: true
             token_handler: App\Security\ApiTokenHandler   # your AccessTokenHandlerInterface
+            firewall_name: main   # required: the firewall whose user_checker applies
             # metadata_key: authorization
             # token_prefix: 'Bearer '
             # required: true      # false: calls without the key run anonymously
@@ -140,7 +143,21 @@ fluffy_discord_road_runner:
 
 The bearer token from call metadata goes through the same `AccessTokenHandlerInterface`
 contract the `access_token` firewall authenticator uses; the resolved user (checked by
-your `UserCheckerInterface`) lands in the token storage for the duration of the call:
+your `UserCheckerInterface`) lands in the token storage for the duration of the call.
+
+`firewall_name` must name a configured security firewall: the bundle resolves
+`security.user_checker.<firewall_name>` at compile time and reuses that firewall's
+`user_checker`, so gRPC gets the same account-status checks that firewall gets over HTTP.
+A name matching no firewall **fails the container build** rather than falling back to the
+global `security.user_checker`, which is a no-op for every non-`InMemoryUser` user and
+would let disabled and locked accounts authenticate. Two caveats: a firewall declared with
+`security: false` does not qualify, and pointing at a firewall that declares no
+`user_checker` of its own resolves back to that same global no-op — parity with the
+firewall is what is guaranteed, not enforcement. It also stamps the firewall name on the
+`PostAuthenticationToken`. A firewall dedicated to gRPC needs a never-matching `pattern`
+(a pattern-less firewall matches everything and the map takes the first match, so an
+unpatterned `grpc` firewall declared first would swallow all HTTP traffic).
+`bin/console grpc:debug` prints the resolved service id:
 
 ```php
 #[IsGranted('ROLE_API')]                  // PERMISSION_DENIED when denied,

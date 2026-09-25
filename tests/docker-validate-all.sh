@@ -426,11 +426,39 @@ class LiveTokenHandler implements AccessTokenHandlerInterface
 {
     public function getUserBadgeFrom(string $accessToken): UserBadge
     {
+        if ($accessToken === 'banned-token') {
+            return new UserBadge('banned');
+        }
+
         if ($accessToken !== 'live-token') {
             throw new BadCredentialsException('secret internal reason the client must never see');
         }
 
         return new UserBadge('alice');
+    }
+}
+PHP
+
+cat > "$CTX/app/app-src/LiveUserChecker.php" <<'PHP'
+<?php
+namespace App;
+
+use Symfony\Component\Security\Core\Authentication\Token\TokenInterface;
+use Symfony\Component\Security\Core\Exception\DisabledException;
+use Symfony\Component\Security\Core\User\UserCheckerInterface;
+use Symfony\Component\Security\Core\User\UserInterface;
+
+class LiveUserChecker implements UserCheckerInterface
+{
+    public function checkPreAuth(UserInterface $user): void
+    {
+        if ($user->getUserIdentifier() === 'banned') {
+            throw new DisabledException();
+        }
+    }
+
+    public function checkPostAuth(UserInterface $user, ?TokenInterface $token = null): void
+    {
     }
 }
 PHP
@@ -480,19 +508,26 @@ class Kernel extends BaseKernel
 
     protected function configureContainer(ContainerConfigurator $c): void
     {
+        // symfony/messenger is a require-dev of the bundle whose composer.json this harness reuses, so
+        // FrameworkBundle's enableIfStandalone() leaves messenger off; the #[AsMessageHandler] jobs
+        // path under test needs it on.
         $c->extension('framework', [
             'secret' => 'validation-secret', 'test' => false,
             'http_method_override' => false, 'handle_all_throwables' => true,
             'php_errors' => ['log' => true],
+            'messenger' => ['enabled' => true],
         ]);
 
         $c->extension('security', [
             'providers' => [
                 'app_users' => [
-                    'memory' => ['users' => ['alice' => ['password' => null, 'roles' => ['ROLE_USER']]]],
+                    'memory' => ['users' => ['alice' => ['password' => null, 'roles' => ['ROLE_USER']], 'banned' => ['password' => null, 'roles' => ['ROLE_USER']]]],
                 ],
             ],
-            'firewalls' => ['dummy' => ['security' => false]],
+            'firewalls' => [
+                'dummy' => ['security' => false],
+                'grpc' => ['stateless' => true, 'provider' => 'app_users', 'user_checker' => \App\LiveUserChecker::class, 'pattern' => '^/never-matches-grpc$'],
+            ],
         ]);
 
         $c->extension('fluffy_discord_road_runner', [

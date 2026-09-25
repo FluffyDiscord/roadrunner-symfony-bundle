@@ -25,7 +25,7 @@ class GrpcAccessTokenAuthenticator implements GrpcCallAuthenticatorInterface
         private readonly AccessTokenHandlerInterface $tokenHandler,
         private readonly TokenStorageInterface       $tokenStorage,
         private readonly ?UserProviderInterface      $userProvider,
-        private readonly ?UserCheckerInterface       $userChecker,
+        private readonly UserCheckerInterface        $userChecker,
         private readonly string                      $metadataKey,
         private readonly string                      $tokenPrefix,
         private readonly bool                        $required,
@@ -116,9 +116,9 @@ class GrpcAccessTokenAuthenticator implements GrpcCallAuthenticatorInterface
     private function buildToken(UserInterface $user): PostAuthenticationToken
     {
         try {
-            $this->userChecker?->checkPreAuth($user);
+            $this->userChecker->checkPreAuth($user);
             $token = new PostAuthenticationToken($user, $this->firewallName, $user->getRoles());
-            $this->userChecker?->checkPostAuth($user, $token);
+            $this->userChecker->checkPostAuth($user, $token);
         } catch (AuthenticationException $accountStatusException) {
             throw UnauthenticatedException::create('Invalid credentials', StatusCode::UNAUTHENTICATED, $accountStatusException);
         }
