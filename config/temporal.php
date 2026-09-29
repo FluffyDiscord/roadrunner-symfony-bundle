@@ -18,7 +18,7 @@ use FluffyDiscord\RoadRunnerBundle\Temporal\Logging\TemporalLogProcessor;
 use FluffyDiscord\RoadRunnerBundle\Temporal\TemporalCredentialsFactory;
 use FluffyDiscord\RoadRunnerBundle\Temporal\TemporalWorkerInitializer;
 use FluffyDiscord\RoadRunnerBundle\Temporal\TemporalWorkerRegistry;
-use FluffyDiscord\RoadRunnerBundle\Temporal\Transport\WorkflowContextClearingHostConnection;
+use FluffyDiscord\RoadRunnerBundle\Temporal\Transport\BatchIsolatingHostConnection;
 use FluffyDiscord\RoadRunnerBundle\Worker\TemporalWorker;
 use FluffyDiscord\RoadRunnerBundle\Worker\WorkerRegistry;
 use Monolog\Processor\ProcessorInterface;
@@ -163,9 +163,15 @@ return static function (ContainerConfigurator $container): void {
     $services->alias(HostConnectionInterface::class, TemporalRoadRunner::class);
 
     $services
-        ->set(WorkflowContextClearingHostConnection::class)
+        ->set(BatchIsolatingHostConnection::class)
         ->decorate(HostConnectionInterface::class)
-        ->args([service('.inner')])
+        ->args([
+            service('.inner'),
+            service(EnvironmentInterface::class),
+            service('services_resetter'),
+            service('monolog.logger.temporal')->nullOnInvalid(),
+            service(SentryHubInterface::class)->nullOnInvalid(),
+        ])
     ;
 
     $services

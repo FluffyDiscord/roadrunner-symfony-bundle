@@ -63,15 +63,15 @@ class HttpWorkerExceptionTest extends AbstractHttpWorkerTestCase
         $this->makeWorker(debug: true)->start();
     }
 
-    public function testErrorCallsWorkerStop(): void
+    public function testErrorAnswersTheNextRequestWithStopInsteadOfHandlingIt(): void
     {
         $this->spiralHttpWorker
             ->method('waitRequest')
-            ->willReturnOnConsecutiveCalls($this->rrRequest(), null)
+            ->willReturnOnConsecutiveCalls($this->rrRequest(), $this->rrRequest(), null)
         ;
-        $this->kernel->method('handle')->willThrowException(new \Error('fatal'));
+        $this->kernel->expects($this->once())->method('handle')->willThrowException(new \Error('fatal'));
 
-        $this->rrWorker->expects($this->atLeastOnce())->method('stop');
+        $this->rrWorker->expects($this->once())->method('stop');
 
         $this->makeWorker()->start();
     }

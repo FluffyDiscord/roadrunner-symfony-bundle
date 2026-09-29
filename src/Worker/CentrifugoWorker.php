@@ -70,6 +70,7 @@ class CentrifugoWorker implements WorkerInterface
         $handlingRequest = false;
         $responded = false;
         $currentRequest = null;
+        $isStopRequested = false;
 
         if (!$this->shutdownRegistered) {
             $this->shutdownRegistered = true;
@@ -79,6 +80,11 @@ class CentrifugoWorker implements WorkerInterface
         }
 
         while ($request = $this->waitRequest()) {
+            if ($isStopRequested) {
+                $this->worker->getWorker()->stop();
+                break;
+            }
+
             $event = null;
             $hadException = false;
             $handlingRequest = true;
@@ -130,7 +136,7 @@ class CentrifugoWorker implements WorkerInterface
                 $this->logError((string)$throwable);
 
                 if ($throwable instanceof \Error) {
-                    $this->worker->getWorker()->stop();
+                    $isStopRequested = true;
                     continue;
                 }
             } finally {
@@ -140,13 +146,13 @@ class CentrifugoWorker implements WorkerInterface
                     }
                 } catch (\Throwable $cleanupThrowable) {
                     $this->logError("Fatal worker cleanup error: " . $cleanupThrowable);
-                    $this->worker->getWorker()->stop();
+                    $isStopRequested = true;
                 } finally {
                     try {
                         $this->servicesResetter?->reset();
                     } catch (\Throwable $throwable) {
                         $this->logError((string)$throwable);
-                        $this->worker->getWorker()->stop();
+                        $isStopRequested = true;
                     }
                 }
 

@@ -10,7 +10,7 @@ use FluffyDiscord\RoadRunnerBundle\Tests\Temporal\Fixtures\GreetingActivity;
 use FluffyDiscord\RoadRunnerBundle\Tests\Temporal\Fixtures\GreetingWorkflow;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
-use Symfony\Component\HttpKernel\DependencyInjection\ServicesResetterInterface;
+use FluffyDiscord\RoadRunnerBundle\Temporal\Transport\BatchIsolatingHostConnection;
 use Symfony\Component\HttpKernel\KernelInterface;
 use Temporal\Client\WorkflowOptions;
 use Temporal\DataConverter\EncodedValues;
@@ -30,7 +30,7 @@ class TemporalCollectorTest extends BaseTestCase
     {
         $initializer = new TemporalWorkerInitializer(
             $this->createStub(KernelInterface::class),
-            $this->createStub(ServicesResetterInterface::class),
+            $this->createStub(BatchIsolatingHostConnection::class),
             new ExceptionInterceptor([\Error::class]),
             new SimplePipelineProvider([]),
             ['default' => ['maxConcurrentActivityExecutionSize' => 4]],

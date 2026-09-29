@@ -12,12 +12,12 @@ class HttpWorkerOutOfMemoryTest extends AbstractHttpWorkerTestCase
         $oom = self::makeOutOfMemoryError();
 
         $this->spiralHttpWorker->method('waitRequest')
-            ->willReturnOnConsecutiveCalls($this->rrRequest(), null);
+            ->willReturnOnConsecutiveCalls($this->rrRequest(), $this->rrRequest(), null);
 
-        $this->kernel->method('handle')
+        $this->kernel->expects($this->once())->method('handle')
             ->willReturnCallback(static function () use ($oom): void { throw $oom; });
 
-        $this->rrWorker->expects($this->atLeastOnce())->method('stop');
+        $this->rrWorker->expects($this->once())->method('stop');
 
         $this->makeWorker()->start();
     }
@@ -28,15 +28,15 @@ class HttpWorkerOutOfMemoryTest extends AbstractHttpWorkerTestCase
         $secondOom = self::makeOutOfMemoryError();
 
         $this->spiralHttpWorker->method('waitRequest')
-            ->willReturnOnConsecutiveCalls($this->rrRequest(), null);
+            ->willReturnOnConsecutiveCalls($this->rrRequest(), $this->rrRequest(), null);
 
-        $this->kernel->method('handle')
+        $this->kernel->expects($this->once())->method('handle')
             ->willReturnCallback(static function () use ($firstOom): void { throw $firstOom; });
 
         $this->servicesResetter->method('reset')
             ->willReturnCallback(static function () use ($secondOom): void { throw $secondOom; });
 
-        $this->rrWorker->expects($this->atLeastOnce())->method('stop');
+        $this->rrWorker->expects($this->once())->method('stop');
 
         $this->makeWorker()->start();
     }

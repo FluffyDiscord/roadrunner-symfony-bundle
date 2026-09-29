@@ -9,7 +9,7 @@ use FluffyDiscord\RoadRunnerBundle\Temporal\TemporalWorkerInitializer;
 use FluffyDiscord\RoadRunnerBundle\Tests\BaseTestCase;
 use PHPUnit\Framework\Attributes\AllowMockObjectsWithoutExpectations;
 use Spiral\RoadRunner\EnvironmentInterface;
-use Symfony\Component\HttpKernel\DependencyInjection\ServicesResetterInterface;
+use FluffyDiscord\RoadRunnerBundle\Temporal\Transport\BatchIsolatingHostConnection;
 use Symfony\Component\HttpKernel\KernelInterface;
 use Temporal\DataConverter\DataConverter;
 use Temporal\Exception\ExceptionInterceptor;
@@ -96,7 +96,7 @@ class FactoriesTest extends BaseTestCase
 
         $initializer = new TemporalWorkerInitializer(
             $this->createStub(KernelInterface::class),
-            $this->createStub(ServicesResetterInterface::class),
+            $this->createStub(BatchIsolatingHostConnection::class),
             new ExceptionInterceptor([\Error::class]),
             new SimplePipelineProvider([]),
             [WorkerFactoryInterface::DEFAULT_TASK_QUEUE => $durations],

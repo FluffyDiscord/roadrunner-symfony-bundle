@@ -268,6 +268,82 @@ class ActivityMarkerListener
 }
 PHP
 
+cat > "$CTX/app/src/CrashingActivity.php" <<'PHP'
+<?php
+namespace App;
+
+use FluffyDiscord\RoadRunnerBundle\Temporal\Attribute\TaskQueue;
+use FluffyDiscord\RoadRunnerBundle\Tests\Temporal\Live\Workflow\CrashingActivityInterface;
+
+#[TaskQueue('default')]
+class CrashingActivity implements CrashingActivityInterface
+{
+    public function crash(): string
+    {
+        $marker = getenv('TEMPORAL_CRASH_MARKER') ?: '/app/crash-marker';
+        @file_put_contents($marker, getmypid() . "\n", FILE_APPEND);
+
+        throw new \Error('corrupted activity state');
+    }
+}
+PHP
+
+cat > "$CTX/app/src/CrashingWorkflow.php" <<'PHP'
+<?php
+namespace App;
+
+use FluffyDiscord\RoadRunnerBundle\Temporal\Attribute\TaskQueue;
+use FluffyDiscord\RoadRunnerBundle\Tests\Temporal\Live\Workflow\CrashingActivityInterface;
+use FluffyDiscord\RoadRunnerBundle\Tests\Temporal\Live\Workflow\CrashingWorkflowInterface;
+use Temporal\Activity\ActivityOptions;
+use Temporal\Common\RetryOptions;
+use Temporal\Workflow;
+
+#[TaskQueue('default')]
+class CrashingWorkflow implements CrashingWorkflowInterface
+{
+    public function run(): \Generator
+    {
+        $activity = Workflow::newActivityStub(
+            CrashingActivityInterface::class,
+            ActivityOptions::new()
+                ->withStartToCloseTimeout(10)
+                ->withRetryOptions(RetryOptions::new()->withMaximumAttempts(1)),
+        );
+
+        return yield $activity->crash();
+    }
+}
+PHP
+
+cat > "$CTX/app/src/WorkflowStateProbe.php" <<'PHP'
+<?php
+namespace App;
+
+use FluffyDiscord\RoadRunnerBundle\Temporal\Interceptor\Event\WorkflowOutboundCalls\ExecuteActivityEvent;
+use Symfony\Component\EventDispatcher\Attribute\AsEventListener;
+use Symfony\Contracts\Service\ResetInterface;
+
+class WorkflowStateProbe implements ResetInterface
+{
+    private int $activityCalls = 0;
+
+    #[AsEventListener(event: ExecuteActivityEvent::class)]
+    public function onExecuteActivity(ExecuteActivityEvent $event): void
+    {
+        ++$this->activityCalls;
+
+        $marker = getenv('TEMPORAL_WORKFLOW_STATE_MARKER') ?: '/app/workflow-state-marker';
+        @file_put_contents($marker, $this->activityCalls . "\n", FILE_APPEND);
+    }
+
+    public function reset(): void
+    {
+        $this->activityCalls = 0;
+    }
+}
+PHP
+
 cat > "$CTX/app/src/ReplayActivity.php" <<'PHP'
 <?php
 namespace App;
@@ -440,6 +516,8 @@ server:
         TEMPORAL_INTERCEPTOR_MARKER: "/app/interceptor-marker"
         TEMPORAL_APP_INTERCEPTOR_MARKER: "/app/app-interceptor-marker"
         TEMPORAL_REPLAY_MARKER: "/app/replay-marker"
+        TEMPORAL_WORKFLOW_STATE_MARKER: "/app/workflow-state-marker"
+        TEMPORAL_CRASH_MARKER: "/app/crash-marker"
 temporal:
     address: "127.0.0.1:7233"
     activities:
@@ -462,6 +540,8 @@ export TEMPORAL_INTERCEPTOR_MARKER="/app/interceptor-marker"
 export TEMPORAL_APP_INTERCEPTOR_MARKER="/app/app-interceptor-marker"
 export TEMPORAL_CHANNEL_LOG="/app/temporal-channel.log"
 export TEMPORAL_REPLAY_MARKER="/app/replay-marker"
+export TEMPORAL_WORKFLOW_STATE_MARKER="/app/workflow-state-marker"
+export TEMPORAL_CRASH_MARKER="/app/crash-marker"
 export TEMPORAL_RR_BINARY="/app/rr"
 export TEMPORAL_RR_CONFIG="/app/.rr.yaml"
 export TEMPORAL_APP_KERNEL_CLASS='App\Kernel'

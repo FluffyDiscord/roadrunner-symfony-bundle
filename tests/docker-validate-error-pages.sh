@@ -105,6 +105,7 @@ use FluffyDiscord\RoadRunnerBundle\Kernel\RoadRunnerMicroKernelTrait;
 use Symfony\Bundle\FrameworkBundle\FrameworkBundle;
 use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigurator;
 use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\HttpKernel\Event\TerminateEvent;
 use Symfony\Component\HttpKernel\Kernel as BaseKernel;
 use Symfony\Component\Routing\Loader\Configurator\RoutingConfigurator;
 
@@ -114,6 +115,16 @@ class BootFailureListener
     {
         if (getenv('BOOT_FAIL') === 'listener') {
             throw new \RuntimeException('boot listener exploded: missing service configuration');
+        }
+    }
+}
+
+class PoisonCleanupListener
+{
+    public function __invoke(TerminateEvent $event): void
+    {
+        if ($event->getRequest()->getPathInfo() === '/poison-cleanup') {
+            throw new \RuntimeException('cleanup exploded: worker state is suspect');
         }
     }
 }
@@ -137,6 +148,15 @@ class Kernel extends BaseKernel
     }
 
     public function ok(): Response { return new Response('OK from worker pid=' . getmypid()); }
+    public function poisonCleanup(): Response { return new Response('poisoned pid=' . getmypid()); }
+
+    public function count(): Response
+    {
+        @file_put_contents('/tmp/count-marker', getmypid() . "\n", FILE_APPEND);
+
+        return new Response('counted pid=' . getmypid());
+    }
+
     public function boom(): Response { throw new \RuntimeException('boom: catchable exception from controller'); }
     public function exitAction(): Response { exit; }                                  // Bucket B: bare exit
     public function dieAction(): Response { die('DUMPED OUTPUT THAT POLLUTES STDOUT'); } // Bucket B: die w/ output
@@ -165,6 +185,10 @@ class Kernel extends BaseKernel
             ->set(BootFailureListener::class)
             ->tag('kernel.event_listener', ['event' => WorkerBootingEvent::class, 'method' => '__invoke'])
         ;
+        $c->services()
+            ->set(PoisonCleanupListener::class)
+            ->tag('kernel.event_listener', ['event' => TerminateEvent::class, 'method' => '__invoke'])
+        ;
     }
 
     protected function configureRoutes(RoutingConfigurator $r): void
@@ -175,6 +199,8 @@ class Kernel extends BaseKernel
         $r->add('die', '/die')->controller([self::class, 'dieAction']);
         $r->add('deprecated_die', '/deprecated-die')->controller([self::class, 'deprecatedDieAction']);
         $r->add('dd', '/dd')->controller([self::class, 'ddAction']);
+        $r->add('poison_cleanup', '/poison-cleanup')->controller([self::class, 'poisonCleanup']);
+        $r->add('count', '/count')->controller([self::class, 'count']);
     }
 }
 PHP
@@ -200,7 +226,9 @@ assert() { # $1=label $2=haystack $3=needle
 assert_absent() { # $1=label $2=haystack $3=needle
   if grep -qF -- "$3" <<< "$2"; then echo "  FAIL: $1 (present: $3)"; FAIL=1; else echo "  PASS: $1"; fi
 }
-gen_yaml() { # $1=debug(0|1) $2=env $3=BOOT_FAIL mode (none|listener|kernel)
+gen_yaml() { # $1=debug(0|1) $2=env $3=BOOT_FAIL mode (none|listener|kernel) $4=pool (debug|single)
+  local pool_options="debug: true"
+  [ "${4:-debug}" = "single" ] && pool_options="num_workers: 1"
   cat > /app/.rr.yaml <<YAML
 version: "3"
 server:
@@ -215,7 +243,7 @@ server:
 http:
     address: "127.0.0.1:8080"
     pool:
-        debug: true
+        ${pool_options}
 rpc:
     listen: "tcp://127.0.0.1:6001"
 logs:
@@ -250,6 +278,20 @@ echo "### PROD mode (APP_DEBUG=0) ###"
 gen_yaml 0 prod; RR=$(run_rr); wait_ready
 code=$(get exit); body=$(cat /tmp/b); echo "/exit -> $code (${#body} body bytes)"; assert "prod exit is HTTP 500" "$code" "500"
 if [ -z "$body" ]; then echo "  PASS: prod exit body is empty (no info disclosure)"; else echo "  FAIL: prod exit leaked a body"; FAIL=1; fi
+kill "$RR" 2>/dev/null; wait "$RR" 2>/dev/null || true
+
+echo "### RECYCLE — the request after a failed cleanup runs once, on a fresh worker ###"
+gen_yaml 0 prod none single; RR=$(run_rr); wait_ready
+rm -f /tmp/count-marker
+code=$(get poison-cleanup); poisoned_body=$(cat /tmp/b); echo "/poison-cleanup -> $code ($poisoned_body)"
+assert "poisoned request itself is answered" "$code" "200"
+code=$(get count); counted_body=$(cat /tmp/b); echo "/count -> $code ($counted_body)"
+assert "next request is answered" "$code" "200"
+sleep 2
+count_runs=$(wc -l < /tmp/count-marker)
+[ "$count_runs" -eq 1 ] && echo "  PASS: next request ran exactly once" || { echo "  FAIL: next request ran $count_runs times"; FAIL=1; }
+poisoned_pid=${poisoned_body#poisoned pid=}; counted_pid=${counted_body#counted pid=}
+[ "$poisoned_pid" != "$counted_pid" ] && echo "  PASS: next request ran on a fresh worker" || { echo "  FAIL: next request reused the poisoned worker $poisoned_pid"; FAIL=1; }
 kill "$RR" 2>/dev/null; wait "$RR" 2>/dev/null || true
 
 echo "### BOOT FAILURE — Bucket D ###"

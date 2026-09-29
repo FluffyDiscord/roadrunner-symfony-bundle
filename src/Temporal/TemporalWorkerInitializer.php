@@ -4,8 +4,8 @@ namespace FluffyDiscord\RoadRunnerBundle\Temporal;
 
 use Psr\Log\LoggerInterface;
 use Sentry\State\HubInterface as SentryHubInterface;
+use FluffyDiscord\RoadRunnerBundle\Temporal\Transport\BatchIsolatingHostConnection;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
-use Symfony\Component\DependencyInjection\ServicesResetterInterface;
 use Symfony\Component\HttpKernel\KernelInterface;
 use Temporal\Activity;
 use Temporal\Activity\ActivityInfo;
@@ -37,8 +37,8 @@ class TemporalWorkerInitializer
     public function __construct(
         private readonly KernelInterface               $kernel,
 
-        #[Autowire(service: 'services_resetter')]
-        private readonly ServicesResetterInterface     $servicesResetter,
+        #[Autowire(lazy: true)]
+        private readonly BatchIsolatingHostConnection  $batchIsolatingHostConnection,
 
         private readonly ExceptionInterceptorInterface $exceptionInterceptor,
         private readonly PipelineProvider              $pipelineProvider,
@@ -160,7 +160,11 @@ class TemporalWorkerInitializer
         try {
             $this->reportActivityFailure($failure);
         } finally {
-            $this->servicesResetter->reset();
+            if ($failure instanceof \Error) {
+                $this->batchIsolatingHostConnection->recycleAfterBatch();
+            }
+
+            $this->batchIsolatingHostConnection->resetServices();
         }
     }
 

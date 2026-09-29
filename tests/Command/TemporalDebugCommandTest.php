@@ -10,7 +10,7 @@ use FluffyDiscord\RoadRunnerBundle\Tests\Temporal\Fixtures\GreetingActivity;
 use FluffyDiscord\RoadRunnerBundle\Tests\Temporal\Fixtures\StubGoodWorkflow;
 use Symfony\Component\Console\Application;
 use Symfony\Component\Console\Tester\CommandTester;
-use Symfony\Component\HttpKernel\DependencyInjection\ServicesResetterInterface;
+use FluffyDiscord\RoadRunnerBundle\Temporal\Transport\BatchIsolatingHostConnection;
 use Symfony\Component\HttpKernel\KernelInterface;
 use Temporal\Exception\ExceptionInterceptor;
 use Temporal\Interceptor\SimplePipelineProvider;
@@ -21,7 +21,7 @@ class TemporalDebugCommandTest extends BaseTestCase
     {
         $initializer = new TemporalWorkerInitializer(
             $this->createStub(KernelInterface::class),
-            $this->createStub(ServicesResetterInterface::class),
+            $this->createStub(BatchIsolatingHostConnection::class),
             new ExceptionInterceptor([\Error::class]),
             new SimplePipelineProvider([]),
             ['billing' => ['maxConcurrentActivityExecutionSize' => 4]],

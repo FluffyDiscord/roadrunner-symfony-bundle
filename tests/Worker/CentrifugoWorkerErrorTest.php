@@ -110,14 +110,16 @@ class CentrifugoWorkerErrorTest extends AbstractCentrifugoWorkerTestCase
             static fn(object $event): object => $event instanceof InvalidEvent ? throw new \Error('boom hard') : $event,
         );
 
-        $this->goridgeWorker->expects($this->atLeastOnce())->method('stop');
+        $this->goridgeWorker->expects($this->once())->method('stop');
         $this->goridgeWorker->expects($this->never())->method('error'); // one frame: STDERR, not a goridge error()
 
-        $worker = $this->makeWorker(debug: true, requests: [$this->makeInvalid()]);
+        $worker = $this->makeWorker(debug: true, requests: [$this->makeInvalid(), $this->makeInvalid()]);
         $worker->start();
 
-        $this->assertNotEmpty(
+        $this->assertCount(
+            1,
             array_filter($worker->loggedErrors, static fn(string $m): bool => str_contains($m, 'boom hard')),
+            'the request after the hard error must be handed back, not handled',
         );
     }
 

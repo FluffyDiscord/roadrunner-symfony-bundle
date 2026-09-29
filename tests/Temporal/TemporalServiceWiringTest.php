@@ -5,7 +5,7 @@ namespace FluffyDiscord\RoadRunnerBundle\Tests\Temporal;
 use FluffyDiscord\RoadRunnerBundle\Temporal\Interceptor\WorkflowInboundCallsInterceptor;
 use FluffyDiscord\RoadRunnerBundle\Temporal\Interceptor\WorkflowOutboundCallsInterceptor;
 use FluffyDiscord\RoadRunnerBundle\Temporal\Logging\TemporalLogProcessor;
-use FluffyDiscord\RoadRunnerBundle\Temporal\Transport\WorkflowContextClearingHostConnection;
+use FluffyDiscord\RoadRunnerBundle\Temporal\Transport\BatchIsolatingHostConnection;
 use FluffyDiscord\RoadRunnerBundle\Tests\BaseTestCase;
 use FluffyDiscord\RoadRunnerBundle\Worker\TemporalWorker;
 use FluffyDiscord\RoadRunnerBundle\Worker\WorkerRegistry;
@@ -81,11 +81,11 @@ class TemporalServiceWiringTest extends BaseTestCase
         self::assertSame([[]], $processorTags);
     }
 
-    public function testHostConnectionClearsTheWorkflowContextAfterEachTick(): void
+    public function testHostConnectionIsolatesEachBatch(): void
     {
         $container = $this->loadServices();
 
-        $decoratedService = $container->getDefinition(WorkflowContextClearingHostConnection::class)->getDecoratedService();
+        $decoratedService = $container->getDefinition(BatchIsolatingHostConnection::class)->getDecoratedService();
 
         self::assertSame(HostConnectionInterface::class, $decoratedService[0] ?? null);
     }

@@ -82,19 +82,22 @@ class JobsWorkerTest extends AbstractJobsWorkerTestCase
     public function testHardErrorNacksAndStopsWorker(): void
     {
         $task = $this->makeTask();
+        $nextTask = $this->makeTask();
 
-        $this->rrWorker->expects($this->atLeastOnce())->method('stop');
+        $this->rrWorker->expects($this->once())->method('stop');
         $this->rrWorker->expects($this->never())->method('error');
 
         $this->eventDispatcher->method('dispatch')->willReturnCallback(
             static fn(object $event): object => $event instanceof JobsRunEvent ? throw new \Error('boom hard') : $event,
         );
 
-        $worker = $this->makeWorker([$task]);
+        $worker = $this->makeWorker([$task, $nextTask]);
         $worker->start();
 
         self::assertCount(1, $task->nackCalls);
         self::assertTrue($task->nackCalls[0]['redelivery']);
+        self::assertSame(0, $nextTask->ackCount);
+        self::assertCount(0, $nextTask->nackCalls);
 
         self::assertNotEmpty(
             array_filter($worker->loggedErrors, static fn(string $m): bool => str_contains($m, 'boom hard')),

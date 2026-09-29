@@ -4,6 +4,7 @@ namespace FluffyDiscord\RoadRunnerBundle\Tests\Temporal\Live;
 
 use FluffyDiscord\RoadRunnerBundle\Tests\BaseTestCase;
 use FluffyDiscord\RoadRunnerBundle\Tests\Temporal\Live\Workflow\CounterWorkflowInterface;
+use FluffyDiscord\RoadRunnerBundle\Tests\Temporal\Live\Workflow\CrashingWorkflowInterface;
 use FluffyDiscord\RoadRunnerBundle\Tests\Temporal\Live\Workflow\FailingWorkflowInterface;
 use FluffyDiscord\RoadRunnerBundle\Tests\Temporal\Live\Workflow\GreetingWorkflowInterface;
 use FluffyDiscord\RoadRunnerBundle\Tests\Temporal\Live\Workflow\ReplayWorkflowInterface;
@@ -215,6 +216,54 @@ class TemporalLiveTest extends BaseTestCase
 
         self::assertNotEmpty($workflowSideLines, 'The workflow-side activity call line lacks the workflow context.');
         self::assertNotEmpty($activitySideLines, 'The activity failure line lacks the activity context.');
+    }
+
+    public function testWorkflowProcessStartsEveryBatchWithResetServices(): void
+    {
+        $stateMarker = self::getEnvironmentValue('TEMPORAL_WORKFLOW_STATE_MARKER');
+        if ($stateMarker === null) {
+            self::markTestSkipped('TEMPORAL_WORKFLOW_STATE_MARKER not set; cannot observe the workflow process state.');
+        }
+
+        $this->greet('first');
+        $this->greet('second');
+        $this->greet('third');
+
+        $recordedCounts = array_map(trim(...), file($stateMarker) ?: []);
+
+        self::assertGreaterThanOrEqual(3, count($recordedCounts), 'The workflow state probe never ran.');
+        self::assertSame(['1'], array_values(array_unique($recordedCounts)), 'State carried over between workflow batches: ' . implode(',', $recordedCounts));
+    }
+
+    public function testActivityErrorGetsAFreshWorkerForTheNextJob(): void
+    {
+        $crashMarker = self::getEnvironmentValue('TEMPORAL_CRASH_MARKER');
+        if ($crashMarker === null) {
+            self::markTestSkipped('TEMPORAL_CRASH_MARKER not set; cannot observe the activity worker process.');
+        }
+
+        $this->runCrashingWorkflow();
+        $this->runCrashingWorkflow();
+
+        $activityProcessIds = array_map(trim(...), file($crashMarker) ?: []);
+
+        self::assertCount(2, $activityProcessIds, 'The crashing activity did not run twice.');
+        self::assertNotSame($activityProcessIds[0], $activityProcessIds[1], 'The activity worker kept serving jobs after an \Error.');
+    }
+
+    private function runCrashingWorkflow(): void
+    {
+        $workflow = self::$client->newWorkflowStub(
+            CrashingWorkflowInterface::class,
+            WorkflowOptions::new()
+                ->withTaskQueue(self::TASK_QUEUE)
+                ->withWorkflowExecutionTimeout(30),
+        );
+
+        try {
+            $workflow->run();
+        } catch (WorkflowFailedException) {
+        }
     }
 
     public function testBundleClientRunsAppGrpcInterceptor(): void

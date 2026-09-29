@@ -514,9 +514,9 @@ if ($lock->acquire()) { /* ... */ $lock->release(); }
 composer require temporal/sdk
 ```
 
-Activates automatically. Assign workflows/activities to a task queue with `#[TaskQueue]`, tune each queue's worker in config, start workflows with the autowired client. Interceptors and OpenTelemetry plug in by just existing; activity failures reach your logs and Sentry; every log line inside a workflow or activity carries its workflow id; the profiler shows every Temporal call a request made. `bin/console debug:temporal` lists what is registered.
+Put workflows and activities on a task queue with `#[TaskQueue]`, start them with `WorkflowLauncherInterface`.
 
-**→ [`docs/temporal.md`](docs/temporal.md)** — activities, workflows, workers, starting workflows, observability.
+**→ [`docs/temporal.md`](docs/temporal.md)**
 
 ## Developing with Symfony and RoadRunner
 

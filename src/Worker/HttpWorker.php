@@ -121,6 +121,7 @@ class HttpWorker implements WorkerInterface
         $handlingRequest = false;
         $responseStarted = false;
         $responseSent = false;
+        $isStopRequested = false;
 
         if (!$this->shutdownRegistered) {
             $this->shutdownRegistered = true;
@@ -148,6 +149,11 @@ class HttpWorker implements WorkerInterface
             } catch (\Throwable) {
                 $worker->respond(new Psr7\Response(Response::HTTP_I_AM_A_TEAPOT));
                 continue;
+            }
+
+            if ($isStopRequested) {
+                $worker->getWorker()->stop();
+                break;
             }
 
             $handlingRequest = true;
@@ -202,7 +208,7 @@ class HttpWorker implements WorkerInterface
                 $this->logError((string)$throwable);
 
                 if ($throwable instanceof \Error) {
-                    $worker->getWorker()->stop();
+                    $isStopRequested = true;
                     continue;
                 }
 
@@ -217,13 +223,13 @@ class HttpWorker implements WorkerInterface
                     }
                 } catch (\Throwable $cleanupThrowable) {
                     $this->logError("Fatal worker cleanup error: " . $cleanupThrowable);
-                    $worker->getWorker()->stop();
+                    $isStopRequested = true;
                 } finally {
                     try {
                         $this->servicesResetter?->reset();
                     } catch (\Throwable $throwable) {
                         $this->logError((string)$throwable);
-                        $worker->getWorker()->stop();
+                        $isStopRequested = true;
                     }
                 }
 

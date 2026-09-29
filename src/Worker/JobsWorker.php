@@ -53,6 +53,7 @@ class JobsWorker implements WorkerInterface
         $handlingTask = false;
         $responded = false;
         $currentTask = null;
+        $isStopRequested = false;
 
         if (!$this->shutdownRegistered) {
             $this->shutdownRegistered = true;
@@ -62,6 +63,11 @@ class JobsWorker implements WorkerInterface
         }
 
         while ($task = $this->waitTask()) {
+            if ($isStopRequested) {
+                $this->rrWorker->stop();
+                break;
+            }
+
             $hadException = false;
             $handlingTask = true;
             $responded = false;
@@ -98,7 +104,7 @@ class JobsWorker implements WorkerInterface
                 $this->logError((string)$throwable);
 
                 if ($throwable instanceof \Error) {
-                    $this->rrWorker->stop();
+                    $isStopRequested = true;
                     continue;
                 }
             } finally {
@@ -108,13 +114,13 @@ class JobsWorker implements WorkerInterface
                     }
                 } catch (\Throwable $cleanupThrowable) {
                     $this->logError("Fatal worker cleanup error: " . $cleanupThrowable);
-                    $this->rrWorker->stop();
+                    $isStopRequested = true;
                 } finally {
                     try {
                         $this->servicesResetter?->reset();
                     } catch (\Throwable $throwable) {
                         $this->logError((string)$throwable);
-                        $this->rrWorker->stop();
+                        $isStopRequested = true;
                     }
                 }
 

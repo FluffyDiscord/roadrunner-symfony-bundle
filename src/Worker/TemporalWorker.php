@@ -43,13 +43,12 @@ class TemporalWorker implements WorkerInterface
             $this->temporalWorkerRegistry->add($taskQueue, $worker);
         }
 
+        if (!$this->workerFactory instanceof WorkerFactory) {
+            throw new \LogicException(sprintf('The Temporal worker factory must extend %s so every job runs isolated; got %s.', WorkerFactory::class, $this->workerFactory::class));
+        }
+
         try {
-            // WorkerFactoryInterface::run() declares no parameters; only the concrete WorkerFactory accepts the host connection.
-            if ($this->workerFactory instanceof WorkerFactory) {
-                $this->workerFactory->run($this->hostConnection);
-            } else {
-                $this->workerFactory->run();
-            }
+            $this->workerFactory->run($this->hostConnection);
         } catch (\Throwable $throwable) {
             try {
                 $this->sentryHubInterface?->captureException($throwable);

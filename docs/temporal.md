@@ -2,15 +2,13 @@
 
 > Beta — the API may still change.
 
-[Temporal](https://learn.temporal.io/getting_started/php/) with this bundle: write activities and workflows as services, start them with an autowired client, see everything in logs, the profiler and `debug:temporal`.
-
 ## 1. Install
 
 ```bash
 composer require temporal/sdk
 ```
 
-Activates automatically. The client needs the `grpc` PHP extension (only once you inject it).
+The client needs the `grpc` PHP extension.
 
 `.rr.yaml`:
 
@@ -31,11 +29,11 @@ temporal:
 
 Local server: `temporal server start-dev`.
 
-**The bundle reads the Temporal address from RoadRunner.** No RoadRunner during the container build (Docker image, CI)? Set `rr_config_path: .rr.yaml` in the bundle config.
+Container built without RoadRunner (Docker image, CI)? Set `rr_config_path: .rr.yaml` in the bundle config.
 
 ## 2. Activity
 
-One class. Put it on a task queue with `#[TaskQueue]` (no name = `default`):
+Put it on a task queue with `#[TaskQueue]` (no name = `default`):
 
 ```php
 namespace App\Temporal;
@@ -55,8 +53,6 @@ class GreetingActivity
     }
 }
 ```
-
-Activities are regular autowired services. Services are reset after every activity.
 
 Prefer an interface? Put `#[ActivityInterface]` on the interface and `#[TaskQueue]` on either.
 
@@ -92,7 +88,7 @@ class GreetingWorkflow extends AbstractWorkflow implements GreetingWorkflowInter
 }
 ```
 
-**Stub properties stay untyped** — the SDK proxy is not an instance of the activity. The `@var` is for your IDE.
+**Keep stub properties untyped.** Use `@var` for your IDE.
 
 `#[ActivityStub]` options:
 
@@ -116,11 +112,7 @@ class MediaActivityStub extends ActivityStub
 }
 ```
 
-Mistakes — missing `#[TaskQueue]`, typed stub, missing timeout, unknown activity, bad duration — fail the container build with a clear message.
-
 ## 4. Start a workflow
-
-Put the start defaults on the interface, then start by name:
 
 ```php
 use FluffyDiscord\RoadRunnerBundle\Temporal\Attribute\WorkflowDefaults;
@@ -141,19 +133,9 @@ $run = $this->launcher->of(GreetingWorkflowInterface::class)
     ->startOrSkip('World');   // null when that id already runs; start() throws instead
 ```
 
-- Fluent methods override the defaults: `id()`, `queue()`, `executionTimeout()`, `reusePolicy()`, `conflictPolicy()`, `retry()`.
-- `searchAttributes()`, `typedSearchAttributes()` and `memo()` attach data to the run — see [Status and progress](#status-and-progress).
+- Fluent overrides: `id()`, `queue()`, `executionTimeout()`, `reusePolicy()`, `conflictPolicy()`, `retry()`, `searchAttributes()`, `typedSearchAttributes()`, `memo()`.
 - `#[WorkflowDefaults]` fields: `queue`, `reusePolicy`, `conflictPolicy`, `executionTimeout`, `retryAttempts`, `retryBackoff`.
-
-The SDK clients are autowired too — `Temporal\Client\WorkflowClientInterface` and `ScheduleClientInterface`, with the configured namespace, API key, data converter and interceptors:
-
-```php
-$workflow = $this->workflowClient->newWorkflowStub(
-    GreetingWorkflowInterface::class,
-    WorkflowOptions::new()->withTaskQueue('default'),
-);
-$workflow->greet('World');
-```
+- Need the raw SDK? Inject `Temporal\Client\WorkflowClientInterface` or `ScheduleClientInterface`.
 
 ## 5. Configuration
 
@@ -163,7 +145,7 @@ fluffy_discord_road_runner:
         namespace: 'default'
         api_key: '%env(TEMPORAL_API_KEY)%'
         retryable_errors: [\Error]     # exceptions Temporal may retry
-        worker_options:                # SDK WorkerOptions, one entry per task queue
+        worker_options:                # SDK WorkerOptions, per task queue
             default:
                 max_concurrent_activity_execution_size: 10
             billing:
@@ -172,33 +154,16 @@ fluffy_discord_road_runner:
                 workflow_panic_policy: FailWorkflow
 ```
 
-**One worker runs per task queue** — `default` plus every queue named in a `#[TaskQueue]`. No worker classes to write.
-
-- `worker_options.<queue>` keys are the `Temporal\Worker\WorkerOptions` properties in snake_case. `bin/console config:dump-reference fluffy_discord_road_runner` lists them all.
+- Keys are the `Temporal\Worker\WorkerOptions` properties in snake_case — `bin/console config:dump-reference fluffy_discord_road_runner` lists them.
 - Durations take seconds or a duration string. Enums take the case name.
-- `default` is the queue named `default`, not a fallback for other queues.
-- A queue in `worker_options` that no `#[TaskQueue]` uses fails the build (typo guard).
-- RoadRunner's `temporal:` block sizes the process pool; `worker_options` tunes the SDK worker inside each process.
 
 ## 6. Observability
 
 ### Logs
 
-Everything goes to the `temporal` Monolog channel:
+Channel: `temporal`. In workflow code log via `Workflow::getLogger()`.
 
-- **Activity failures** — logged as errors with the exception, activity type, attempt, workflow id and task queue. The first attempt is also sent to Sentry when it is installed. Cancellations are not errors.
-- **SDK logs** — the worker logs through the same channel.
-- **Your workflow code** — use `Workflow::getLogger()`. It skips replays, so each line appears once (`enable_logging_in_replay: true` to keep them).
-
-**Every log line written inside a workflow or activity carries its Temporal context** — in any channel, your own logger included (needs MonologBundle):
-
-```json
-"extra": {"temporal": {"workflowType": "IngestWorkflow", "workflowId": "ingest-42", "runId": "…", "activityType": "ingest.import", "activityId": "5", "taskQueue": "ingest", "attempt": 2}}
-```
-
-Filter your log search by `extra.temporal.workflowId` to see one run end to end.
-
-Route the channel wherever you want:
+Filter any log by `extra.temporal.workflowId` to follow one run.
 
 ```yaml
 monolog:
@@ -211,13 +176,10 @@ monolog:
 
 ### Status and progress
 
-**Temporal already stores every run's status** — running, completed, failed, canceled, timed out. No status table needed. Tag runs with search attributes to find them:
-
 ```php
 $this->launcher->of(IngestWorkflowInterface::class)
     ->id('ingest-' . $documentId)
     ->searchAttributes(['WebsiteId' => $websiteId])
-    ->memo(['source' => 'catalog'])
     ->start($documentId);
 ```
 
@@ -228,13 +190,7 @@ $runs = $this->workflowClient->listWorkflowExecutions(
 ```
 
 - Register custom attributes on the server first: `temporal operator search-attribute create --name WebsiteId --type Keyword`.
-- Typed keys: `->typedSearchAttributes(TypedSearchAttributes::empty()->withValue(SearchAttributeKey::forKeyword('WebsiteId'), $websiteId))`. Use one of the two, not both.
-- Progress from inside the workflow: `Workflow::upsertTypedSearchAttributes(SearchAttributeKey::forInteger('ProcessedChunks')->valueSet($count))`, or answer a `#[QueryMethod]`.
-- Memo is shown with the run but not searchable.
-
-### Profiler
-
-The Temporal panel shows every client call the request made — start, signal, query, update, cancel, terminate, result — with workflow id, run id, task queue, time and error. Below: task queues with their options, workflows and activities.
+- Progress from inside the workflow: `Workflow::upsertTypedSearchAttributes(SearchAttributeKey::forInteger('ProcessedChunks')->valueSet($count))`.
 
 ### OpenTelemetry
 
@@ -242,11 +198,11 @@ The Temporal panel shows every client call the request made — start, signal, q
 composer require temporal/open-telemetry-interceptors
 ```
 
-Done — client calls, workflow operations and activities become spans. The tracer comes from the OpenTelemetry SDK's environment setup (`OTEL_PHP_AUTOLOAD_ENABLED=true`, `OTEL_EXPORTER_OTLP_ENDPOINT`, …).
+Configure the exporter with the standard OpenTelemetry env vars (`OTEL_PHP_AUTOLOAD_ENABLED=true`, `OTEL_EXPORTER_OTLP_ENDPOINT`, …).
 
 Own tracer provider? Override the `Temporal\OpenTelemetry\Tracer` service.
 
-Drop one of the three interceptors — keep the service, stop autoconfiguring it:
+Drop one of the interceptors:
 
 ```yaml
 services:
@@ -259,7 +215,7 @@ services:
 
 ### Interceptors
 
-Any service implementing a Temporal SDK interceptor interface joins the pipeline — for the client and the worker. Nothing to configure:
+Implement a Temporal SDK interceptor interface:
 
 ```php
 use Temporal\Interceptor\ActivityInboundInterceptor;
@@ -283,12 +239,11 @@ class ActivityMetricsInterceptor implements ActivityInboundInterceptor
 }
 ```
 
-- Order: `#[AsTaggedItem(priority: 10)]` — higher runs outermost.
-- `GrpcClientInterceptor` wraps each raw gRPC request the client sends to Temporal — metadata headers, network timing.
+Order: `#[AsTaggedItem(priority: 10)]` — higher runs outermost.
 
 ### Events
 
-Only need to look at or change a call's input? Listen to a Symfony event instead — one per interceptor method:
+Only need to read or change a call's input? Listen to an event:
 
 ```php
 use FluffyDiscord\RoadRunnerBundle\Temporal\Interceptor\Event\WorkflowOutboundCalls\ExecuteActivityEvent;
@@ -304,40 +259,36 @@ class ActivityInputListener
 }
 ```
 
-Namespaces: `…\Temporal\Interceptor\Event\{WorkflowClient, WorkflowInboundCalls, WorkflowOutboundCalls, ActivityInbound}`. Events fire before the call; for timing and results use an interceptor.
+Namespaces: `…\Temporal\Interceptor\Event\{WorkflowClient, WorkflowInboundCalls, WorkflowOutboundCalls, ActivityInbound}`.
 
-> Workflow-side events run inside deterministic workflow code: no I/O, no clock, no randomness in those listeners.
+> Workflow-side listeners run inside deterministic workflow code: no I/O, no clock, no randomness.
 
 ### Correlation id
 
-`temporal.tracing: true` puts the request's `X-Request-Id` (or a generated id) into every started workflow's header as `x-correlation-id`, logs starts and activity calls, and adds Sentry breadcrumbs.
+`temporal.tracing: true` — propagates `X-Request-Id` to started workflows as `x-correlation-id`.
 
 ### Live workers
 
-`TemporalWorkerRegistry` holds the running SDK worker per task queue — inside the Temporal worker process only:
-
 ```php
-$worker = $this->workers->get('billing');   // Temporal\Worker\WorkerInterface|null
+$worker = $this->temporalWorkerRegistry->get('billing');   // Temporal\Worker\WorkerInterface|null, worker process only
 ```
 
 ## 7. `debug:temporal`
 
 ```bash
-bin/console debug:temporal                        # task queues, options, workflows, stubs, activities
+bin/console debug:temporal
 bin/console debug:temporal --format=json
-bin/console debug:temporal --format=mermaid > flow.mmd   # workflow → activity flowchart
+bin/console debug:temporal --format=mermaid > flow.mmd
 ```
-
-Reads the build-time registration — no Temporal connection.
 
 ## 8. Customizing
 
-- **Data converter** — point the alias at your service; client and worker both use it:
+- **Data converter:**
 
   ```yaml
   services:
       Temporal\DataConverter\DataConverterInterface: '@App\Temporal\MyDataConverter'
   ```
 
-- **Worker factory** — `Temporal\Worker\WorkerFactoryInterface` is a service; decorate it for anything config can't express (e.g. experimental deployment options).
-- **Introspection** — `debug:temporal` and the profiler read `TemporalIntrospectorInterface`; decorate or replace it.
+- **Worker factory** — point `Temporal\Worker\WorkerFactoryInterface` at your subclass of `Temporal\WorkerFactory`.
+- **Introspection** — decorate or replace `TemporalIntrospectorInterface`.

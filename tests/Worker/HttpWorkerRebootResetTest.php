@@ -69,14 +69,15 @@ class HttpWorkerRebootResetTest extends AbstractHttpWorkerTestCase
 
     public function testServicesResetterExceptionStopsWorker(): void
     {
-        $this->setupSuccessfulRequest();
+        $this->spiralHttpWorker->method('waitRequest')->willReturnOnConsecutiveCalls($this->rrRequest(), $this->rrRequest(), null);
+        $this->kernel->expects($this->once())->method('handle')->willReturn(new Response('ok'));
 
         $this->servicesResetter
             ->method('reset')
             ->willThrowException(new \RuntimeException('reset failed'))
         ;
 
-        $this->rrWorker->expects($this->atLeastOnce())->method('stop');
+        $this->rrWorker->expects($this->once())->method('stop');
 
         $this->makeWorker(debug: false)->start();
     }
@@ -84,12 +85,12 @@ class HttpWorkerRebootResetTest extends AbstractHttpWorkerTestCase
     public function testCleanupTerminateExceptionLogsErrorAndStopsWorker(): void
     {
         $kernel = $this->createMock(TestKernelInterface::class);
-        $kernel->method('handle')->willReturn(new Response());
+        $kernel->expects($this->once())->method('handle')->willReturn(new Response());
         $kernel->method('terminate')->willThrowException(new \RuntimeException('cleanup failure'));
 
         $this->spiralHttpWorker
             ->method('waitRequest')
-            ->willReturnOnConsecutiveCalls($this->rrRequest(), null)
+            ->willReturnOnConsecutiveCalls($this->rrRequest(), $this->rrRequest(), null)
         ;
 
         // Cleanup failures are logged to STDERR (logError), not emitted as a second relay frame.

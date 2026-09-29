@@ -3,12 +3,12 @@
 namespace FluffyDiscord\RoadRunnerBundle\Tests\Temporal;
 
 use FluffyDiscord\RoadRunnerBundle\Temporal\TemporalWorkerInitializer;
+use FluffyDiscord\RoadRunnerBundle\Temporal\Transport\BatchIsolatingHostConnection;
 use FluffyDiscord\RoadRunnerBundle\Tests\BaseTestCase;
 use FluffyDiscord\RoadRunnerBundle\Tests\Temporal\Fixtures\GreetingActivity;
 use FluffyDiscord\RoadRunnerBundle\Tests\Temporal\Fixtures\GreetingWorkflow;
 use Psr\Log\LoggerInterface;
 use Sentry\State\HubInterface;
-use Symfony\Component\DependencyInjection\ServicesResetterInterface;
 use Symfony\Component\HttpKernel\KernelInterface;
 use Temporal\Activity;
 use Temporal\Activity\ActivityContextInterface;
@@ -39,15 +39,15 @@ class TemporalWorkerInitializerTest extends BaseTestCase
      * @param array<string, array<string, mixed>> $workerOptions
      */
     private function initializer(
-        array                      $workerOptions = [],
-        ?ServicesResetterInterface $servicesResetter = null,
-        ?LoggerInterface           $logger = null,
-        ?HubInterface              $sentryHub = null,
+        array                         $workerOptions = [],
+        ?BatchIsolatingHostConnection $batchIsolatingHostConnection = null,
+        ?LoggerInterface              $logger = null,
+        ?HubInterface                 $sentryHub = null,
     ): TemporalWorkerInitializer
     {
         return new TemporalWorkerInitializer(
             $this->createStub(KernelInterface::class),
-            $servicesResetter ?? $this->createStub(ServicesResetterInterface::class),
+            $batchIsolatingHostConnection ?? $this->createStub(BatchIsolatingHostConnection::class),
             new ExceptionInterceptor([\Error::class]),
             new SimplePipelineProvider([]),
             $workerOptions,
@@ -188,25 +188,44 @@ class TemporalWorkerInitializerTest extends BaseTestCase
 
     public function testServicesAreResetEvenWhenReportingFails(): void
     {
-        $servicesResetter = $this->createMock(ServicesResetterInterface::class);
-        $servicesResetter->expects(self::once())->method('reset');
+        $batchIsolatingHostConnection = $this->createMock(BatchIsolatingHostConnection::class);
+        $batchIsolatingHostConnection->expects(self::once())->method('resetServices');
 
         $logger = $this->createStub(LoggerInterface::class);
         $logger->method('error')->willThrowException(new \LogicException('logger broke'));
 
         $this->expectException(\LogicException::class);
 
-        $this->initializer(servicesResetter: $servicesResetter, logger: $logger)->finalizeActivity(new \RuntimeException('failure'));
+        $this->initializer(batchIsolatingHostConnection: $batchIsolatingHostConnection, logger: $logger)->finalizeActivity(new \RuntimeException('failure'));
     }
 
     public function testSuccessfulActivityOnlyResetsServices(): void
     {
-        $servicesResetter = $this->createMock(ServicesResetterInterface::class);
-        $servicesResetter->expects(self::once())->method('reset');
+        $batchIsolatingHostConnection = $this->createMock(BatchIsolatingHostConnection::class);
+        $batchIsolatingHostConnection->expects(self::once())->method('resetServices');
+        $batchIsolatingHostConnection->expects(self::never())->method('recycleAfterBatch');
 
         $logger = $this->createMock(LoggerInterface::class);
         $logger->expects(self::never())->method('error');
 
-        $this->initializer(servicesResetter: $servicesResetter, logger: $logger)->finalizeActivity(null);
+        $this->initializer(batchIsolatingHostConnection: $batchIsolatingHostConnection, logger: $logger)->finalizeActivity(null);
+    }
+
+    public function testActivityExceptionKeepsTheWorker(): void
+    {
+        $batchIsolatingHostConnection = $this->createMock(BatchIsolatingHostConnection::class);
+        $batchIsolatingHostConnection->expects(self::once())->method('resetServices');
+        $batchIsolatingHostConnection->expects(self::never())->method('recycleAfterBatch');
+
+        $this->initializer(batchIsolatingHostConnection: $batchIsolatingHostConnection)->finalizeActivity(new \RuntimeException('SMTP down'));
+    }
+
+    public function testActivityErrorRecyclesTheWorkerAfterThisJob(): void
+    {
+        $batchIsolatingHostConnection = $this->createMock(BatchIsolatingHostConnection::class);
+        $batchIsolatingHostConnection->expects(self::once())->method('resetServices');
+        $batchIsolatingHostConnection->expects(self::once())->method('recycleAfterBatch');
+
+        $this->initializer(batchIsolatingHostConnection: $batchIsolatingHostConnection)->finalizeActivity(new \TypeError('corrupted state'));
     }
 }
