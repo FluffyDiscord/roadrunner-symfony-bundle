@@ -8,7 +8,6 @@ use Symfony\Component\Form\FormTypeInterface;
 /**
  * Resolves every registered form type (instantiation + resolved-type chain +
  * option resolvers), all otherwise built on first use per worker.
- * See docs/specs/worker-warmup.md §3.
  */
 readonly class FormRegistryWarmer implements WorkerWarmerInterface
 {

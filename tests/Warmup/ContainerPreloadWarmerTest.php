@@ -8,8 +8,7 @@ use FluffyDiscord\RoadRunnerBundle\Warmup\WarmupManifestStorage;
 use Symfony\Component\DependencyInjection\ParameterBag\ParameterBag;
 
 /**
- * See docs/specs/worker-warmup.md §9 (U9-U11). The fixture pins the generated
- * preload-file format (spec ADR-9): if a Symfony release reformats the dump,
+ * The fixture pins the generated preload-file format: if a Symfony release reformats the dump,
  * testExtractsClassListFromGeneratedFormat fails loudly instead of the warmer
  * silently no-opping in production.
  */

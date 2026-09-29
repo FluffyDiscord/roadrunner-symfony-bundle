@@ -12,7 +12,6 @@ use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 use Symfony\Component\DependencyInjection\Reference;
 
-/** See docs/specs/doctrine-preconnect.md §9. */
 class DoctrinePreconnectWiringTest extends BaseTestCase
 {
     /** @param array<string, mixed>|null $doctrine */

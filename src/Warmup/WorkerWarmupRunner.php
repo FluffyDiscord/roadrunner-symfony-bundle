@@ -6,7 +6,6 @@ use FluffyDiscord\RoadRunnerBundle\Event\Worker\WorkerBootingEvent;
 use FluffyDiscord\RoadRunnerBundle\Worker\HttpWorker;
 use Psr\Log\LoggerInterface;
 
-/** See docs/specs/worker-warmup.md ADR-2, ADR-5. */
 readonly class WorkerWarmupRunner
 {
     /**

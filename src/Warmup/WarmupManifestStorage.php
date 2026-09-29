@@ -9,7 +9,7 @@ use Symfony\Component\DependencyInjection\ParameterBag\ParameterBagInterface;
  * JSON manifest of symbols/files real traffic loaded, replayed at worker boot.
  * JSON, not executable PHP: a PHP manifest read via include would be opcache-cached
  * (stale re-reads under validate_timestamps=0) and would execute attacker-writable
- * code if manifest_path is relocated. See docs/specs/worker-warmup.md ADR-8.
+ * code if manifest_path is relocated.
  */
 class WarmupManifestStorage
 {

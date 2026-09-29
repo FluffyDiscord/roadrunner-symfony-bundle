@@ -9,7 +9,6 @@ use FluffyDiscord\RoadRunnerBundle\Warmup\WorkerWarmupRunner;
 use FluffyDiscord\RoadRunnerBundle\Worker\HttpWorker;
 use Psr\Log\AbstractLogger;
 
-/** See docs/specs/worker-warmup.md §9 (U1-U3b). */
 class WorkerWarmupRunnerTest extends BaseTestCase
 {
     /**

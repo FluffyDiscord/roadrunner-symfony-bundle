@@ -7,7 +7,6 @@ use FluffyDiscord\RoadRunnerBundle\Warmup\WarmupManifestStorage;
 use Symfony\Component\DependencyInjection\ParameterBag\ParameterBag;
 use Psr\Log\AbstractLogger;
 
-/** See docs/specs/worker-warmup.md §9 (U4-U8, U7b). */
 class WarmupManifestStorageTest extends BaseTestCase
 {
     private string $workDir;

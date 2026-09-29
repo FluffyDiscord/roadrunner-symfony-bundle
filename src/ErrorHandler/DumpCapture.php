@@ -15,8 +15,6 @@ use Symfony\Contracts\Service\ResetInterface;
  * die()/exit() leave no trace: error_get_last() stays null and a shutdown function runs on an
  * unwound stack, so debug_backtrace() there is empty. dd() does leave one — it calls
  * VarDumper::dump() first, on an intact stack.
- *
- * See docs/specs/dump-capture.md.
  */
 class DumpCapture implements ResetInterface
 {

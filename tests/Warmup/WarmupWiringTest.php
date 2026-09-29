@@ -19,7 +19,6 @@ use FluffyDiscord\RoadRunnerBundle\Warmup\WorkerWarmerInterface;
 use FluffyDiscord\RoadRunnerBundle\Warmup\WorkerWarmupRunner;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 
-/** See docs/specs/worker-warmup.md §9 (W1-W6). */
 class WarmupWiringTest extends BaseTestCase
 {
     private const string WARMER_TAG = 'fluffy_discord.road_runner.worker_warmer';

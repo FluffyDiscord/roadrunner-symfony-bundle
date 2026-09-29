@@ -5,15 +5,15 @@ namespace FluffyDiscord\RoadRunnerBundle\Tests\Job\Live;
 use PHPUnit\Framework\Attributes\Group;
 
 /**
- * Live end-to-end test for the RoadRunner Jobs (queue consumer) worker (docs/specs/rr-jobs-worker.md).
+ * Live end-to-end test for the RoadRunner Jobs (queue consumer) worker.
  *
  * Asserts the worker's deterministic guarantee against a real jobs pool: a successful task is
  * consumed and acked EXACTLY ONCE (the handler runs a single time and the task is not redelivered).
  *
- * The nack-with-requeue path is intentionally NOT asserted here: per docs/specs/rr-jobs-worker.md
- * (assumption A-1 / OQ-1) `redelivery` is driver-dependent — the memory pipeline used by the harness
- * may legitimately drop rather than redeliver — so requeue is proven deterministically by the unit
- * tests (TC-02, via the SpyReceivedTask double), not against a live driver whose behavior may vary.
+ * The nack-with-requeue path is intentionally NOT asserted here: `redelivery` is driver-dependent —
+ * the memory pipeline used by the harness may legitimately drop rather than redeliver — so requeue
+ * is proven deterministically by the unit tests (via the SpyReceivedTask double), not against a live
+ * driver whose behavior may vary.
  */
 #[Group('jobs-live')]
 class JobsWorkerLiveTest extends AbstractJobsLiveTestCase

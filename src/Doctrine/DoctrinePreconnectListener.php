@@ -7,7 +7,6 @@ use Doctrine\Persistence\ConnectionRegistry;
 use FluffyDiscord\RoadRunnerBundle\Event\Worker\WorkerBootingEvent;
 use Psr\Log\LoggerInterface;
 
-/** See docs/specs/doctrine-preconnect.md. */
 readonly class DoctrinePreconnectListener
 {
     public function __construct(

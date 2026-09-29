@@ -9,7 +9,6 @@ use Spiral\RoadRunner\Environment\Mode;
 
 /**
  * @see \FluffyDiscord\RoadRunnerBundle\Worker\JobsWorker
- * @see docs/specs/rr-jobs-worker.md §N-2
  */
 #[AllowMockObjectsWithoutExpectations]
 class JobsWorkerTest extends AbstractJobsWorkerTestCase

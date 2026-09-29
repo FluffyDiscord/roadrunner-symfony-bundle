@@ -7,7 +7,7 @@ use Spiral\Goridge\RPC\RPC;
 use Spiral\RoadRunner\Jobs\Jobs;
 
 /**
- * Live end-to-end tests for the Jobs message bus (docs/specs/jobs-message-bus.md).
+ * Live end-to-end tests for the Jobs message bus.
  *
  * An HTTP request dispatches an #[AsJob] message; the jobs pool consumes the enveloped task, the
  * JobRoutingListener rehydrates it through the Native serializer and dispatches it into Symfony

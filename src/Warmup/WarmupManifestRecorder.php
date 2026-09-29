@@ -13,7 +13,6 @@ use Spiral\RoadRunner\Environment\Mode;
  * must not be reintroduced — any baseline captured at or after the first response
  * swallows that request's cold-load graph, the single biggest thing to learn.
  * A write is skipped when neither set grew since the last record.
- * See docs/specs/worker-warmup.md ADR-7.
  */
 class WarmupManifestRecorder
 {

@@ -8,7 +8,7 @@ use FluffyDiscord\RoadRunnerBundle\Tests\BaseTestCase;
 use FluffyDiscord\RoadRunnerBundle\Tests\Job\Fixtures\PlainMessage;
 
 /**
- * Wire-contract tests for the envelope header format. See docs/specs/jobs-message-bus.md §N-2 TC-04.
+ * Wire-contract tests for the envelope header format.
  */
 class JobEnvelopeTest extends BaseTestCase
 {

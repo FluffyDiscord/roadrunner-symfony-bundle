@@ -19,9 +19,6 @@ class FailingRendererResponder extends WorkerErrorResponder
     }
 }
 
-/**
- * @see docs/specs/graceful-error-handling.md §6.9 (TC-D01..TC-D04)
- */
 #[AllowMockObjectsWithoutExpectations]
 class WorkerErrorResponderTest extends BaseTestCase
 {

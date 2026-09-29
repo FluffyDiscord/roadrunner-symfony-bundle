@@ -9,7 +9,6 @@ use Symfony\Component\VarDumper\VarDumper;
 
 /**
  * @see \FluffyDiscord\RoadRunnerBundle\ErrorHandler\DumpCapture
- * @see docs/specs/dump-capture.md §9 (TC-D1..TC-D8)
  */
 class DumpCaptureTest extends TestCase
 {

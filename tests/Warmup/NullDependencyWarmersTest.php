@@ -12,7 +12,7 @@ use FluffyDiscord\RoadRunnerBundle\Warmup\TwigRuntimesWarmer;
 use Symfony\Component\Routing\Router;
 use Symfony\Component\Routing\RouterInterface;
 
-/** See docs/specs/worker-warmup.md §9 (U15, U15b, U15c): absent dependencies mean no-op, never a throw. */
+/** Absent dependencies mean no-op, never a throw. */
 #[AllowMockObjectsWithoutExpectations]
 class NullDependencyWarmersTest extends BaseTestCase
 {

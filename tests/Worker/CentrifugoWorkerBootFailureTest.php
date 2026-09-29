@@ -4,9 +4,6 @@ namespace FluffyDiscord\RoadRunnerBundle\Tests\Worker;
 
 use PHPUnit\Framework\Attributes\AllowMockObjectsWithoutExpectations;
 
-/**
- * @see docs/specs/graceful-error-handling.md §6.5, §6.9 (TC-D10)
- */
 #[AllowMockObjectsWithoutExpectations]
 class CentrifugoWorkerBootFailureTest extends AbstractCentrifugoWorkerTestCase
 {

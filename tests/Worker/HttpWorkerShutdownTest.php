@@ -11,7 +11,6 @@ use Symfony\Component\HttpFoundation\Response;
  * Bucket B / B′ — the register_shutdown_function path for die()/exit()/fatal.
  *
  * @see \FluffyDiscord\RoadRunnerBundle\Worker\HttpWorker::handleShutdown()
- * @see docs/specs/graceful-error-handling.md §N-2 (TC-01..06, TC-12, IT-03)
  */
 #[AllowMockObjectsWithoutExpectations]
 class HttpWorkerShutdownTest extends AbstractHttpWorkerTestCase

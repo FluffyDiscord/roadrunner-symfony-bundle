@@ -9,7 +9,6 @@ use FluffyDiscord\RoadRunnerBundle\Warmup\WarmupManifestStorage;
 use Symfony\Component\DependencyInjection\ParameterBag\ParameterBag;
 use Spiral\RoadRunner\Environment\Mode;
 
-/** See docs/specs/worker-warmup.md §9 (U13-U14). */
 class WarmupManifestRecorderTest extends BaseTestCase
 {
     private string $manifestPath;

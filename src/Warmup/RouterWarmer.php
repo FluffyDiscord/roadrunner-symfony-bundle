@@ -12,7 +12,7 @@ use Symfony\Component\Routing\RouterInterface;
  * decorators like Sylius's LocaleStrippingRouter hide the concrete Router behind
  * the alias, while FrameworkBundle keeps it under router.default. Never matches a
  * path — no route can be assumed to exist, and match() runs real lookup logic on
- * custom routers. See docs/specs/worker-warmup.md §3, ADR-10.
+ * custom routers.
  */
 readonly class RouterWarmer implements WorkerWarmerInterface
 {

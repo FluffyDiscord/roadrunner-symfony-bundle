@@ -7,9 +7,7 @@ use PHPUnit\Framework\Attributes\AllowMockObjectsWithoutExpectations;
 
 /**
  * Bucket D2 on a worker with no HTTP client: the failure is logged and reported, and the
- * consume loop still runs (worker-warmup ADR-5 — degrade, never "no worker").
- *
- * @see docs/specs/graceful-error-handling.md §6.5, §6.9 (TC-D10)
+ * consume loop still runs (degrade, never "no worker").
  */
 #[AllowMockObjectsWithoutExpectations]
 class NonHttpWorkerBootFailureTest extends AbstractJobsWorkerTestCase

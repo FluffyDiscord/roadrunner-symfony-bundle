@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Real-world end-to-end validation of the RoadRunner Jobs message bus + queue-consumer worker
-# (docs/specs/jobs-message-bus.md, docs/specs/rr-jobs-worker.md).
+# Real-world end-to-end validation of the RoadRunner Jobs message bus + queue-consumer worker.
 #
 # Builds a minimal Symfony app on top of this bundle, runs it under a REAL RoadRunner server in Docker
 # with BOTH an `http:` and a `jobs:` pool (memory driver) sharing ONE `server.command`. The assertions

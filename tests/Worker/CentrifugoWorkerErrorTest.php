@@ -7,7 +7,6 @@ use PHPUnit\Framework\Attributes\AllowMockObjectsWithoutExpectations;
 
 /**
  * @see \FluffyDiscord\RoadRunnerBundle\Worker\CentrifugoWorker
- * @see docs/specs/graceful-error-handling.md "Centrifugo worker (delta)"
  */
 #[AllowMockObjectsWithoutExpectations]
 class CentrifugoWorkerErrorTest extends AbstractCentrifugoWorkerTestCase

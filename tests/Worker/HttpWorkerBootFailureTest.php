@@ -8,8 +8,6 @@ use Symfony\Component\HttpFoundation\Response;
 
 /**
  * Bucket D2 — a boot listener dies while the kernel itself is serviceable.
- *
- * @see docs/specs/graceful-error-handling.md §6.5, §6.9 (TC-D05, TC-D06)
  */
 #[AllowMockObjectsWithoutExpectations]
 class HttpWorkerBootFailureTest extends AbstractHttpWorkerTestCase

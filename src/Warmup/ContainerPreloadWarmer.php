@@ -10,7 +10,7 @@ use Symfony\Component\DependencyInjection\Dumper\Preloader;
  * build dir. The generated preload file cannot be included directly — it returns
  * early under the cli SAPI RoadRunner workers run in — so the class list is
  * extracted from its stable "$classes[] = '...';" lines. Fail-open: format drift
- * means a no-op, pinned by a fixture test. See docs/specs/worker-warmup.md ADR-9.
+ * means a no-op, pinned by a fixture test.
  */
 class ContainerPreloadWarmer implements WorkerWarmerInterface
 {

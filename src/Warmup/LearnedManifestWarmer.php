@@ -9,7 +9,7 @@ use Symfony\Component\DependencyInjection\Dumper\Preloader;
  * Replays the learned manifest at boot: symbols via Symfony's Preloader (autoloader
  * driven, idempotent — opcache_compile_file() on class files would early-bind and
  * later fatal with "Cannot redeclare" on multi-class files), cache-dir files via
- * opcache_compile_file(). See docs/specs/worker-warmup.md ADR-3, ADR-4.
+ * opcache_compile_file().
  */
 class LearnedManifestWarmer implements WorkerWarmerInterface
 {
@@ -71,7 +71,7 @@ class LearnedManifestWarmer implements WorkerWarmerInterface
         }
 
         // Boot-compiling volatile cache-pool files while opcache.file_cache is active
-        // measurably degrades first requests (spec ADR-4); the class preload above is
+        // measurably degrades first requests; the class preload above is
         // still beneficial, so only this step is skipped.
         if ($this->getFileCacheIni() !== '') {
             $this->logger?->debug('RoadRunner warmup: opcache.file_cache active; skipping cache-dir file compilation.');

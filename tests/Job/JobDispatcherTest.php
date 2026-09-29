@@ -16,8 +16,7 @@ use Spiral\RoadRunner\Jobs\Task\PreparedTaskInterface;
 use Spiral\RoadRunner\Jobs\Task\QueuedTaskInterface;
 
 /**
- * Dispatcher tests: queue/delay/priority resolution and the built task. See
- * docs/specs/jobs-message-bus.md §N-2 TC-05..TC-07.
+ * Dispatcher tests: queue/delay/priority resolution and the built task.
  */
 #[AllowMockObjectsWithoutExpectations]
 class JobDispatcherTest extends BaseTestCase

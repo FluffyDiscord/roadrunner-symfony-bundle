@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Real-world validation of graceful worker error handling (docs/specs/graceful-error-handling.md).
+# Real-world validation of graceful worker error handling.
 #
 # Builds a minimal Symfony app on top of this bundle, runs it under a real RoadRunner server in
 # Docker, and asserts the client-visible behavior for catchable exceptions, die()/exit(), and prod.
@@ -252,7 +252,7 @@ code=$(get exit); body=$(cat /tmp/b); echo "/exit -> $code (${#body} body bytes)
 if [ -z "$body" ]; then echo "  PASS: prod exit body is empty (no info disclosure)"; else echo "  FAIL: prod exit leaked a body"; FAIL=1; fi
 kill "$RR" 2>/dev/null; wait "$RR" 2>/dev/null || true
 
-echo "### BOOT FAILURE — Bucket D (docs/specs/graceful-error-handling.md §6) ###"
+echo "### BOOT FAILURE — Bucket D ###"
 # These scenarios never become ready, so wait_ready() is skipped: it curls /ok with --retry and
 # exits 0 on a 500, so it would burn its --max-time and pass regardless of the app being broken.
 boot_fail_start() { gen_yaml "$1" "$2" "$3"; RR=$(run_rr); sleep 6; }   # RR must be assigned in this shell, not a subshell

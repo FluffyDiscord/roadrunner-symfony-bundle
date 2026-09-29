@@ -43,15 +43,14 @@ php vendor/bin/phpunit tests
 
 - `src/Worker/` — `HttpWorker`, `CentrifugoWorker`, `JobsWorker` (graceful error handling:
   one frame per request, STDERR/Sentry logging, `register_shutdown_function` rescue for
-  die/exit/fatal). See `docs/specs/graceful-error-handling.md`. The Jobs (queue consumer)
-  worker — ack-on-success / nack-with-requeue-on-failure — is specced in
-  `docs/specs/rr-jobs-worker.md` and registered under `Mode::MODE_JOBS`.
+  die/exit/fatal). The Jobs (queue consumer) worker — ack-on-success /
+  nack-with-requeue-on-failure — is registered under `Mode::MODE_JOBS`.
 - `src/Job/` — typed message bus over RR Jobs built on **Symfony Messenger** (additive on top of
   `JobsRunEvent`): `#[AsJob]` (producer attribute) + `JobDispatcher`, `JobEnvelope` (wire contract:
   `x-job-class` / `x-job-serializer` headers), igbinary/Native (PHP serialize) + optional Symfony
   serializers. On consume, `JobRoutingListener` deserializes and dispatches the message into
   `MessageBusInterface` (passing the RR task via a `HandlerArgumentsStamp`); handlers are plain
-  `#[AsMessageHandler]`. Specced in `docs/specs/jobs-message-bus.md`. `symfony/messenger` and
+  `#[AsMessageHandler]`. `symfony/messenger` and
   `symfony/serializer` are `require-dev` + `suggest` only.
 - `src/Factory/ServerParamsFactory.php` — builds the Symfony `Request` server bag from the
   RoadRunner request alone (method, URI, protocol, remote address, host, `HTTP_*` headers). The
@@ -69,7 +68,7 @@ php vendor/bin/phpunit tests
   deprecation is never reported as the cause of a `die`/`exit`.
 - `src/ErrorHandler/DumpCapture.php` — chains onto `VarDumper`'s handler to record where the last
   `dump()`/`dd()` ran (PHP records nothing for `exit`), so the rescue page can name and IDE-link it.
-  Specced in `docs/specs/dump-capture.md`; live-tested by the `/dd` case in
+  Live-tested by the `/dd` case in
   `tests/docker-validate-error-pages.sh`.
 - `src/EventListener/CentrifugoEventRouter.php` + `src/DependencyInjection/Compiler/CentrifugoRouterPass.php`
   — compile-time routing table for `#[AsCentrifugoChannelListener]` / `#[AsCentrifugoRpcListener]`.

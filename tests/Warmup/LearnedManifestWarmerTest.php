@@ -7,7 +7,6 @@ use FluffyDiscord\RoadRunnerBundle\Warmup\LearnedManifestWarmer;
 use FluffyDiscord\RoadRunnerBundle\Warmup\WarmupManifestStorage;
 use Symfony\Component\DependencyInjection\ParameterBag\ParameterBag;
 
-/** See docs/specs/worker-warmup.md §9 (U12 + missing-manifest no-op). */
 class LearnedManifestWarmerTest extends BaseTestCase
 {
     private string $manifestPath;
@@ -78,7 +77,7 @@ class LearnedManifestWarmerTest extends BaseTestCase
 
             protected function getFileCacheIni(): string
             {
-                // Simulates opcache.file_cache pointing at a directory (spec ADR-4);
+                // Simulates opcache.file_cache pointing at a directory;
                 // the real comparison logic in supportsFileCompilation() runs.
                 return '/tmp/opcache-file-cache';
             }

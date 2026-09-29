@@ -17,7 +17,7 @@ abstract class AbstractJobsLiveTestCase extends BaseTestCase
         parent::setUp();
 
         if (!self::liveEnabled()) {
-            $this->markTestSkipped('Live Jobs tests require RR_JOBS_LIVE=1 with a provisioned RoadRunner http+jobs pool. See tests/docker-validate-jobs.sh and docs/specs/rr-jobs-worker.md §N-2.');
+            $this->markTestSkipped('Live Jobs tests require RR_JOBS_LIVE=1 with a provisioned RoadRunner http+jobs pool. See tests/docker-validate-jobs.sh.');
         }
     }
 

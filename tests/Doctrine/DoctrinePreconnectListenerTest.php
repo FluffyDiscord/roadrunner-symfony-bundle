@@ -14,7 +14,6 @@ use PHPUnit\Framework\Attributes\AllowMockObjectsWithoutExpectations;
 use PHPUnit\Framework\MockObject\MockObject;
 use Psr\Log\LoggerInterface;
 
-/** See docs/specs/doctrine-preconnect.md §9. */
 #[AllowMockObjectsWithoutExpectations]
 class DoctrinePreconnectListenerTest extends BaseTestCase
 {

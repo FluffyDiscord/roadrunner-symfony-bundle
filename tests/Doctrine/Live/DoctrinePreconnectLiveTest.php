@@ -7,7 +7,7 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * /db-status runs no query, so a "connected" PostgreSQL socket proves the boot-time preconnect
- * opened it before the first request; sqlite must stay unconnected. See docs/specs/doctrine-preconnect.md §9.
+ * opened it before the first request; sqlite must stay unconnected.
  */
 #[Group('doctrine-preconnect-live')]
 class DoctrinePreconnectLiveTest extends TestCase

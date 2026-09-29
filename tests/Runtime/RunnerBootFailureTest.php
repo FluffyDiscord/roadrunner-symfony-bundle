@@ -46,8 +46,6 @@ class TestableRunner extends Runner
 
 /**
  * Bucket D1 — the kernel, the registry or the worker construction dies inside Runner::run().
- *
- * @see docs/specs/graceful-error-handling.md §6.4, §6.9 (TC-D07..TC-D09, TC-D11)
  */
 #[AllowMockObjectsWithoutExpectations]
 class RunnerBootFailureTest extends BaseTestCase

@@ -17,7 +17,7 @@ use Symfony\Component\HttpKernel\KernelInterface;
 use Symfony\Component\HttpKernel\RebootableInterface;
 
 /**
- * Loop-level integration tests (mock-driven). See docs/specs/rr-jobs-worker.md §N-2 IT-01..IT-03.
+ * Loop-level integration tests (mock-driven).
  */
 #[AllowMockObjectsWithoutExpectations]
 class JobsWorkerIntegrationTest extends AbstractJobsWorkerTestCase

@@ -10,7 +10,6 @@ use Symfony\Component\HttpFoundation\Response;
  * MinimalErrorPage fallback if the renderer itself fails), and the one-frame guarantee.
  *
  * @see \FluffyDiscord\RoadRunnerBundle\Worker\HttpWorker::sendThrowableResponse()
- * @see docs/specs/graceful-error-handling.md §N-2 (TC-07..10, IT-02)
  */
 #[AllowMockObjectsWithoutExpectations]
 class HttpWorkerErrorResponseTest extends AbstractHttpWorkerTestCase
