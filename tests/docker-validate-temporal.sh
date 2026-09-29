@@ -96,7 +96,9 @@ cat > "$CTX/app/composer.json" <<'JSON'
         "symfony/framework-bundle": "^7.4 || ^8",
         "symfony/runtime": "^7.4 || ^8",
         "symfony/yaml": "^7.4 || ^8",
-        "temporal/sdk": "^2.16"
+        "symfony/monolog-bundle": "^3.10 || ^4",
+        "temporal/sdk": "^2.16",
+        "temporal/open-telemetry-interceptors": "^1.1"
     },
     "require-dev": {
         "phpunit/phpunit": "^13"
@@ -266,12 +268,106 @@ class ActivityMarkerListener
 }
 PHP
 
+cat > "$CTX/app/src/ReplayActivity.php" <<'PHP'
+<?php
+namespace App;
+
+use FluffyDiscord\RoadRunnerBundle\Temporal\Attribute\TaskQueue;
+use FluffyDiscord\RoadRunnerBundle\Tests\Temporal\Live\Workflow\ReplayActivityInterface;
+
+#[TaskQueue('default')]
+class ReplayActivity implements ReplayActivityInterface
+{
+    public function touch(): string
+    {
+        return 'touched';
+    }
+}
+PHP
+
+cat > "$CTX/app/src/ReplayWorkflow.php" <<'PHP'
+<?php
+namespace App;
+
+use FluffyDiscord\RoadRunnerBundle\Temporal\Attribute\TaskQueue;
+use FluffyDiscord\RoadRunnerBundle\Tests\Temporal\Live\Workflow\ReplayActivityInterface;
+use FluffyDiscord\RoadRunnerBundle\Tests\Temporal\Live\Workflow\ReplayWorkflowInterface;
+use Temporal\Activity\ActivityOptions;
+use Temporal\Workflow;
+
+#[TaskQueue('default')]
+class ReplayWorkflow implements ReplayWorkflowInterface
+{
+    private bool $proceed = false;
+
+    public function run(): \Generator
+    {
+        $marker = getenv('TEMPORAL_REPLAY_MARKER') ?: '/app/replay-marker';
+        @file_put_contents($marker, (Workflow::isReplaying() ? 'replaying' : 'live') . "\n", FILE_APPEND);
+
+        $activity = Workflow::newActivityStub(ReplayActivityInterface::class, ActivityOptions::new()->withStartToCloseTimeout(10));
+        yield $activity->touch();
+
+        yield Workflow::await(fn (): bool => $this->proceed);
+
+        return 'done';
+    }
+
+    public function proceed(): void
+    {
+        $this->proceed = true;
+    }
+}
+PHP
+
+cat > "$CTX/app/src/AppGrpcInterceptor.php" <<'PHP'
+<?php
+namespace App;
+
+use Temporal\Client\GRPC\ContextInterface;
+use Temporal\Interceptor\GrpcClientInterceptor;
+
+class AppGrpcInterceptor implements GrpcClientInterceptor
+{
+    public function interceptCall(string $method, object $arg, ContextInterface $ctx, callable $next): object
+    {
+        $marker = getenv('TEMPORAL_GRPC_INTERCEPTOR_MARKER') ?: '/app/grpc-interceptor-marker';
+        @file_put_contents($marker, $method . "\n", FILE_APPEND);
+
+        return $next($method, $arg, $ctx);
+    }
+}
+PHP
+
+cat > "$CTX/app/src/AppActivityInterceptor.php" <<'PHP'
+<?php
+namespace App;
+
+use Temporal\Interceptor\ActivityInbound\ActivityInput;
+use Temporal\Interceptor\ActivityInboundInterceptor;
+use Temporal\Interceptor\Trait\ActivityInboundInterceptorTrait;
+
+class AppActivityInterceptor implements ActivityInboundInterceptor
+{
+    use ActivityInboundInterceptorTrait;
+
+    public function handleActivityInbound(ActivityInput $input, callable $next): mixed
+    {
+        $marker = getenv('TEMPORAL_APP_INTERCEPTOR_MARKER') ?: '/app/app-interceptor-marker';
+        @file_put_contents($marker, "fired\n", FILE_APPEND);
+
+        return $next($input);
+    }
+}
+PHP
+
 cat > "$CTX/app/src/Kernel.php" <<'PHP'
 <?php
 namespace App;
 
 use FluffyDiscord\RoadRunnerBundle\FluffyDiscordRoadRunnerBundle;
 use Symfony\Bundle\FrameworkBundle\FrameworkBundle;
+use Symfony\Bundle\MonologBundle\MonologBundle;
 use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigurator;
 use Symfony\Component\HttpKernel\Kernel as BaseKernel;
 
@@ -279,7 +375,7 @@ class Kernel extends BaseKernel
 {
     public function registerBundles(): iterable
     {
-        return [new FrameworkBundle(), new FluffyDiscordRoadRunnerBundle()];
+        return [new FrameworkBundle(), new MonologBundle(), new FluffyDiscordRoadRunnerBundle()];
     }
 
     protected function configureContainer(ContainerConfigurator $c): void
@@ -288,6 +384,26 @@ class Kernel extends BaseKernel
             'secret' => 'validation-secret', 'test' => false,
             'http_method_override' => false, 'handle_all_throwables' => true,
             'php_errors' => ['log' => true],
+        ]);
+
+        $c->extension('monolog', [
+            'handlers' => [
+                'temporal' => ['type' => 'stream', 'path' => '/app/temporal-channel.log', 'level' => 'debug', 'channels' => ['temporal']],
+            ],
+        ]);
+
+        $c->extension('fluffy_discord_road_runner', [
+            'rr_config_path' => '.rr.yaml',
+            'temporal' => [
+                'tracing'        => true,
+                'worker_options' => [
+                    'default' => [
+                        'max_concurrent_activity_execution_size' => 5,
+                        'worker_stop_timeout'                    => '5 seconds',
+                        'workflow_panic_policy'                  => 'FailWorkflow',
+                    ],
+                ],
+            ],
         ]);
 
         // Register App\ classes as autowired/autoconfigured services so the bundle's compile-time
@@ -322,6 +438,8 @@ server:
         APP_DEBUG: "0"
         APP_SECRET: "validation-secret"
         TEMPORAL_INTERCEPTOR_MARKER: "/app/interceptor-marker"
+        TEMPORAL_APP_INTERCEPTOR_MARKER: "/app/app-interceptor-marker"
+        TEMPORAL_REPLAY_MARKER: "/app/replay-marker"
 temporal:
     address: "127.0.0.1:7233"
     activities:
@@ -341,6 +459,13 @@ cd /app
 export TEMPORAL_LIVE=1
 export TEMPORAL_ADDRESS="127.0.0.1:7233"
 export TEMPORAL_INTERCEPTOR_MARKER="/app/interceptor-marker"
+export TEMPORAL_APP_INTERCEPTOR_MARKER="/app/app-interceptor-marker"
+export TEMPORAL_CHANNEL_LOG="/app/temporal-channel.log"
+export TEMPORAL_REPLAY_MARKER="/app/replay-marker"
+export TEMPORAL_RR_BINARY="/app/rr"
+export TEMPORAL_RR_CONFIG="/app/.rr.yaml"
+export TEMPORAL_APP_KERNEL_CLASS='App\Kernel'
+export TEMPORAL_GRPC_INTERCEPTOR_MARKER="/app/grpc-interceptor-marker"
 
 dump_logs() {
   echo "----- temporal server log -----"; tail -n 60 /app/temporal.log 2>/dev/null || true

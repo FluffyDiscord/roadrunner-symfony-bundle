@@ -3,162 +3,231 @@
 {% block toolbar %}
     {% set icon %}
         {{ include('@FluffyDiscordRoadRunner/Collector/icon.svg') }}
+        <span class="sf-toolbar-value">{{ collector.calls|length }}</span>
+        <span class="sf-toolbar-label">calls · {{ '%.0f'|format(collector.callsDurationMilliseconds) }} ms</span>
     {% endset %}
     {% set text %}
-        <div class="sf-toolbar-info-piece">
-            <b>Temporal</b>
-        </div>
-
-        <div class="sf-toolbar-info-piece">
-            <b>Workers</b>
-            <span class="sf-toolbar-status">{{ collector.workers | length }}</span>
+        <div class="sf-toolbar-info-piece" data-testid="temporal-toolbar-calls">
+            <b>Client calls</b>
+            <span class="sf-toolbar-status">{{ collector.calls|length }}</span>
         </div>
         <div class="sf-toolbar-info-piece">
-            <b>Workflows</b>
-            <span class="sf-toolbar-status">{{ collector.workflows | length }}</span>
+            <b>Failed</b>
+            <span class="sf-toolbar-status{{ collector.failedCallCount > 0 ? ' sf-toolbar-status-red' }}">{{ collector.failedCallCount }}</span>
         </div>
         <div class="sf-toolbar-info-piece">
-            <b>Activities</b>
-            <span class="sf-toolbar-status">{{ collector.activities | length }}</span>
+            <b>Total time</b>
+            <span>{{ '%.1f'|format(collector.callsDurationMilliseconds) }} ms</span>
+        </div>
+        <div class="sf-toolbar-info-piece">
+            <b>Task queues</b>
+            <span class="sf-toolbar-status">{{ collector.workers|length }}</span>
         </div>
     {% endset %}
-    {{ include('@WebProfiler/Profiler/toolbar_item.html.twig', { 'link': true }) }}
+    {{ include('@WebProfiler/Profiler/toolbar_item.html.twig', { 'link': true, 'status': collector.failedCallCount > 0 ? 'red' : '' }) }}
 {% endblock %}
 
 {% block menu %}
-    <span class="label">
-    <span class="icon">
-    {{ include('@FluffyDiscordRoadRunner/Collector/icon.svg') }}
-    </span>
-    <strong>Temporal</strong>
+    <span class="label{{ collector.calls is empty ? ' disabled' }}">
+        <span class="icon">
+            {{ include('@FluffyDiscordRoadRunner/Collector/icon.svg') }}
+        </span>
+        <strong>Temporal</strong>
+        {% if collector.failedCallCount > 0 %}
+            <span class="count">{{ collector.failedCallCount }}</span>
+        {% endif %}
     </span>
 {% endblock %}
 
 {% block panel %}
-    <h2>Collected services</h2>
+    <div data-testid="temporal-panel">
+        <h2>Temporal</h2>
 
-    <div class="sf-tabs">
-        <div class="tab">
-            <h3 class="tab-title">Workers</h3>
-            <div class="tab-content">
-                {% if collector.workers is not empty %}
-                    <table>
+        <div class="metrics">
+            <div class="metric">
+                <span class="value">{{ collector.calls|length }}</span>
+                <span class="label">Client calls</span>
+            </div>
+            <div class="metric">
+                <span class="value">{{ collector.failedCallCount }}</span>
+                <span class="label">Failed</span>
+            </div>
+            <div class="metric">
+                <span class="value">{{ '%.1f'|format(collector.callsDurationMilliseconds) }} <span class="unit">ms</span></span>
+                <span class="label">Total time</span>
+            </div>
+        </div>
+
+        <h3>Client calls</h3>
+        {% if collector.calls is not empty %}
+            <table data-testid="temporal-calls">
+                <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Call</th>
+                    <th>Workflow</th>
+                    <th>Workflow&nbsp;ID</th>
+                    <th>Run&nbsp;ID</th>
+                    <th>Task&nbsp;queue</th>
+                    <th>Name</th>
+                    <th>Time</th>
+                    <th>Result</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for call in collector.calls %}
+                    <tr data-testid="temporal-call-{{ call.call }}-{{ call.workflowId }}-{{ call.sequence }}"{% if call.error is not null %} class="status-error"{% endif %}>
+                        <td class="font-normal">{{ call.sequence + 1 }}</td>
+                        <td class="font-normal"><span class="badge">{{ call.call }}</span></td>
+                        <td class="font-normal">{{ call.workflowType ?? '-' }}</td>
+                        <td class="font-normal">{{ call.workflowId }}</td>
+                        <td class="font-normal"><small>{{ call.runId ?? '-' }}</small></td>
+                        <td class="font-normal">
+                            {% if call.taskQueue is not null %}
+                                <span class="badge badge-success">{{ call.taskQueue }}</span>
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
+                        <td class="font-normal">{{ call.name ?? '-' }}</td>
+                        <td class="font-normal">{{ '%.1f'|format(call.durationMilliseconds) }}&nbsp;ms</td>
+                        <td class="font-normal">
+                            {% if call.error is null %}
+                                <span class="badge badge-success">ok</span>
+                            {% else %}
+                                <span class="badge badge-error">failed</span> {{ call.error }}
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <div class="empty" data-testid="temporal-calls-empty">
+                <p>No Temporal client calls during this request.</p>
+            </div>
+        {% endif %}
+
+        <h3>Registered</h3>
+        <div class="sf-tabs">
+            <div class="tab">
+                <h3 class="tab-title">Task queues</h3>
+                <div class="tab-content">
+                    <table data-testid="temporal-workers">
                         <thead>
                         <tr>
-                            <th>Class</th>
                             <th>Task&nbsp;queue</th>
+                            <th>Worker options</th>
                             <th>Workflows</th>
                             <th>Activities</th>
                         </tr>
                         </thead>
                         <tbody>
                         {% for worker in collector.workers %}
-                            <tr>
-                                <td class="font-normal">{{ worker.class }}</td>
+                            <tr data-testid="temporal-worker-{{ worker.taskQueue }}">
                                 <td class="font-normal">
-                                    <span class="badge badge-success">{{ worker.id }}</span>
+                                    <span class="badge badge-success">{{ worker.taskQueue }}</span>
                                 </td>
                                 <td class="font-normal">
-                                    {% if worker.workflows is not empty %}
+                                    {% if worker.options is not empty %}
+                                        <ul>
+                                            {% for option, value in worker.options %}
+                                                <li>{{ option }}: {{ value }}</li>
+                                            {% endfor %}
+                                        </ul>
+                                    {% else %}
+                                        SDK defaults
+                                    {% endif %}
+                                </td>
+                                <td class="font-normal">
+                                    <ul>
                                         {% for workflow in worker.workflows %}
-                                            <ul>
-                                                <li>{{ workflow.class }}{% if workflow.id %} <small>({{ workflow.id }})</small>{% endif %}</li>
-                                            </ul>
+                                            <li>{{ workflow.class }}{% if workflow.id %} <small>({{ workflow.id }})</small>{% endif %}</li>
+                                        {% else %}
+                                            <li>-</li>
                                         {% endfor %}
-                                    {% else %}
-                                        <div class="empty">
-                                            <p>No workflows assigned.</p>
-                                        </div>
-                                    {% endif %}
+                                    </ul>
                                 </td>
                                 <td class="font-normal">
-                                    {% if worker.activities is not empty %}
+                                    <ul>
                                         {% for activity in worker.activities %}
-                                            <ul>
-                                               <li>{{ activity.class }}{% if activity.id %} <small>({{ activity.id }})</small>{% endif %}</li>
-                                            </ul>
+                                            <li>{{ activity.class }}{% if activity.id %} <small>({{ activity.id }})</small>{% endif %}</li>
+                                        {% else %}
+                                            <li>-</li>
                                         {% endfor %}
-                                    {% else %}
-                                        <div class="empty">
-                                            <p>No activities assigned.</p>
-                                        </div>
-                                    {% endif %}
+                                    </ul>
                                 </td>
                             </tr>
                         {% endfor %}
                         </tbody>
                     </table>
-                {% else %}
-                    <div class="empty">
-                        <p>No workers registered.</p>
-                    </div>
-                {% endif %}
+                </div>
             </div>
-        </div>
-        <div class="tab">
-            <h3 class="tab-title">Workflows</h3>
-            <div class="tab-content">
-                {% if collector.workflows is not empty %}
-                    <table>
-                        <thead>
-                        <tr>
-                            <th>Class</th>
-                            <th>Type</th>
-                            <th>Task&nbsp;queue</th>
-                        </tr>
-                        </thead>
-                        <tbody>
-                        {% for workflow in collector.workflows %}
+            <div class="tab">
+                <h3 class="tab-title">Workflows</h3>
+                <div class="tab-content">
+                    {% if collector.workflows is not empty %}
+                        <table data-testid="temporal-workflows">
+                            <thead>
                             <tr>
-                                <td class="font-normal">{{ workflow.class }}</td>
-                                <td class="font-normal">{{ workflow.ids|join(', ') }}</td>
-                                <td class="font-normal">
-                                    {% for taskQueue in workflow.taskQueues %}
-                                        <span class="badge badge-success">{{ taskQueue }}</span>
-                                    {% endfor %}
-                                </td>
+                                <th>Class</th>
+                                <th>Type</th>
+                                <th>Task&nbsp;queue</th>
                             </tr>
-                        {% endfor %}
-                        </tbody>
-                    </table>
-                {% else %}
-                    <div class="empty">
-                        <p>No workflows registered.</p>
-                    </div>
-                {% endif %}
+                            </thead>
+                            <tbody>
+                            {% for workflow in collector.workflows %}
+                                <tr data-testid="temporal-workflow-{{ workflow.class|replace({'\\': '-'}) }}">
+                                    <td class="font-normal">{{ workflow.class }}</td>
+                                    <td class="font-normal">{{ workflow.ids|join(', ') }}</td>
+                                    <td class="font-normal">
+                                        {% for taskQueue in workflow.taskQueues %}
+                                            <span class="badge badge-success">{{ taskQueue }}</span>
+                                        {% endfor %}
+                                    </td>
+                                </tr>
+                            {% endfor %}
+                            </tbody>
+                        </table>
+                    {% else %}
+                        <div class="empty">
+                            <p>No workflows registered.</p>
+                        </div>
+                    {% endif %}
+                </div>
             </div>
-        </div>
-        <div class="tab">
-            <h3 class="tab-title">Activities</h3>
-            <div class="tab-content">
-                {% if collector.activities is not empty %}
-                    <table>
-                        <thead>
-                        <tr>
-                            <th>Class</th>
-                            <th>Type</th>
-                            <th>Task&nbsp;queue</th>
-                        </tr>
-                        </thead>
-                        <tbody>
-                        {% for activity in collector.activities %}
+            <div class="tab">
+                <h3 class="tab-title">Activities</h3>
+                <div class="tab-content">
+                    {% if collector.activities is not empty %}
+                        <table data-testid="temporal-activities">
+                            <thead>
                             <tr>
-                                <td class="font-normal">{{ activity.class }}</td>
-                                <td class="font-normal">{{ activity.ids|join(', ') }}</td>
-                                <td class="font-normal">
-                                    {% for taskQueue in activity.taskQueues %}
-                                        <span class="badge badge-success">{{ taskQueue }}</span>
-                                    {% endfor %}
-                                </td>
+                                <th>Class</th>
+                                <th>Type</th>
+                                <th>Task&nbsp;queue</th>
                             </tr>
-                        {% endfor %}
-                        </tbody>
-                    </table>
-                {% else %}
-                    <div class="empty">
-                        <p>No activities registered.</p>
-                    </div>
-                {% endif %}
+                            </thead>
+                            <tbody>
+                            {% for activity in collector.activities %}
+                                <tr data-testid="temporal-activity-{{ activity.class|replace({'\\': '-'}) }}">
+                                    <td class="font-normal">{{ activity.class }}</td>
+                                    <td class="font-normal">{{ activity.ids|join(', ') }}</td>
+                                    <td class="font-normal">
+                                        {% for taskQueue in activity.taskQueues %}
+                                            <span class="badge badge-success">{{ taskQueue }}</span>
+                                        {% endfor %}
+                                    </td>
+                                </tr>
+                            {% endfor %}
+                            </tbody>
+                        </table>
+                    {% else %}
+                        <div class="empty">
+                            <p>No activities registered.</p>
+                        </div>
+                    {% endif %}
+                </div>
             </div>
         </div>
     </div>

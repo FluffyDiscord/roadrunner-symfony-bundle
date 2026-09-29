@@ -1,5 +1,37 @@
 # Upgrade guide
 
+## v8.0 → v8.1
+
+### Temporal (beta)
+
+**Workers are config only.** `TemporalWorkerInterface`, `DefaultTemporalWorker`, `TemporalWorkerFactoryInterface`, `DefaultTemporalWorkerFactory` and `DuplicateTemporalWorkerException` are gone. One worker runs per task queue.
+
+```yaml
+# before
+temporal:
+    default_worker_options: { maxConcurrentActivityExecutionSize: 10 }
+    worker_options: { billing: { maxConcurrentActivityExecutionSize: 4 } }
+
+# after
+temporal:
+    worker_options:
+        default: { max_concurrent_activity_execution_size: 10 }
+        billing: { max_concurrent_activity_execution_size: 4, workflow_panic_policy: FailWorkflow }
+```
+
+- Option keys are snake_case; enums take the case name. A queue no `#[TaskQueue]` uses now fails the build.
+- Custom worker class → move its options to `worker_options.<queue>` and delete the class.
+- Custom `TemporalWorkerFactoryInterface` for a data converter → alias `Temporal\DataConverter\DataConverterInterface` to your converter. Anything else → decorate `Temporal\Worker\WorkerFactoryInterface`.
+- `TemporalIntrospectorInterface::workerSummaries()` returns `{taskQueue, options}` instead of `{class, taskQueue}`.
+
+**Commands renamed.** `temporal:debug` → `debug:temporal`; `temporal:diagram -o flow.mmd` → `debug:temporal --format=mermaid > flow.mmd`; `centrifugo:debug` → `debug:centrifugo`.
+
+**Interceptors you define now run.** Any service implementing a Temporal SDK interceptor interface joins the pipeline. Before, only the bundle's own did — check that yours are meant to run.
+
+**OpenTelemetry wires itself** when `temporal/open-telemetry-interceptors` is installed. Registered its interceptors yourself? Remove your definitions, or you get every span twice.
+
+**Activity failures are logged** on the `temporal` channel (error level) and sent to Sentry on the first attempt.
+
 ## v7 → v8
 
 ### Centrifugo

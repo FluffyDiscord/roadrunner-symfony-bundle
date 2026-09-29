@@ -9,6 +9,8 @@ use FluffyDiscord\RoadRunnerBundle\Temporal\Interceptor\Event\WorkflowClient\Sta
 use FluffyDiscord\RoadRunnerBundle\Temporal\Interceptor\Event\WorkflowOutboundCalls\ExecuteActivityEvent;
 use FluffyDiscord\RoadRunnerBundle\Temporal\Tracing\TemporalTracingListener;
 use FluffyDiscord\RoadRunnerBundle\Tests\BaseTestCase;
+use Psr\Log\LoggerInterface;
+use Sentry\State\HubInterface;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\RequestStack;
@@ -18,6 +20,8 @@ use Temporal\Interceptor\ActivityInbound\ActivityInput;
 use Temporal\Interceptor\Header;
 use Temporal\Interceptor\WorkflowClient\StartInput;
 use Temporal\Interceptor\WorkflowOutboundCalls\ExecuteActivityInput;
+use Temporal\Workflow;
+use Temporal\Workflow\WorkflowContextInterface;
 
 /**
  * TC-D13 / TC-D14 — the opt-in tracing listener and its conditional wiring.
@@ -66,6 +70,60 @@ class TemporalTracingListenerTest extends BaseTestCase
         $listener->onActivityInbound(new ActivityEvent(new ActivityInput(EncodedValues::empty(), Header::empty())));
 
         $this->expectNotToPerformAssertions();
+    }
+
+    public function testExecuteActivityLogsThroughTheReplayAwareWorkflowLogger(): void
+    {
+        $workflowLogger = $this->createMock(LoggerInterface::class);
+        $workflowLogger->expects(self::once())->method('debug')->with('Temporal: executing activity');
+
+        $injectedLogger = $this->createMock(LoggerInterface::class);
+        $injectedLogger->expects(self::never())->method('debug');
+
+        $this->enterWorkflowContext($workflowLogger, false);
+
+        (new TemporalTracingListener($injectedLogger, null, null))->onExecuteActivity($this->executeActivityEvent());
+    }
+
+    public function testExecuteActivitySkipsTheBreadcrumbWhileReplaying(): void
+    {
+        $hub = $this->createMock(HubInterface::class);
+        $hub->expects(self::never())->method('addBreadcrumb');
+
+        $this->enterWorkflowContext($this->createStub(LoggerInterface::class), true);
+
+        (new TemporalTracingListener(null, null, $hub))->onExecuteActivity($this->executeActivityEvent());
+    }
+
+    public function testExecuteActivityAddsTheBreadcrumbOnFirstExecution(): void
+    {
+        $hub = $this->createMock(HubInterface::class);
+        $hub->expects(self::once())->method('addBreadcrumb');
+
+        $this->enterWorkflowContext($this->createStub(LoggerInterface::class), false);
+
+        (new TemporalTracingListener(null, null, $hub))->onExecuteActivity($this->executeActivityEvent());
+    }
+
+    protected function tearDown(): void
+    {
+        Workflow::setCurrentContext(null);
+
+        parent::tearDown();
+    }
+
+    private function enterWorkflowContext(LoggerInterface $workflowLogger, bool $isReplaying): void
+    {
+        $context = $this->createStub(WorkflowContextInterface::class);
+        $context->method('getLogger')->willReturn($workflowLogger);
+        $context->method('isReplaying')->willReturn($isReplaying);
+
+        Workflow::setCurrentContext($context);
+    }
+
+    private function executeActivityEvent(): ExecuteActivityEvent
+    {
+        return new ExecuteActivityEvent(new ExecuteActivityInput('greeting.greet', [], null, null));
     }
 
     public function testListenerIsRegisteredOnlyWhenTracingEnabled(): void

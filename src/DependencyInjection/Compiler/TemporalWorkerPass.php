@@ -2,13 +2,13 @@
 
 namespace FluffyDiscord\RoadRunnerBundle\DependencyInjection\Compiler;
 
+use FluffyDiscord\RoadRunnerBundle\DataCollector\TemporalCollector;
 use FluffyDiscord\RoadRunnerBundle\Exception\ActivityNotAssignedException;
 use FluffyDiscord\RoadRunnerBundle\Exception\InvalidActivityStubException;
+use FluffyDiscord\RoadRunnerBundle\Exception\UnknownTaskQueueException;
 use FluffyDiscord\RoadRunnerBundle\Exception\WorkflowNotAssignedException;
 use FluffyDiscord\RoadRunnerBundle\Temporal\Attribute\TaskQueue;
-use FluffyDiscord\RoadRunnerBundle\Temporal\DefaultTemporalWorker;
 use FluffyDiscord\RoadRunnerBundle\Temporal\TemporalWorkerInitializer;
-use FluffyDiscord\RoadRunnerBundle\Temporal\TemporalWorkerInterface;
 use FluffyDiscord\RoadRunnerBundle\Temporal\Workflow\AbstractWorkflow;
 use FluffyDiscord\RoadRunnerBundle\Temporal\Workflow\ActivityStubReader;
 use FluffyDiscord\RoadRunnerBundle\Temporal\Workflow\HasActivityStubs;
@@ -21,12 +21,12 @@ use Temporal\Worker\WorkerFactoryInterface;
 use Temporal\Workflow\WorkflowInterface;
 
 /**
- * Records Temporal workflows/activities/workers on the initializer — including SDK markers placed on
+ * Records Temporal workflows/activities on the initializer — including SDK markers placed on
  * an interface, which Symfony attribute autoconfiguration cannot see, hence the definition scan.
  *
  * @internal
  */
-final class TemporalWorkerPass implements CompilerPassInterface
+class TemporalWorkerPass implements CompilerPassInterface
 {
     public function process(ContainerBuilder $container): void
     {
@@ -34,13 +34,15 @@ final class TemporalWorkerPass implements CompilerPassInterface
             return;
         }
 
+        $hasProfiler = $container->hasDefinition('profiler');
+        if (!$hasProfiler) {
+            $container->removeDefinition(TemporalCollector::class);
+        }
+
         $workerInitializer = $container->getDefinition(TemporalWorkerInitializer::class);
 
         /** @var array<string, true> $allTaskQueues */
-        $allTaskQueues = [];
-
-        /** @var array<string, true> $coveredQueues */
-        $coveredQueues = [];
+        $allTaskQueues = [WorkerFactoryInterface::DEFAULT_TASK_QUEUE => true];
 
         foreach ($container->getDefinitions() as $definition) {
             $class = $this->getClassFromDefinition($definition);
@@ -50,15 +52,6 @@ final class TemporalWorkerPass implements CompilerPassInterface
 
             $interfaces = $this->getDefinitionClassInterfaces($definition);
             $reflectionClass = new \ReflectionClass($class);
-
-            if (in_array(TemporalWorkerInterface::class, $interfaces, true)) {
-                $definition->addTag('fluffy_discord.roadrunner.temporal.worker');
-
-                foreach ($this->collectTaskQueues($reflectionClass, $interfaces) as $taskQueue) {
-                    $coveredQueues[$taskQueue] = true;
-                }
-                continue;
-            }
 
             $isActivity = $this->hasAttributeInHierarchy($reflectionClass, ActivityInterface::class, $interfaces);
             $isWorkflow = $this->hasAttributeInHierarchy($reflectionClass, WorkflowInterface::class, $interfaces);
@@ -98,7 +91,37 @@ final class TemporalWorkerPass implements CompilerPassInterface
             }
         }
 
-        $this->registerAutoWorkers($container, array_keys($allTaskQueues), $coveredQueues);
+        $this->validateWorkerOptionQueues($container, $allTaskQueues);
+    }
+
+    /**
+     * @param array<string, true> $declaredTaskQueues
+     */
+    private function validateWorkerOptionQueues(ContainerBuilder $container, array $declaredTaskQueues): void
+    {
+        $hasWorkerOptions = $container->hasParameter('fluffy_discord.roadrunner.temporal.worker_options');
+        if (!$hasWorkerOptions) {
+            return;
+        }
+
+        $workerOptions = $container->getParameter('fluffy_discord.roadrunner.temporal.worker_options');
+        if (!is_array($workerOptions)) {
+            return;
+        }
+
+        foreach (array_keys($workerOptions) as $taskQueue) {
+            $isDeclared = isset($declaredTaskQueues[$taskQueue]);
+            if ($isDeclared) {
+                continue;
+            }
+
+            throw new UnknownTaskQueueException(sprintf(
+                'Temporal "worker_options" configures task queue "%s", but no workflow or activity is assigned to it with #[%s]. Declared task queues: "%s".',
+                $taskQueue,
+                TaskQueue::class,
+                implode('", "', array_keys($declaredTaskQueues)),
+            ));
+        }
     }
 
     /**
@@ -148,50 +171,6 @@ final class TemporalWorkerPass implements CompilerPassInterface
                     throw new InvalidActivityStubException(sprintf('Activity stub %s has an unparseable duration "%s": %s', $where, $duration, $throwable->getMessage()));
                 }
             }
-        }
-    }
-
-    /**
-     * @param list<string>        $taskQueues
-     * @param array<string, true> $coveredQueues
-     */
-    private function registerAutoWorkers(ContainerBuilder $container, array $taskQueues, array $coveredQueues): void
-    {
-        if (!$container->hasDefinition(DefaultTemporalWorker::class)) {
-            return;
-        }
-
-        $perQueueOptions = $container->hasParameter('fluffy_discord.roadrunner.temporal.worker_options')
-            ? $container->getParameter('fluffy_discord.roadrunner.temporal.worker_options')
-            : [];
-
-        if (!is_array($perQueueOptions)) {
-            $perQueueOptions = [];
-        }
-
-        foreach ($taskQueues as $taskQueue) {
-            if ($taskQueue === WorkerFactoryInterface::DEFAULT_TASK_QUEUE || isset($coveredQueues[$taskQueue])) {
-                continue;
-            }
-
-            $serviceId = 'fluffy_discord.roadrunner.temporal.worker.' . preg_replace('/[^A-Za-z0-9_.]/', '_', $taskQueue);
-            if ($container->hasDefinition($serviceId)) {
-                continue;
-            }
-
-            $options = $perQueueOptions[$taskQueue] ?? [];
-            if (!is_array($options)) {
-                $options = [];
-            }
-
-            $definition = new Definition(DefaultTemporalWorker::class, [
-                $taskQueue,
-                $options,
-            ]);
-            $definition->setPublic(true);
-            $definition->addTag('fluffy_discord.roadrunner.temporal.worker');
-
-            $container->setDefinition($serviceId, $definition);
         }
     }
 

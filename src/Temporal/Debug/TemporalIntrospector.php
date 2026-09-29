@@ -15,7 +15,7 @@ use Temporal\Internal\Declaration\Reader\WorkflowReader;
  *
  * @phpstan-import-type StubRow from TemporalIntrospectorInterface
  */
-final class TemporalIntrospector implements TemporalIntrospectorInterface
+class TemporalIntrospector implements TemporalIntrospectorInterface
 {
     private ?WorkflowReader $workflowReader = null;
     private ?ActivityReader $activityReader = null;
@@ -41,7 +41,7 @@ final class TemporalIntrospector implements TemporalIntrospectorInterface
     /** @return list<string> all registered task-queue names, sorted */
     public function queues(): array
     {
-        $queues = array_keys($this->workflowsByQueue() + $this->activitiesByQueue());
+        $queues = $this->initializer->getTaskQueues();
         sort($queues);
 
         return $queues;
@@ -111,7 +111,7 @@ final class TemporalIntrospector implements TemporalIntrospectorInterface
         }
     }
 
-    /** @return list<array{class: class-string, taskQueue: string}> */
+    /** @return list<array{taskQueue: string, options: array<string, mixed>}> */
     public function workerSummaries(): array
     {
         return $this->initializer->getWorkerSummaries();

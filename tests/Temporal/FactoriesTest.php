@@ -4,13 +4,16 @@ namespace FluffyDiscord\RoadRunnerBundle\Tests\Temporal;
 
 use FluffyDiscord\RoadRunnerBundle\Exception\InvalidRPCConfigurationException;
 use FluffyDiscord\RoadRunnerBundle\Factory\RPCConnectionFactory;
-use FluffyDiscord\RoadRunnerBundle\Temporal\DefaultTemporalWorker;
-use FluffyDiscord\RoadRunnerBundle\Temporal\DefaultTemporalWorkerFactory;
 use FluffyDiscord\RoadRunnerBundle\Temporal\TemporalCredentialsFactory;
+use FluffyDiscord\RoadRunnerBundle\Temporal\TemporalWorkerInitializer;
 use FluffyDiscord\RoadRunnerBundle\Tests\BaseTestCase;
 use PHPUnit\Framework\Attributes\AllowMockObjectsWithoutExpectations;
 use Spiral\RoadRunner\EnvironmentInterface;
-use Temporal\DataConverter\DataConverterInterface;
+use Symfony\Component\HttpKernel\DependencyInjection\ServicesResetterInterface;
+use Symfony\Component\HttpKernel\KernelInterface;
+use Temporal\DataConverter\DataConverter;
+use Temporal\Exception\ExceptionInterceptor;
+use Temporal\Interceptor\SimplePipelineProvider;
 use Temporal\Worker\ServiceCredentials;
 use Temporal\Worker\Transport\RPCConnectionInterface;
 use Temporal\Worker\WorkerFactoryInterface;
@@ -79,47 +82,30 @@ class FactoriesTest extends BaseTestCase
         }
     }
 
-    // TC-06 — worker factory
-    public function testWorkerFactoryCreatesWorkerFactory(): void
-    {
-        $factory = new DefaultTemporalWorkerFactory(
-            $this->createMock(RPCConnectionInterface::class),
-            $this->createMock(DataConverterInterface::class),
-            ServiceCredentials::create(),
-        );
-
-        self::assertInstanceOf(WorkerFactory::class, $factory->create());
-    }
-
-    // TC-07 — DefaultTemporalWorker describes a queue and builds its WorkerOptions
-    public function testDefaultTemporalWorkerExposesQueueAndOptions(): void
-    {
-        $defaultWorker = new DefaultTemporalWorker('billing', ['maxConcurrentActivityExecutionSize' => 7]);
-
-        self::assertSame('billing', $defaultWorker->getTaskQueue());
-
-        $options = $defaultWorker->getWorkerOptions();
-        self::assertInstanceOf(WorkerOptions::class, $options);
-        self::assertSame(7, $options->maxConcurrentActivityExecutionSize);
-    }
-
-    // Every \DateInterval-typed worker option must be parsed into a \DateInterval (config carries an
-    // int of seconds) — a raw write would TypeError at worker boot. Reflect them all so a newly-added
-    // SDK duration option can't silently regress past this guard.
     public function testAllDurationWorkerOptionsAreParsedFromSeconds(): void
     {
         $durations = [];
         foreach ((new \ReflectionClass(WorkerOptions::class))->getProperties(\ReflectionProperty::IS_PUBLIC) as $property) {
             $type = $property->getType();
             if ($type instanceof \ReflectionNamedType && $type->getName() === 'DateInterval') {
-                $durations[] = $property->getName();
+                $durations[$property->getName()] = 30;
             }
         }
 
         self::assertNotEmpty($durations, 'expected WorkerOptions to expose at least one \DateInterval option');
 
-        foreach ($durations as $name) {
-            $value = (new DefaultTemporalWorker('default', [$name => 30]))->getWorkerOptions()->{$name};
+        $initializer = new TemporalWorkerInitializer(
+            $this->createStub(KernelInterface::class),
+            $this->createStub(ServicesResetterInterface::class),
+            new ExceptionInterceptor([\Error::class]),
+            new SimplePipelineProvider([]),
+            [WorkerFactoryInterface::DEFAULT_TASK_QUEUE => $durations],
+        );
+        $workerFactory = WorkerFactory::create(DataConverter::createDefault(), $this->createStub(RPCConnectionInterface::class));
+        $options = $initializer->initialize($workerFactory)[WorkerFactoryInterface::DEFAULT_TASK_QUEUE]->getOptions();
+
+        foreach (array_keys($durations) as $name) {
+            $value = $options->{$name};
 
             self::assertInstanceOf(\DateInterval::class, $value, "{$name} was not parsed into a DateInterval");
             self::assertSame(
@@ -128,13 +114,5 @@ class FactoriesTest extends BaseTestCase
                 "{$name} did not round-trip 30 seconds",
             );
         }
-    }
-
-    public function testDefaultTemporalWorkerDefaultsToTheDefaultQueue(): void
-    {
-        self::assertSame(
-            WorkerFactoryInterface::DEFAULT_TASK_QUEUE,
-            (new DefaultTemporalWorker())->getTaskQueue(),
-        );
     }
 }

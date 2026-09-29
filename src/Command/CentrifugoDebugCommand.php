@@ -9,8 +9,8 @@ use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
 
-#[AsCommand(name: 'centrifugo:debug', description: 'List the compile-time Centrifugo channel and RPC routing table (no server connection).')]
-final class CentrifugoDebugCommand extends Command
+#[AsCommand(name: 'debug:centrifugo', description: 'List the compile-time Centrifugo channel and RPC routing table (no server connection).')]
+class CentrifugoDebugCommand extends Command
 {
     public function __construct(
         private readonly CentrifugoEventRouter $router,

@@ -7,6 +7,7 @@ use Temporal\Client\WorkflowClientInterface;
 use Temporal\Client\WorkflowOptions;
 use Temporal\Common\IdReusePolicy;
 use Temporal\Common\RetryOptions;
+use Temporal\Common\TypedSearchAttributes;
 use Temporal\Common\WorkflowIdConflictPolicy;
 use Temporal\Exception\Client\WorkflowExecutionAlreadyStartedException;
 use Temporal\Workflow\WorkflowRunInterface;
@@ -22,6 +23,11 @@ final class PendingWorkflowStart
     /** @var int<0, max>|null */
     private ?int $retryAttempts = null;
     private ?float $retryBackoff = null;
+    /** @var array<string, mixed>|null */
+    private ?array $searchAttributes = null;
+    private ?TypedSearchAttributes $typedSearchAttributes = null;
+    /** @var array<string, mixed>|null */
+    private ?array $memo = null;
 
     /** @param class-string $workflowInterface */
     public function __construct(
@@ -84,6 +90,29 @@ final class PendingWorkflowStart
         return $this;
     }
 
+    /** @param array<string, mixed> $searchAttributes */
+    public function searchAttributes(array $searchAttributes): self
+    {
+        $this->searchAttributes = $searchAttributes;
+
+        return $this;
+    }
+
+    public function typedSearchAttributes(TypedSearchAttributes $searchAttributes): self
+    {
+        $this->typedSearchAttributes = $searchAttributes;
+
+        return $this;
+    }
+
+    /** @param array<string, mixed> $memo */
+    public function memo(array $memo): self
+    {
+        $this->memo = $memo;
+
+        return $this;
+    }
+
     public function start(mixed ...$args): WorkflowRunInterface
     {
         $stub = $this->client->newWorkflowStub($this->workflowInterface, $this->options());
@@ -125,6 +154,15 @@ final class PendingWorkflowStart
                     ->withMaximumAttempts($this->retryAttempts)
                     ->withBackoffCoefficient($this->retryBackoff ?? 2.0),
             );
+        }
+        if ($this->searchAttributes !== null) {
+            $options = $options->withSearchAttributes($this->searchAttributes);
+        }
+        if ($this->typedSearchAttributes !== null) {
+            $options = $options->withTypedSearchAttributes($this->typedSearchAttributes);
+        }
+        if ($this->memo !== null) {
+            $options = $options->withMemo($this->memo);
         }
 
         return $options;

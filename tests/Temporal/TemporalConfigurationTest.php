@@ -4,8 +4,11 @@ namespace FluffyDiscord\RoadRunnerBundle\Tests\Temporal;
 
 use FluffyDiscord\RoadRunnerBundle\DependencyInjection\Configuration;
 use FluffyDiscord\RoadRunnerBundle\Tests\BaseTestCase;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Component\Config\Definition\Exception\InvalidConfigurationException;
 use Symfony\Component\Config\Definition\Processor;
+use Temporal\Worker\WorkerDeploymentOptions;
+use Temporal\Worker\WorkerOptions;
 
 /**
  * TC-16 — the `temporal` config node (only defined when temporal/sdk is installed).
@@ -21,6 +24,21 @@ class TemporalConfigurationTest extends BaseTestCase
         return (new Processor())->processConfiguration(new Configuration(), $configs);
     }
 
+    /**
+     * @param array<string, mixed> $queueOptions
+     * @return array<string, mixed>
+     */
+    private function processQueueOptions(array $queueOptions): array
+    {
+        $config = $this->processConfig([[
+            'temporal' => [
+                'worker_options' => ['billing' => $queueOptions],
+            ],
+        ]]);
+
+        return $config['temporal']['worker_options']['billing'];
+    }
+
     public function testTemporalDefaults(): void
     {
         $config = $this->processConfig();
@@ -28,7 +46,9 @@ class TemporalConfigurationTest extends BaseTestCase
         self::assertArrayHasKey('temporal', $config);
         self::assertNull($config['temporal']['api_key']);
         self::assertSame([\Error::class], $config['temporal']['retryable_errors']);
-        self::assertSame([], $config['temporal']['default_worker_options']);
+        self::assertSame('default', $config['temporal']['namespace']);
+        self::assertFalse($config['temporal']['tracing']);
+        self::assertSame([], $config['temporal']['worker_options']);
     }
 
     public function testApiKeyAndRetryableErrorsPassThrough(): void
@@ -44,15 +64,6 @@ class TemporalConfigurationTest extends BaseTestCase
         self::assertSame([\LogicException::class, \RuntimeException::class], $config['temporal']['retryable_errors']);
     }
 
-    public function testClientAndTracingDefaults(): void
-    {
-        $config = $this->processConfig();
-
-        self::assertSame('default', $config['temporal']['namespace']);
-        self::assertFalse($config['temporal']['tracing']);
-        self::assertSame([], $config['temporal']['worker_options']);
-    }
-
     public function testNamespaceAndTracingPassThrough(): void
     {
         $config = $this->processConfig([[
@@ -66,65 +77,151 @@ class TemporalConfigurationTest extends BaseTestCase
         self::assertTrue($config['temporal']['tracing']);
     }
 
-    public function testPerQueueWorkerOptionsAreValidated(): void
+    /**
+     * @return array<string, string>
+     */
+    private static function getOptionNamesByPropertyName(): array
     {
-        $config = $this->processConfig([[
-            'temporal' => [
-                'worker_options' => ['billing' => ['maxConcurrentActivityExecutionSize' => 3]],
-            ],
-        ]]);
-
-        self::assertSame(['maxConcurrentActivityExecutionSize' => 3], $config['temporal']['worker_options']['billing']);
+        return [
+            'maxConcurrentActivityExecutionSize'      => 'max_concurrent_activity_execution_size',
+            'workerActivitiesPerSecond'               => 'worker_activities_per_second',
+            'maxConcurrentLocalActivityExecutionSize' => 'max_concurrent_local_activity_execution_size',
+            'workerLocalActivitiesPerSecond'          => 'worker_local_activities_per_second',
+            'taskQueueActivitiesPerSecond'            => 'task_queue_activities_per_second',
+            'maxConcurrentActivityTaskPollers'        => 'max_concurrent_activity_task_pollers',
+            'maxConcurrentWorkflowTaskExecutionSize'  => 'max_concurrent_workflow_task_execution_size',
+            'maxConcurrentWorkflowTaskPollers'        => 'max_concurrent_workflow_task_pollers',
+            'maxConcurrentNexusTaskExecutionSize'     => 'max_concurrent_nexus_task_execution_size',
+            'maxConcurrentNexusTaskPollers'           => 'max_concurrent_nexus_task_pollers',
+            'enableLoggingInReplay'                   => 'enable_logging_in_replay',
+            'stickyScheduleToStartTimeout'            => 'sticky_schedule_to_start_timeout',
+            'workflowPanicPolicy'                     => 'workflow_panic_policy',
+            'workerStopTimeout'                       => 'worker_stop_timeout',
+            'enableSessionWorker'                     => 'enable_session_worker',
+            'sessionResourceId'                       => 'session_resource_id',
+            'maxConcurrentSessionExecutionSize'       => 'max_concurrent_session_execution_size',
+            'disableWorkflowWorker'                   => 'disable_workflow_worker',
+            'localActivityWorkerOnly'                 => 'local_activity_worker_only',
+            'identity'                                => 'identity',
+            'deadlockDetectionTimeout'                => 'deadlock_detection_timeout',
+            'maxHeartbeatThrottleInterval'            => 'max_heartbeat_throttle_interval',
+            'disableEagerActivities'                  => 'disable_eager_activities',
+            'maxConcurrentEagerActivityExecutionSize' => 'max_concurrent_eager_activity_execution_size',
+            'disableRegistrationAliasing'             => 'disable_registration_aliasing',
+            'buildID'                                 => 'build_id',
+            'useBuildIDForVersioning'                 => 'use_build_id_for_versioning',
+        ];
     }
 
-    public function testUnknownPerQueueWorkerOptionIsRejected(): void
+    /**
+     * @return iterable<string, array{string, string}>
+     */
+    public static function configurableWorkerOptions(): iterable
+    {
+        foreach (self::getOptionNamesByPropertyName() as $propertyName => $optionName) {
+            yield $propertyName => [$optionName, $propertyName];
+        }
+    }
+
+    public function testEveryConfigurableWorkerOptionIsListed(): void
+    {
+        $propertyNames = array_map(
+            static fn (\ReflectionProperty $property): string => $property->getName(),
+            (new \ReflectionClass(WorkerOptions::class))->getProperties(\ReflectionProperty::IS_PUBLIC),
+        );
+        $configurablePropertyNames = array_values(array_diff($propertyNames, ['deploymentOptions']));
+
+        self::assertEqualsCanonicalizing($configurablePropertyNames, array_keys(self::getOptionNamesByPropertyName()));
+    }
+
+    #[DataProvider('configurableWorkerOptions')]
+    public function testEveryWorkerOptionIsConfigurableInSnakeCase(string $optionName, string $propertyName): void
+    {
+        $type = (new \ReflectionProperty(WorkerOptions::class, $propertyName))->getType();
+        $typeName = $type instanceof \ReflectionNamedType ? $type->getName() : '';
+
+        $value = match ($typeName) {
+            'int'          => 3,
+            'float'        => 1.5,
+            'bool'         => true,
+            'string'       => 'value',
+            'DateInterval' => '30 seconds',
+            default        => 'FailWorkflow',
+        };
+
+        self::assertSame([$propertyName => $value], $this->processQueueOptions([$optionName => $value]));
+    }
+
+    public function testAcronymPropertiesKeepTheirSnakeCaseName(): void
+    {
+        self::assertSame(
+            ['buildID' => 'v1', 'useBuildIDForVersioning' => true],
+            $this->processQueueOptions(['build_id' => 'v1', 'use_build_id_for_versioning' => true]),
+        );
+    }
+
+    public function testDurationAcceptsSeconds(): void
+    {
+        self::assertSame(['workerStopTimeout' => 30], $this->processQueueOptions(['worker_stop_timeout' => 30]));
+    }
+
+    public function testDurationAcceptsNumericStringSeconds(): void
+    {
+        self::assertSame(['workerStopTimeout' => '30'], $this->processQueueOptions(['worker_stop_timeout' => '30']));
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function invalidDurations(): iterable
+    {
+        yield 'unknown unit' => ['30 blorps'];
+        yield 'no amount' => ['bogus'];
+        yield 'spelled-out amount' => ['thirty seconds'];
+    }
+
+    #[DataProvider('invalidDurations')]
+    public function testUnparseableDurationIsRejected(string $duration): void
     {
         $this->expectException(InvalidConfigurationException::class);
-        $this->expectExceptionMessage('Unknown worker option "nope"');
+        $this->expectExceptionMessage('worker_stop_timeout');
 
-        $this->processConfig([[
-            'temporal' => [
-                'worker_options' => ['billing' => ['nope' => 1]],
-            ],
-        ]]);
+        $this->processQueueOptions(['worker_stop_timeout' => $duration]);
     }
 
-    public function testValidWorkerOptionPassesValidation(): void
+    public function testUnknownEnumCaseIsRejected(): void
     {
-        $config = $this->processConfig([[
-            'temporal' => [
-                'default_worker_options' => ['maxConcurrentActivityExecutionSize' => 5],
-            ],
-        ]]);
+        $this->expectException(InvalidConfigurationException::class);
+        $this->expectExceptionMessage('workflow_panic_policy');
 
-        self::assertSame(['maxConcurrentActivityExecutionSize' => 5], $config['temporal']['default_worker_options']);
+        $this->processQueueOptions(['workflow_panic_policy' => 'Explode']);
     }
 
     public function testUnknownWorkerOptionIsRejected(): void
     {
-        // The validator throws \InvalidArgumentException; the Symfony config layer
-        // wraps it in InvalidConfigurationException but preserves the message.
         $this->expectException(InvalidConfigurationException::class);
-        $this->expectExceptionMessage('Unknown worker option "thisDoesNotExist"');
+        $this->expectExceptionMessage('Unrecognized option "maxConcurrentActivityExecutionSize"');
 
-        $this->processConfig([[
-            'temporal' => [
-                'default_worker_options' => ['thisDoesNotExist' => 1],
-            ],
-        ]]);
+        $this->processQueueOptions(['maxConcurrentActivityExecutionSize' => 1]);
     }
 
-    public function testNonScalarWorkerOptionIsRejected(): void
+    public function testDeploymentOptionsAreNotConfigurable(): void
     {
-        // workflowPanicPolicy is a WorkflowPanicPolicy enum — the array config can't carry it, so the
-        // validator rejects it with guidance instead of letting it TypeError when the worker boots.
-        $this->expectException(InvalidConfigurationException::class);
-        $this->expectExceptionMessage('Worker option "workflowPanicPolicy" cannot be set from configuration');
+        self::assertTrue(class_exists(WorkerDeploymentOptions::class));
 
-        $this->processConfig([[
+        $this->expectException(InvalidConfigurationException::class);
+
+        $this->processQueueOptions(['deployment_options' => []]);
+    }
+
+    public function testDashedQueueNamesAreKept(): void
+    {
+        $config = $this->processConfig([[
             'temporal' => [
-                'default_worker_options' => ['workflowPanicPolicy' => 0],
+                'worker_options' => ['billing-eu' => ['max_concurrent_activity_execution_size' => 2]],
             ],
         ]]);
+
+        self::assertSame(['billing-eu'], array_keys($config['temporal']['worker_options']));
     }
 }

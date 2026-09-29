@@ -41,6 +41,6 @@ interface TemporalIntrospectorInterface
      */
     public function activityIds(string $class): array;
 
-    /** @return list<array{class: class-string, taskQueue: string}> */
+    /** @return list<array{taskQueue: string, options: array<string, mixed>}> */
     public function workerSummaries(): array;
 }

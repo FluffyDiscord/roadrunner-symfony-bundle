@@ -435,7 +435,7 @@ fluffy_discord_road_runner:
     bus: ~                     # Messenger bus service id (default: application's default bus)
 ```
 
-> **Wire format** (`x-job-class` / `x-job-serializer` headers, message FQCN as the RR job name) is a stable contract — changing it breaks in-flight queued tasks across an upgrade (`docs/specs/jobs-message-bus.md`).
+> **Wire format** (`x-job-class` / `x-job-serializer` headers, message FQCN as the RR job name) is a stable contract — changing it breaks in-flight queued tasks across an upgrade.
 
 ## Worker warmup
 
@@ -514,9 +514,9 @@ if ($lock->acquire()) { /* ... */ $lock->release(); }
 composer require temporal/sdk
 ```
 
-Activates automatically. Assign workflows/activities to a worker's task queue with `#[TaskQueue]`, run them under RR's `temporal` plugin, react to interceptor calls via Symfony events. A profiler tab lists registered workers, workflows and activities.
+Activates automatically. Assign workflows/activities to a task queue with `#[TaskQueue]`, tune each queue's worker in config, start workflows with the autowired client. Interceptors and OpenTelemetry plug in by just existing; activity failures reach your logs and Sentry; every log line inside a workflow or activity carries its workflow id; the profiler shows every Temporal call a request made. `bin/console debug:temporal` lists what is registered.
 
-**→ [`docs/temporal.md`](docs/temporal.md)** — defining activities/workflows, configuration, starting a workflow, interceptor events.
+**→ [`docs/temporal.md`](docs/temporal.md)** — activities, workflows, workers, starting workflows, observability.
 
 ## Developing with Symfony and RoadRunner
 

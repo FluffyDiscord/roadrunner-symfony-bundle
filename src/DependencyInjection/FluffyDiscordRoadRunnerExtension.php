@@ -52,6 +52,7 @@ use Symfony\Component\DependencyInjection\Reference;
 use Symfony\Component\Yaml\Yaml;
 use Sentry\State\HubInterface as SentryHubInterface;
 use Temporal\Client\GRPC\ServiceClientInterface;
+use Temporal\Internal\Interceptor\Interceptor;
 use Temporal\Workflow\WorkflowInterface;
 
 class FluffyDiscordRoadRunnerExtension extends Extension implements PrependExtensionInterface
@@ -74,6 +75,13 @@ class FluffyDiscordRoadRunnerExtension extends Extension implements PrependExten
 
         if ($container->getParameter('kernel.debug')) {
             $loader->load("debug.php");
+        }
+
+        if (class_exists(WorkflowInterface::class)) {
+            $container
+                ->registerForAutoconfiguration(Interceptor::class)
+                ->addTag('fluffy_discord.roadrunner.temporal.interceptor')
+            ;
         }
 
         if (class_exists(RoadRunnerCentrifugoWorker::class)) {
@@ -116,7 +124,7 @@ class FluffyDiscordRoadRunnerExtension extends Extension implements PrependExten
         }
 
         $configuration = $this->getConfiguration([], $container);
-        /** @var array{http: array{lazy_boot: bool, request_factory: 'auto'|'native'|'psr7'}, warmup: array{enabled: bool, learn: bool, learn_requests: int, manifest_path: ?string}, centrifugo: array{lazy_boot: bool}, jobs: array{lazy_boot: bool, serializer: 'native'|'igbinary'|'symfony'|null, default_queue: non-empty-string, bus: ?string}, doctrine: array{preconnect: bool}, kv: array{auto_register: bool, serializer: ?string, keypair_path: ?string}, rr_config_path: ?string, temporal?: array{namespace?: string, tracing?: bool, api_key?: ?string, retryable_errors?: list<string>, default_worker_options?: array<string, mixed>, worker_options?: array<string, array<string, mixed>>}} $config */
+        /** @var array{http: array{lazy_boot: bool, request_factory: 'auto'|'native'|'psr7'}, warmup: array{enabled: bool, learn: bool, learn_requests: int, manifest_path: ?string}, centrifugo: array{lazy_boot: bool}, jobs: array{lazy_boot: bool, serializer: 'native'|'igbinary'|'symfony'|null, default_queue: non-empty-string, bus: ?string}, doctrine: array{preconnect: bool}, kv: array{auto_register: bool, serializer: ?string, keypair_path: ?string}, rr_config_path: ?string, temporal?: array{namespace?: string, tracing?: bool, api_key?: ?string, retryable_errors?: list<string>, worker_options?: array<string, array<string, mixed>>}} $config */
         $config = $this->processConfiguration($configuration, $configs);
 
         if ($container->hasDefinition(HttpWorker::class)) {
@@ -256,7 +264,7 @@ class FluffyDiscordRoadRunnerExtension extends Extension implements PrependExten
     }
 
     /**
-     * @param array{rr_config_path: ?string, temporal?: array{namespace?: string, tracing?: bool, api_key?: ?string, retryable_errors?: list<string>, default_worker_options?: array<string, mixed>, worker_options?: array<string, array<string, mixed>>}} $config
+     * @param array{rr_config_path: ?string, temporal?: array{namespace?: string, tracing?: bool, api_key?: ?string, retryable_errors?: list<string>, worker_options?: array<string, array<string, mixed>>}} $config
      */
     private function setTemporalParameters(array $config, ContainerBuilder $container): void
     {
@@ -268,7 +276,6 @@ class FluffyDiscordRoadRunnerExtension extends Extension implements PrependExten
         $container->setParameter('fluffy_discord.roadrunner.temporal.namespace', $temporal['namespace'] ?? 'default');
         $container->setParameter('fluffy_discord.roadrunner.temporal.api_key', $temporal['api_key'] ?? null);
         $container->setParameter('fluffy_discord.roadrunner.temporal.retryable_errors', $temporal['retryable_errors'] ?? [\Error::class]);
-        $container->setParameter('fluffy_discord.roadrunner.temporal.default_worker_options', $temporal['default_worker_options'] ?? []);
         $container->setParameter('fluffy_discord.roadrunner.temporal.worker_options', $temporal['worker_options'] ?? []);
 
         if ($container->hasDefinition(ServiceClientInterface::class)) {
@@ -315,7 +322,7 @@ class FluffyDiscordRoadRunnerExtension extends Extension implements PrependExten
     }
 
     /**
-     * See docs/specs/worker-warmup.md. All wiring lives here (config-flag-gated), not in
+     * All wiring lives here (config-flag-gated), not in
      * config/services.php — same rule as registerDoctrinePreconnect.
      *
      * @param array{enabled: bool, learn: bool, learn_requests: int, manifest_path: ?string} $warmupConfig

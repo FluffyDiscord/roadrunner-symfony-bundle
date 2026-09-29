@@ -5,12 +5,13 @@ namespace FluffyDiscord\RoadRunnerBundle\Tests\Temporal;
 use FluffyDiscord\RoadRunnerBundle\DependencyInjection\Compiler\TemporalWorkerPass;
 use FluffyDiscord\RoadRunnerBundle\DependencyInjection\FluffyDiscordRoadRunnerExtension;
 use FluffyDiscord\RoadRunnerBundle\FluffyDiscordRoadRunnerBundle;
-use FluffyDiscord\RoadRunnerBundle\Temporal\DefaultTemporalWorker;
 use FluffyDiscord\RoadRunnerBundle\Temporal\Debug\TemporalIntrospector;
 use FluffyDiscord\RoadRunnerBundle\Temporal\Debug\TemporalIntrospectorInterface;
+use FluffyDiscord\RoadRunnerBundle\Temporal\TemporalWorkerInitializer;
 use FluffyDiscord\RoadRunnerBundle\Tests\BaseTestCase;
 use Symfony\Component\DependencyInjection\Compiler\CompilerPassInterface;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
+use Symfony\Component\DependencyInjection\Definition;
 use Temporal\Client\ClientOptions;
 use Temporal\Client\GRPC\ServiceClientInterface;
 use Temporal\Exception\ExceptionInterceptor;
@@ -51,25 +52,34 @@ class TemporalParametersTest extends BaseTestCase
             'namespace'              => 'my_ns',
             'api_key'                => 'secret',
             'retryable_errors'       => [\LogicException::class],
-            'default_worker_options' => ['maxConcurrentActivityExecutionSize' => 7],
-            'worker_options'         => ['billing' => ['maxConcurrentActivityExecutionSize' => 3]],
+            'worker_options'         => [
+                'default'    => ['max_concurrent_activity_execution_size' => 7],
+                'billing-eu' => ['max_concurrent_activity_execution_size' => 3, 'workflow_panic_policy' => 'FailWorkflow'],
+            ],
         ]);
 
         self::assertSame('my_ns', $container->getParameter('fluffy_discord.roadrunner.temporal.namespace'));
         self::assertSame('secret', $container->getParameter('fluffy_discord.roadrunner.temporal.api_key'));
         self::assertSame([\LogicException::class], $container->getParameter('fluffy_discord.roadrunner.temporal.retryable_errors'));
-        self::assertSame(['maxConcurrentActivityExecutionSize' => 7], $container->getParameter('fluffy_discord.roadrunner.temporal.default_worker_options'));
-        self::assertSame(['billing' => ['maxConcurrentActivityExecutionSize' => 3]], $container->getParameter('fluffy_discord.roadrunner.temporal.worker_options'));
+        self::assertSame(
+            [
+                'default'    => ['maxConcurrentActivityExecutionSize' => 7],
+                'billing-eu' => ['maxConcurrentActivityExecutionSize' => 3, 'workflowPanicPolicy' => 'FailWorkflow'],
+            ],
+            $container->getParameter('fluffy_discord.roadrunner.temporal.worker_options'),
+        );
         self::assertSame('127.0.0.1:7233', $container->getParameter('fluffy_discord.roadrunner.temporal.address'));
 
         // The autowired clients must reference those parameters, not literal values — guards against a
         // dropped param() reference re-introducing the old hardcoded-then-overwritten wiring.
-        self::assertSame('%fluffy_discord.roadrunner.temporal.address%', (string) $container->getDefinition(ServiceClientInterface::class)->getArgument(0));
-        self::assertSame('%fluffy_discord.roadrunner.temporal.api_key%', (string) $container->getDefinition(ServiceClientInterface::class)->getArgument(1));
+        $baseServiceClient = $container->getDefinition(ServiceClientInterface::class)->getFactory()[0];
+        self::assertInstanceOf(Definition::class, $baseServiceClient);
+        self::assertSame('%fluffy_discord.roadrunner.temporal.address%', (string) $baseServiceClient->getArgument(0));
+        self::assertSame('%fluffy_discord.roadrunner.temporal.api_key%', (string) $baseServiceClient->getArgument(1));
         self::assertSame('%fluffy_discord.roadrunner.temporal.namespace%', (string) $container->getDefinition(ClientOptions::class)->getArgument(0));
         self::assertSame('%fluffy_discord.roadrunner.temporal.api_key%', (string) $container->getDefinition(ServiceCredentials::class)->getArgument(0));
         self::assertSame('%fluffy_discord.roadrunner.temporal.retryable_errors%', (string) $container->getDefinition(ExceptionInterceptor::class)->getArgument(0));
-        self::assertSame('%fluffy_discord.roadrunner.temporal.default_worker_options%', (string) $container->getDefinition(DefaultTemporalWorker::class)->getArgument(1));
+        self::assertSame('%fluffy_discord.roadrunner.temporal.worker_options%', (string) $container->getDefinition(TemporalWorkerInitializer::class)->getArgument('$workerOptions'));
     }
 
     public function testDefaultsAreSetWhenTemporalNodeEmpty(): void
@@ -79,7 +89,6 @@ class TemporalParametersTest extends BaseTestCase
         self::assertSame('default', $container->getParameter('fluffy_discord.roadrunner.temporal.namespace'));
         self::assertNull($container->getParameter('fluffy_discord.roadrunner.temporal.api_key'));
         self::assertSame([\Error::class], $container->getParameter('fluffy_discord.roadrunner.temporal.retryable_errors'));
-        self::assertSame([], $container->getParameter('fluffy_discord.roadrunner.temporal.default_worker_options'));
         self::assertSame([], $container->getParameter('fluffy_discord.roadrunner.temporal.worker_options'));
     }
 

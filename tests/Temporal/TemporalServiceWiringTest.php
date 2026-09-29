@@ -4,6 +4,8 @@ namespace FluffyDiscord\RoadRunnerBundle\Tests\Temporal;
 
 use FluffyDiscord\RoadRunnerBundle\Temporal\Interceptor\WorkflowInboundCallsInterceptor;
 use FluffyDiscord\RoadRunnerBundle\Temporal\Interceptor\WorkflowOutboundCallsInterceptor;
+use FluffyDiscord\RoadRunnerBundle\Temporal\Logging\TemporalLogProcessor;
+use FluffyDiscord\RoadRunnerBundle\Temporal\Transport\WorkflowContextClearingHostConnection;
 use FluffyDiscord\RoadRunnerBundle\Tests\BaseTestCase;
 use FluffyDiscord\RoadRunnerBundle\Worker\TemporalWorker;
 use FluffyDiscord\RoadRunnerBundle\Worker\WorkerRegistry;
@@ -16,6 +18,7 @@ use Temporal\Client\WorkflowClient;
 use Temporal\Client\WorkflowClientInterface;
 use Temporal\DataConverter\DataConverterInterface;
 use Temporal\Interceptor\PipelineProvider;
+use Temporal\Worker\Transport\HostConnectionInterface;
 
 /**
  * TC-01 / TC-17 — Temporal services are wired and registered under MODE_TEMPORAL,
@@ -67,6 +70,24 @@ class TemporalServiceWiringTest extends BaseTestCase
         $alias = $container->getAlias(\Temporal\Interceptor\WorkflowOutboundCallsInterceptor::class);
 
         self::assertSame(WorkflowOutboundCallsInterceptor::class, (string) $alias);
+    }
+
+    public function testLogProcessorJoinsEveryMonologChannel(): void
+    {
+        $container = $this->loadServices();
+
+        $processorTags = $container->getDefinition(TemporalLogProcessor::class)->getTag('monolog.processor');
+
+        self::assertSame([[]], $processorTags);
+    }
+
+    public function testHostConnectionClearsTheWorkflowContextAfterEachTick(): void
+    {
+        $container = $this->loadServices();
+
+        $decoratedService = $container->getDefinition(WorkflowContextClearingHostConnection::class)->getDecoratedService();
+
+        self::assertSame(HostConnectionInterface::class, $decoratedService[0] ?? null);
     }
 
     public function testWorkerRegistryIsRegisteredAndPublic(): void

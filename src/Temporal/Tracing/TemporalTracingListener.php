@@ -9,8 +9,9 @@ use Psr\Log\LoggerInterface;
 use Sentry\Breadcrumb;
 use Sentry\State\HubInterface as SentryHubInterface;
 use Symfony\Component\HttpFoundation\RequestStack;
+use Temporal\Workflow;
 
-final class TemporalTracingListener
+class TemporalTracingListener
 {
     public const CORRELATION_HEADER = 'x-correlation-id';
 
@@ -52,8 +53,18 @@ final class TemporalTracingListener
     {
         $type = $event->getInput()->type;
 
-        $this->logger?->debug('Temporal: executing activity', ['activity' => $type]);
-        $this->breadcrumb(sprintf('Execute activity %s', $type), ['activity' => $type]);
+        if ($this->logger !== null) {
+            Workflow::getLogger()->debug('Temporal: executing activity', ['activity' => $type]);
+        }
+
+        if ($this->hub === null) {
+            return;
+        }
+
+        $isReplaying = Workflow::isReplaying();
+        if (!$isReplaying) {
+            $this->breadcrumb(sprintf('Execute activity %s', $type), ['activity' => $type]);
+        }
     }
 
     public function onActivityInbound(ActivityEvent $event): void

@@ -2,10 +2,11 @@
 
 namespace FluffyDiscord\RoadRunnerBundle\Tests\Temporal;
 
+use FluffyDiscord\RoadRunnerBundle\DataCollector\TemporalCollector;
 use FluffyDiscord\RoadRunnerBundle\DependencyInjection\Compiler\TemporalWorkerPass;
 use FluffyDiscord\RoadRunnerBundle\Exception\ActivityNotAssignedException;
+use FluffyDiscord\RoadRunnerBundle\Exception\UnknownTaskQueueException;
 use FluffyDiscord\RoadRunnerBundle\Exception\WorkflowNotAssignedException;
-use FluffyDiscord\RoadRunnerBundle\Temporal\DefaultTemporalWorker;
 use FluffyDiscord\RoadRunnerBundle\Temporal\TemporalWorkerInitializer;
 use FluffyDiscord\RoadRunnerBundle\Tests\BaseTestCase;
 use FluffyDiscord\RoadRunnerBundle\Tests\Temporal\Fixtures\GreetingActivity;
@@ -15,7 +16,7 @@ use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\Definition;
 
 /**
- * TC-03 — the compile-time scan that tags workflows/activities/workers and records
+ * TC-03 — the compile-time scan that tags workflows/activities and records
  * addWorkflow/addActivity calls on the initializer.
  */
 class ExtensionTemporalPassTest extends BaseTestCase
@@ -61,59 +62,53 @@ class ExtensionTemporalPassTest extends BaseTestCase
         }
     }
 
-    public function testWorkerImplementationsAreTagged(): void
+    public function testWorkerOptionsForDeclaredQueuesAreAccepted(): void
     {
         $container = $this->containerWithInitializer();
-        $container->setDefinition(DefaultTemporalWorker::class, new Definition(DefaultTemporalWorker::class));
-
-        (new TemporalWorkerPass())->process($container);
-
-        self::assertTrue(
-            $container->getDefinition(DefaultTemporalWorker::class)->hasTag('fluffy_discord.roadrunner.temporal.worker'),
-        );
-    }
-
-    public function testAutoWorkerRegisteredForNonDefaultQueue(): void
-    {
-        $container = $this->containerWithInitializer();
-        $container->setDefinition(DefaultTemporalWorker::class, new Definition(DefaultTemporalWorker::class));
         $container->setDefinition(BillingWorkflowForTest::class, new Definition(BillingWorkflowForTest::class));
+        $container->setParameter('fluffy_discord.roadrunner.temporal.worker_options', [
+            'default' => ['maxConcurrentActivityExecutionSize' => 10],
+            'billing' => ['maxConcurrentActivityExecutionSize' => 4],
+        ]);
 
         (new TemporalWorkerPass())->process($container);
 
-        $autoWorkerId = 'fluffy_discord.roadrunner.temporal.worker.billing';
-        self::assertTrue($container->hasDefinition($autoWorkerId));
-
-        $definition = $container->getDefinition($autoWorkerId);
-        self::assertSame(DefaultTemporalWorker::class, $definition->getClass());
-        self::assertSame('billing', $definition->getArgument(0));
-        self::assertTrue($definition->hasTag('fluffy_discord.roadrunner.temporal.worker'));
+        $this->expectNotToPerformAssertions();
     }
 
-    public function testNoAutoWorkerForDefaultQueue(): void
+    public function testWorkerOptionsForUndeclaredQueueFailTheBuild(): void
     {
         $container = $this->containerWithInitializer();
-        $container->setDefinition(DefaultTemporalWorker::class, new Definition(DefaultTemporalWorker::class));
-        $container->setDefinition(GreetingWorkflow::class, new Definition(GreetingWorkflow::class));
-
-        (new TemporalWorkerPass())->process($container);
-
-        self::assertFalse($container->hasDefinition('fluffy_discord.roadrunner.temporal.worker.default'));
-    }
-
-    public function testNoAutoWorkerWhenUserWorkerClaimsQueue(): void
-    {
-        // A user worker declaring #[TaskQueue('billing')] means the bundle must NOT register a
-        // default worker for billing next to it.
-        $container = $this->containerWithInitializer();
-        $container->setDefinition(DefaultTemporalWorker::class, new Definition(DefaultTemporalWorker::class));
         $container->setDefinition(BillingWorkflowForTest::class, new Definition(BillingWorkflowForTest::class));
-        $container->setDefinition(BillingWorkerForTest::class, new Definition(BillingWorkerForTest::class));
+        $container->setParameter('fluffy_discord.roadrunner.temporal.worker_options', [
+            'biling' => ['maxConcurrentActivityExecutionSize' => 4],
+        ]);
+
+        $this->expectException(UnknownTaskQueueException::class);
+        $this->expectExceptionMessage('"biling"');
+
+        (new TemporalWorkerPass())->process($container);
+    }
+
+    public function testCollectorIsRemovedWithoutProfiler(): void
+    {
+        $container = $this->containerWithInitializer();
+        $container->setDefinition(TemporalCollector::class, new Definition(TemporalCollector::class));
 
         (new TemporalWorkerPass())->process($container);
 
-        self::assertFalse($container->hasDefinition('fluffy_discord.roadrunner.temporal.worker.billing'));
-        self::assertTrue($container->getDefinition(BillingWorkerForTest::class)->hasTag('fluffy_discord.roadrunner.temporal.worker'));
+        self::assertFalse($container->hasDefinition(TemporalCollector::class));
+    }
+
+    public function testCollectorIsKeptWithProfiler(): void
+    {
+        $container = $this->containerWithInitializer();
+        $container->setDefinition('profiler', new Definition(\stdClass::class));
+        $container->setDefinition(TemporalCollector::class, new Definition(TemporalCollector::class));
+
+        (new TemporalWorkerPass())->process($container);
+
+        self::assertTrue($container->hasDefinition(TemporalCollector::class));
     }
 
     public function testActivityWithoutAssignmentThrows(): void
@@ -155,19 +150,5 @@ class BillingWorkflowForTest
     public function run(): \Generator
     {
         yield;
-    }
-}
-
-#[\FluffyDiscord\RoadRunnerBundle\Temporal\Attribute\TaskQueue('billing')]
-class BillingWorkerForTest implements \FluffyDiscord\RoadRunnerBundle\Temporal\TemporalWorkerInterface
-{
-    public function getTaskQueue(): string
-    {
-        return 'billing';
-    }
-
-    public function getWorkerOptions(): \Temporal\Worker\WorkerOptions
-    {
-        return \Temporal\Worker\WorkerOptions::new();
     }
 }

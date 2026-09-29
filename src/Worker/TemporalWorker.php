@@ -4,13 +4,13 @@ namespace FluffyDiscord\RoadRunnerBundle\Worker;
 
 use FluffyDiscord\RoadRunnerBundle\ErrorHandler\BootFailureReporting;
 use FluffyDiscord\RoadRunnerBundle\Event\Worker\WorkerBootingEvent;
-use FluffyDiscord\RoadRunnerBundle\Temporal\TemporalWorkerFactoryInterface;
 use FluffyDiscord\RoadRunnerBundle\Temporal\TemporalWorkerInitializer;
 use FluffyDiscord\RoadRunnerBundle\Temporal\TemporalWorkerRegistry;
 use Sentry\State\HubInterface as SentryHubInterface;
 use Symfony\Component\EventDispatcher\EventDispatcherInterface;
 use Symfony\Component\HttpKernel\KernelInterface;
 use Temporal\Worker\Transport\HostConnectionInterface;
+use Temporal\Worker\WorkerFactoryInterface;
 use Temporal\WorkerFactory;
 
 class TemporalWorker implements WorkerInterface
@@ -18,13 +18,13 @@ class TemporalWorker implements WorkerInterface
     use BootFailureReporting;
 
     public function __construct(
-        private readonly KernelInterface                $kernel,
-        private readonly EventDispatcherInterface       $eventDispatcher,
-        private readonly TemporalWorkerFactoryInterface $temporalWorkerFactory,
-        private readonly TemporalWorkerInitializer      $temporalWorkerInitializer,
-        private readonly TemporalWorkerRegistry         $temporalWorkerRegistry,
-        private readonly HostConnectionInterface        $hostConnection,
-        private readonly ?SentryHubInterface            $sentryHubInterface = null,
+        private readonly KernelInterface           $kernel,
+        private readonly EventDispatcherInterface  $eventDispatcher,
+        private readonly WorkerFactoryInterface    $workerFactory,
+        private readonly TemporalWorkerInitializer $temporalWorkerInitializer,
+        private readonly TemporalWorkerRegistry    $temporalWorkerRegistry,
+        private readonly HostConnectionInterface   $hostConnection,
+        private readonly ?SentryHubInterface       $sentryHubInterface = null,
     )
     {
     }
@@ -39,18 +39,16 @@ class TemporalWorker implements WorkerInterface
             $this->reportBootFailure($bootThrowable);
         }
 
-        $workerFactory = $this->temporalWorkerFactory->create();
-
-        foreach ($this->temporalWorkerInitializer->initialize($workerFactory) as $entry) {
-            $this->temporalWorkerRegistry->add($entry['taskQueue'], $entry['worker']);
+        foreach ($this->temporalWorkerInitializer->initialize($this->workerFactory) as $taskQueue => $worker) {
+            $this->temporalWorkerRegistry->add($taskQueue, $worker);
         }
 
         try {
             // WorkerFactoryInterface::run() declares no parameters; only the concrete WorkerFactory accepts the host connection.
-            if ($workerFactory instanceof WorkerFactory) {
-                $workerFactory->run($this->hostConnection);
+            if ($this->workerFactory instanceof WorkerFactory) {
+                $this->workerFactory->run($this->hostConnection);
             } else {
-                $workerFactory->run();
+                $this->workerFactory->run();
             }
         } catch (\Throwable $throwable) {
             try {

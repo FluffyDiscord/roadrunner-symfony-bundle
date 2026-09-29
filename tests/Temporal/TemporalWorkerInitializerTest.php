@@ -2,132 +2,211 @@
 
 namespace FluffyDiscord\RoadRunnerBundle\Tests\Temporal;
 
-use FluffyDiscord\RoadRunnerBundle\Exception\DuplicateTemporalWorkerException;
-use FluffyDiscord\RoadRunnerBundle\Temporal\DefaultTemporalWorker;
 use FluffyDiscord\RoadRunnerBundle\Temporal\TemporalWorkerInitializer;
-use FluffyDiscord\RoadRunnerBundle\Temporal\TemporalWorkerInterface;
 use FluffyDiscord\RoadRunnerBundle\Tests\BaseTestCase;
 use FluffyDiscord\RoadRunnerBundle\Tests\Temporal\Fixtures\GreetingActivity;
 use FluffyDiscord\RoadRunnerBundle\Tests\Temporal\Fixtures\GreetingWorkflow;
-use PHPUnit\Framework\Attributes\AllowMockObjectsWithoutExpectations;
-use Symfony\Component\HttpKernel\DependencyInjection\ServicesResetterInterface;
+use Psr\Log\LoggerInterface;
+use Sentry\State\HubInterface;
+use Symfony\Component\DependencyInjection\ServicesResetterInterface;
 use Symfony\Component\HttpKernel\KernelInterface;
+use Temporal\Activity;
+use Temporal\Activity\ActivityContextInterface;
+use Temporal\Activity\ActivityInfo;
 use Temporal\DataConverter\DataConverter;
+use Temporal\Exception\Client\ActivityCanceledException;
 use Temporal\Exception\ExceptionInterceptor;
 use Temporal\Interceptor\SimplePipelineProvider;
 use Temporal\Worker\Transport\RPCConnectionInterface;
-use Temporal\Worker\WorkerOptions;
+use Temporal\Worker\WorkflowPanicPolicy;
 use Temporal\WorkerFactory;
 
 /**
- * TC-04 — the initializer creates a worker per task queue and registers the workflows
- * and activities assigned to that queue.
+ * TC-04 — the initializer creates one worker per task queue from config and registers the
+ * workflows and activities assigned to that queue.
  */
-#[AllowMockObjectsWithoutExpectations]
 class TemporalWorkerInitializerTest extends BaseTestCase
 {
     private function realWorkerFactory(): WorkerFactory
     {
         return WorkerFactory::create(
             DataConverter::createDefault(),
-            $this->createMock(RPCConnectionInterface::class),
+            $this->createStub(RPCConnectionInterface::class),
         );
     }
 
-    private function defaultQueueWorker(): TemporalWorkerInterface
-    {
-        return new class implements TemporalWorkerInterface {
-            public function getTaskQueue(): string
-            {
-                return 'default';
-            }
-
-            public function getWorkerOptions(): WorkerOptions
-            {
-                return WorkerOptions::new();
-            }
-        };
-    }
-
     /**
-     * @param iterable<TemporalWorkerInterface> $workers
+     * @param array<string, array<string, mixed>> $workerOptions
      */
-    private function initializer(iterable $workers): TemporalWorkerInitializer
+    private function initializer(
+        array                      $workerOptions = [],
+        ?ServicesResetterInterface $servicesResetter = null,
+        ?LoggerInterface           $logger = null,
+        ?HubInterface              $sentryHub = null,
+    ): TemporalWorkerInitializer
     {
         return new TemporalWorkerInitializer(
-            $this->createMock(KernelInterface::class),
-            $this->createMock(ServicesResetterInterface::class),
-            $workers,
+            $this->createStub(KernelInterface::class),
+            $servicesResetter ?? $this->createStub(ServicesResetterInterface::class),
             new ExceptionInterceptor([\Error::class]),
             new SimplePipelineProvider([]),
-            null,
+            $workerOptions,
+            $logger,
+            $sentryHub,
         );
     }
 
     public function testRegistersWorkflowAndActivityForMatchingQueue(): void
     {
-        $factory = $this->realWorkerFactory();
-        $config = $this->defaultQueueWorker();
-
-        $initializer = $this->initializer([$config]);
+        $initializer = $this->initializer();
         $initializer->addWorkflow(GreetingWorkflow::class, ['default']);
         $initializer->addActivity(GreetingActivity::class, ['default']);
 
-        $result = $initializer->initialize($factory);
+        $workers = $initializer->initialize($this->realWorkerFactory());
 
-        self::assertCount(1, $result);
-        self::assertSame($config, $result[0]['config']);
-        self::assertSame('default', $result[0]['taskQueue']);
-        $worker = $result[0]['worker'];
+        self::assertSame(['default'], array_keys($workers));
 
         $workflowClasses = array_map(
-            static fn ($p) => $p->getClass()->getName(),
-            iterator_to_array($worker->getWorkflows()),
+            static fn ($prototype) => $prototype->getClass()->getName(),
+            iterator_to_array($workers['default']->getWorkflows()),
         );
         self::assertContains(GreetingWorkflow::class, $workflowClasses);
 
         $activityClasses = array_map(
-            static fn ($p) => $p->getClass()->getName(),
-            iterator_to_array($worker->getActivities()),
+            static fn ($prototype) => $prototype->getClass()->getName(),
+            iterator_to_array($workers['default']->getActivities()),
         );
         self::assertContains(GreetingActivity::class, $activityClasses);
     }
 
-    public function testWorkflowsForOtherQueuesAreNotRegistered(): void
+    public function testEachQueueGetsItsOwnWorker(): void
     {
-        $factory = $this->realWorkerFactory();
+        $initializer = $this->initializer();
+        $initializer->addWorkflow(GreetingWorkflow::class, ['billing-eu']);
 
-        $initializer = $this->initializer([$this->defaultQueueWorker()]);
-        // Assigned to a different queue — must NOT land on the default worker.
-        $initializer->addWorkflow(GreetingWorkflow::class, ['other-queue']);
+        $workers = $initializer->initialize($this->realWorkerFactory());
 
-        $result = $initializer->initialize($factory);
-
-        self::assertCount(0, iterator_to_array($result[0]['worker']->getWorkflows()));
+        self::assertSame(['default', 'billing-eu'], array_keys($workers));
+        self::assertCount(0, iterator_to_array($workers['default']->getWorkflows()));
+        self::assertCount(1, iterator_to_array($workers['billing-eu']->getWorkflows()));
     }
 
-    public function testTwoCustomWorkersForOneQueueThrow(): void
+    public function testDefaultQueueWorkerAlwaysExists(): void
     {
-        // Two custom (non-DefaultTemporalWorker) workers for the same queue is the real
-        // misconfiguration — a task queue maps to exactly one worker.
-        $this->expectException(DuplicateTemporalWorkerException::class);
-        $this->expectExceptionMessage('Task queue "default" is served by more than one worker');
+        $workers = $this->initializer()->initialize($this->realWorkerFactory());
 
-        $this->initializer([$this->defaultQueueWorker(), $this->defaultQueueWorker()])
-            ->initialize($this->realWorkerFactory());
+        self::assertSame(['default'], array_keys($workers));
     }
 
-    public function testCustomWorkerOverridesBundleDefault(): void
+    public function testConfiguredWorkerOptionsAreApplied(): void
     {
-        $custom = $this->defaultQueueWorker();
+        $initializer = $this->initializer([
+            'default' => [
+                'maxConcurrentActivityExecutionSize' => 7,
+                'workerStopTimeout'                  => '30 seconds',
+                'stickyScheduleToStartTimeout'       => 5,
+                'deadlockDetectionTimeout'           => '12',
+                'workflowPanicPolicy'                => 'FailWorkflow',
+            ],
+        ]);
 
-        // Order-independent: a custom worker always wins over the bundle-provided
-        // DefaultTemporalWorker for the same queue, and it is not a conflict.
-        foreach ([[new DefaultTemporalWorker('default'), $custom], [$custom, new DefaultTemporalWorker('default')]] as $workers) {
-            $result = $this->initializer($workers)->initialize($this->realWorkerFactory());
+        $options = $initializer->initialize($this->realWorkerFactory())['default']->getOptions();
 
-            self::assertCount(1, $result);
-            self::assertSame($custom, $result[0]['config']);
-        }
+        self::assertSame(12, $options->deadlockDetectionTimeout?->s);
+        self::assertSame(7, $options->maxConcurrentActivityExecutionSize);
+        self::assertSame(30, $options->workerStopTimeout?->s);
+        self::assertSame(5, $options->stickyScheduleToStartTimeout?->s);
+        self::assertSame(WorkflowPanicPolicy::FailWorkflow, $options->workflowPanicPolicy);
+    }
+
+    protected function tearDown(): void
+    {
+        Activity::setCurrentContext(null);
+
+        parent::tearDown();
+    }
+
+    private function enterActivityContext(int $attempt): void
+    {
+        $activityInfo = new ActivityInfo();
+        $activityInfo->type->name = 'greeting.greet';
+        $activityInfo->attempt = $attempt;
+
+        $context = $this->createStub(ActivityContextInterface::class);
+        $context->method('getInfo')->willReturn($activityInfo);
+
+        Activity::setCurrentContext($context);
+    }
+
+    public function testFirstFailedAttemptIsLoggedAndReportedToSentry(): void
+    {
+        $failure = new \RuntimeException('SMTP down');
+        $this->enterActivityContext(1);
+
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->expects(self::once())->method('error')->with('Temporal: activity failed', self::callback(
+            static fn (array $context): bool => $context['exception'] === $failure && $context['activity'] === 'greeting.greet' && $context['attempt'] === 1,
+        ));
+
+        $sentryHub = $this->createMock(HubInterface::class);
+        $sentryHub->expects(self::once())->method('captureException')->with($failure);
+
+        $this->initializer(logger: $logger, sentryHub: $sentryHub)->finalizeActivity($failure);
+    }
+
+    public function testRetriedAttemptIsLoggedButNotSentToSentryAgain(): void
+    {
+        $this->enterActivityContext(2);
+
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->expects(self::once())->method('error');
+
+        $sentryHub = $this->createMock(HubInterface::class);
+        $sentryHub->expects(self::never())->method('captureException');
+
+        $this->initializer(logger: $logger, sentryHub: $sentryHub)->finalizeActivity(new \RuntimeException('SMTP down'));
+    }
+
+    public function testFailureWithoutActivityContextIsLoggedOnly(): void
+    {
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->expects(self::once())->method('error');
+
+        $sentryHub = $this->createMock(HubInterface::class);
+        $sentryHub->expects(self::never())->method('captureException');
+
+        $this->initializer(logger: $logger, sentryHub: $sentryHub)->finalizeActivity(new \RuntimeException('activity service failed to build'));
+    }
+
+    public function testActivityCancellationIsNotReported(): void
+    {
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->expects(self::never())->method('error');
+
+        $this->initializer(logger: $logger)->finalizeActivity(new ActivityCanceledException());
+    }
+
+    public function testServicesAreResetEvenWhenReportingFails(): void
+    {
+        $servicesResetter = $this->createMock(ServicesResetterInterface::class);
+        $servicesResetter->expects(self::once())->method('reset');
+
+        $logger = $this->createStub(LoggerInterface::class);
+        $logger->method('error')->willThrowException(new \LogicException('logger broke'));
+
+        $this->expectException(\LogicException::class);
+
+        $this->initializer(servicesResetter: $servicesResetter, logger: $logger)->finalizeActivity(new \RuntimeException('failure'));
+    }
+
+    public function testSuccessfulActivityOnlyResetsServices(): void
+    {
+        $servicesResetter = $this->createMock(ServicesResetterInterface::class);
+        $servicesResetter->expects(self::once())->method('reset');
+
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->expects(self::never())->method('error');
+
+        $this->initializer(servicesResetter: $servicesResetter, logger: $logger)->finalizeActivity(null);
     }
 }

@@ -2,16 +2,23 @@
 
 namespace FluffyDiscord\RoadRunnerBundle\Temporal;
 
-use FluffyDiscord\RoadRunnerBundle\Exception\DuplicateTemporalWorkerException;
 use Psr\Log\LoggerInterface;
+use Sentry\State\HubInterface as SentryHubInterface;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
-use Symfony\Component\DependencyInjection\Attribute\AutowireIterator;
 use Symfony\Component\DependencyInjection\ServicesResetterInterface;
 use Symfony\Component\HttpKernel\KernelInterface;
+use Temporal\Activity;
+use Temporal\Activity\ActivityInfo;
+use Temporal\Exception\Client\ActivityCanceledException;
+use Temporal\Exception\Client\ActivityPausedException;
+use Temporal\Exception\Client\ActivityWorkerShutdownException;
 use Temporal\Exception\ExceptionInterceptorInterface;
+use Temporal\Exception\OutOfContextException;
 use Temporal\Interceptor\PipelineProvider;
+use Temporal\Internal\Support\DateInterval;
 use Temporal\Worker\WorkerFactoryInterface;
 use Temporal\Worker\WorkerInterface;
+use Temporal\Worker\WorkerOptions;
 
 /**
  * @internal
@@ -25,7 +32,7 @@ class TemporalWorkerInitializer
     private array $workflows = [];
 
     /**
-     * @param iterable<TemporalWorkerInterface> $workers
+     * @param array<string, array<string, mixed>> $workerOptions
      */
     public function __construct(
         private readonly KernelInterface               $kernel,
@@ -33,12 +40,11 @@ class TemporalWorkerInitializer
         #[Autowire(service: 'services_resetter')]
         private readonly ServicesResetterInterface     $servicesResetter,
 
-        #[AutowireIterator('fluffy_discord.roadrunner.temporal.worker')]
-        private readonly iterable                      $workers,
-
         private readonly ExceptionInterceptorInterface $exceptionInterceptor,
         private readonly PipelineProvider              $pipelineProvider,
+        private readonly array                         $workerOptions = [],
         private readonly ?LoggerInterface              $logger = null,
+        private readonly ?SentryHubInterface           $sentryHub = null,
     )
     {
     }
@@ -88,35 +94,49 @@ class TemporalWorkerInitializer
     }
 
     /**
-     * @return list<array{class: class-string, taskQueue: string}>
+     * @return list<string>
+     */
+    public function getTaskQueues(): array
+    {
+        $taskQueues = [
+            WorkerFactoryInterface::DEFAULT_TASK_QUEUE,
+            ...array_keys($this->workflows),
+            ...array_keys($this->activities),
+        ];
+
+        return array_values(array_unique(array_map(strval(...), $taskQueues)));
+    }
+
+    /**
+     * @return list<array{taskQueue: string, options: array<string, mixed>}>
      */
     public function getWorkerSummaries(): array
     {
         $summaries = [];
-        foreach ($this->chooseWorkers(false) as $taskQueue => $config) {
-            $summaries[] = ['class' => $config::class, 'taskQueue' => $taskQueue];
+        foreach ($this->getTaskQueues() as $taskQueue) {
+            $summaries[] = ['taskQueue' => $taskQueue, 'options' => $this->workerOptions[$taskQueue] ?? []];
         }
 
         return $summaries;
     }
 
     /**
-     * @return list<array{config: TemporalWorkerInterface, worker: WorkerInterface, taskQueue: string}>
+     * @return array<string, WorkerInterface>
      */
     public function initialize(WorkerFactoryInterface $workerFactory): array
     {
-        $temporalWorkers = [];
+        $workers = [];
 
-        foreach ($this->chooseWorkers(true) as $taskQueue => $config) {
+        foreach ($this->getTaskQueues() as $taskQueue) {
             $worker = $workerFactory->newWorker(
                 $taskQueue,
-                $config->getWorkerOptions(),
+                $this->createWorkerOptions($this->workerOptions[$taskQueue] ?? []),
                 $this->exceptionInterceptor,
                 $this->pipelineProvider,
                 $this->logger,
             );
 
-            $worker->registerActivityFinalizer(fn() => $this->servicesResetter->reset());
+            $worker->registerActivityFinalizer($this->finalizeActivity(...));
 
             foreach ($this->workflows[$taskQueue] ?? [] as $workflow) {
                 $worker->registerWorkflowTypes($workflow);
@@ -129,55 +149,104 @@ class TemporalWorkerInitializer
                 );
             }
 
-            $temporalWorkers[] = [
-                'config'    => $config,
-                'worker'    => $worker,
-                'taskQueue' => $taskQueue,
-            ];
+            $workers[$taskQueue] = $worker;
         }
 
-        return $temporalWorkers;
+        return $workers;
+    }
+
+    public function finalizeActivity(?\Throwable $failure = null): void
+    {
+        try {
+            $this->reportActivityFailure($failure);
+        } finally {
+            $this->servicesResetter->reset();
+        }
     }
 
     /**
-     * @return array<string, TemporalWorkerInterface>
+     * @param array<string, mixed> $options
      */
-    private function chooseWorkers(bool $throwOnConflict): array
+    private function createWorkerOptions(array $options): WorkerOptions
     {
-        /** @var array<string, TemporalWorkerInterface> $chosen */
-        $chosen = [];
+        $workerOptions = WorkerOptions::new();
 
-        foreach ($this->workers as $config) {
-            $taskQueue = $config->getTaskQueue();
+        foreach ($options as $propertyName => $value) {
+            $workerOptions->{$propertyName} = $this->getWorkerOptionValue($propertyName, $value);
+        }
 
-            if (!isset($chosen[$taskQueue])) {
-                $chosen[$taskQueue] = $config;
-                continue;
-            }
+        return $workerOptions;
+    }
 
-            $existing = $chosen[$taskQueue];
-            $newIsCustom = !$config instanceof DefaultTemporalWorker;
-            $existingIsCustom = !$existing instanceof DefaultTemporalWorker;
+    private function getWorkerOptionValue(string $propertyName, mixed $value): mixed
+    {
+        $type = (new \ReflectionProperty(WorkerOptions::class, $propertyName))->getType();
+        $typeName = $type instanceof \ReflectionNamedType ? $type->getName() : '';
 
-            if ($newIsCustom && $existingIsCustom) {
-                if ($throwOnConflict) {
-                    throw new DuplicateTemporalWorkerException(sprintf(
-                        'Task queue "%s" is served by more than one worker ("%s" and "%s"), but a task queue maps to exactly one worker. '
-                        . 'Register many workflows/activities on a single worker instead, or move them to separate task queues. '
-                        . 'See https://docs.temporal.io/workers#task-queue.',
-                        $taskQueue,
-                        $existing::class,
-                        $config::class,
-                    ));
-                }
-                continue;
-            }
+        if ($typeName === \DateInterval::class) {
+            $isNumericSeconds = is_numeric($value);
+            $duration = $isNumericSeconds ? (int) $value : $value;
 
-            if ($newIsCustom) {
-                $chosen[$taskQueue] = $config;
+            return DateInterval::parse($duration, DateInterval::FORMAT_SECONDS);
+        }
+
+        $isEnum = is_a($typeName, \UnitEnum::class, true);
+        if ($isEnum) {
+            return $this->getEnumCase($typeName, $value);
+        }
+
+        return $value;
+    }
+
+    /**
+     * @param class-string<\UnitEnum> $enumClass
+     */
+    private function getEnumCase(string $enumClass, mixed $caseName): \UnitEnum
+    {
+        foreach ($enumClass::cases() as $case) {
+            if ($case->name === $caseName) {
+                return $case;
             }
         }
 
-        return $chosen;
+        throw new \InvalidArgumentException(sprintf('"%s" has no case named %s.', $enumClass, json_encode($caseName, JSON_THROW_ON_ERROR)));
+    }
+
+    private function reportActivityFailure(?\Throwable $failure): void
+    {
+        if ($failure === null) {
+            return;
+        }
+
+        $isInterruption = $failure instanceof ActivityCanceledException
+            || $failure instanceof ActivityPausedException
+            || $failure instanceof ActivityWorkerShutdownException;
+        if ($isInterruption) {
+            return;
+        }
+
+        $activityInfo = $this->getCurrentActivityInfo();
+
+        $this->logger?->error('Temporal: activity failed', [
+            'exception'  => $failure,
+            'activity'   => $activityInfo?->type->name,
+            'attempt'    => $activityInfo?->attempt,
+            'workflowId' => $activityInfo?->workflowExecution?->getID(),
+            'taskQueue'  => $activityInfo?->taskQueue,
+        ]);
+
+        $isFirstAttempt = $activityInfo?->attempt === 1;
+        if ($isFirstAttempt) {
+            $this->sentryHub?->captureException($failure);
+        }
+    }
+
+    private function getCurrentActivityInfo(): ?ActivityInfo
+    {
+        try {
+            return Activity::getInfo();
+        } catch (OutOfContextException) {
+            return null;
+        }
     }
 }

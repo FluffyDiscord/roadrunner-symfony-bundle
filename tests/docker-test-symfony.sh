@@ -58,7 +58,13 @@ RUN composer config minimum-stability dev \
       "symfony/event-dispatcher:^${SYMFONY_VERSION}" \
       "symfony/expression-language:^${SYMFONY_VERSION}" \
       "symfony/mime:^${SYMFONY_VERSION}" \
- && composer update --prefer-dist --no-interaction --no-progress
+ && composer update --prefer-dist --no-interaction --no-progress \
+ && composer show --name-only 'symfony/*' \
+      | grep -vE '^symfony/(polyfill-|.*-contracts$|deprecation-contracts$)' \
+      | sed "s|\$|:^${SYMFONY_VERSION}|" \
+      | xargs composer require --dev --no-update --no-interaction \
+ && composer update --prefer-dist --no-interaction --no-progress \
+ && composer show 'symfony/*' | grep -vE '^symfony/(polyfill-|.*-contracts )'
 
 CMD ["vendor/bin/phpunit", "tests/"]
 DOCKERFILE

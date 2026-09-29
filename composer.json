@@ -68,7 +68,9 @@
         "doctrine/persistence" : "^4",
         "doctrine/orm": "^3.6",
         "symfony/form": "^8.0",
-        "symfony/var-dumper": "^7.4 || ^8"
+        "symfony/var-dumper": "^7.4 || ^8",
+        "temporal/open-telemetry-interceptors": "^1.1",
+        "monolog/monolog": "^3"
     },
     "suggest" : {
         "spiral/roadrunner-jobs" : "Enables the RoadRunner Jobs (queue consumer) worker, the raw JobsRunEvent and the typed Jobs message bus. Without it only the HTTP/Centrifugo/Temporal workers are available.",
@@ -78,6 +80,7 @@
         "symfony/serializer" : "Optional JSON-based serializer for the Jobs message-bus (interoperable payloads). The default native serializer requires no extra dependencies.",
         "roadrunner-php/symfony-lock-driver" : "Exposes RoadRunner distributed locks as a Symfony LockFactory / PersistingStoreInterface (pulls in roadrunner-php/lock + symfony/lock).",
         "doctrine/dbal" : "Enables PostgreSQL connection preconnect at worker boot (fluffy_discord_road_runner.doctrine.preconnect). The connection registry is provided by doctrine/doctrine-bundle.",
-        "symfony/var-dumper": "Names the file:line of the last dump()/dd() on the worker error page when a request dies, and shows the dump itself when no dump server is configured."
+        "symfony/var-dumper": "Names the file:line of the last dump()/dd() on the worker error page when a request dies, and shows the dump itself when no dump server is configured.",
+        "temporal/open-telemetry-interceptors": "OpenTelemetry tracing for Temporal workflows, activities and client calls, wired automatically"
     }
 }

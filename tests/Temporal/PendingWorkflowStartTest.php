@@ -2,12 +2,16 @@
 
 namespace FluffyDiscord\RoadRunnerBundle\Tests\Temporal;
 
+use FluffyDiscord\RoadRunnerBundle\Temporal\Client\PendingWorkflowStart;
 use FluffyDiscord\RoadRunnerBundle\Temporal\Client\WorkflowLauncher;
 use FluffyDiscord\RoadRunnerBundle\Tests\BaseTestCase;
 use FluffyDiscord\RoadRunnerBundle\Tests\Temporal\Fixtures\DefaultedWorkflowInterface;
 use FluffyDiscord\RoadRunnerBundle\Tests\Temporal\Fixtures\GreetingWorkflow;
 use Temporal\Client\WorkflowClientInterface;
+use Temporal\Client\WorkflowOptions;
 use Temporal\Common\IdReusePolicy;
+use Temporal\Common\SearchAttributes\SearchAttributeKey;
+use Temporal\Common\TypedSearchAttributes;
 use Temporal\Exception\Client\WorkflowExecutionAlreadyStartedException;
 use Temporal\Workflow\WorkflowRunInterface;
 
@@ -54,6 +58,50 @@ class PendingWorkflowStartTest extends BaseTestCase
         $launcher = new WorkflowLauncher($client);
 
         self::assertSame($run, $launcher->of(GreetingWorkflow::class)->id('x')->start('arg'));
+    }
+
+    private function startAndCaptureOptions(PendingWorkflowStart $pending, WorkflowClientInterface $client): WorkflowOptions
+    {
+        $capturedOptions = null;
+        $client->method('newWorkflowStub')->willReturnCallback(
+            static function (string $workflowInterface, WorkflowOptions $options) use (&$capturedOptions): object {
+                $capturedOptions = $options;
+
+                return new \stdClass();
+            },
+        );
+
+        $pending->start();
+
+        self::assertInstanceOf(WorkflowOptions::class, $capturedOptions);
+
+        return $capturedOptions;
+    }
+
+    public function testSearchAttributesAndMemoReachTheWorkflowOptions(): void
+    {
+        $client = $this->createStub(WorkflowClientInterface::class);
+        $pending = (new WorkflowLauncher($client))->of(GreetingWorkflow::class)
+            ->searchAttributes(['WebsiteId' => 'site-1'])
+            ->memo(['source' => 'catalog']);
+
+        $options = $this->startAndCaptureOptions($pending, $client);
+
+        self::assertSame(['WebsiteId' => 'site-1'], $options->searchAttributes);
+        self::assertSame(['source' => 'catalog'], $options->memo);
+    }
+
+    public function testTypedSearchAttributesReachTheWorkflowOptions(): void
+    {
+        $websiteId = SearchAttributeKey::forKeyword('WebsiteId');
+        $client = $this->createStub(WorkflowClientInterface::class);
+        $pending = (new WorkflowLauncher($client))->of(GreetingWorkflow::class)
+            ->typedSearchAttributes(TypedSearchAttributes::empty()->withValue($websiteId, 'site-1'));
+
+        $options = $this->startAndCaptureOptions($pending, $client);
+
+        self::assertSame('site-1', $options->typedSearchAttributes?->get($websiteId));
+        self::assertNull($options->searchAttributes);
     }
 
     public function testStartOrSkipReturnsNullOnAlreadyStarted(): void

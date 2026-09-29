@@ -6,6 +6,7 @@ use FluffyDiscord\RoadRunnerBundle\Tests\BaseTestCase;
 use FluffyDiscord\RoadRunnerBundle\Tests\Temporal\Live\Workflow\CounterWorkflowInterface;
 use FluffyDiscord\RoadRunnerBundle\Tests\Temporal\Live\Workflow\FailingWorkflowInterface;
 use FluffyDiscord\RoadRunnerBundle\Tests\Temporal\Live\Workflow\GreetingWorkflowInterface;
+use FluffyDiscord\RoadRunnerBundle\Tests\Temporal\Live\Workflow\ReplayWorkflowInterface;
 use PHPUnit\Framework\Attributes\Group;
 use Temporal\Client\GRPC\ServiceClient;
 use Temporal\Client\WorkflowClient;
@@ -140,6 +141,162 @@ class TemporalLiveTest extends BaseTestCase
         $this->expectException(WorkflowFailedException::class);
 
         $workflow->run();
+    }
+
+    public function testAppDefinedInterceptorRunsInWorker(): void
+    {
+        $marker = self::getEnvironmentValue('TEMPORAL_APP_INTERCEPTOR_MARKER');
+        if ($marker === null) {
+            self::markTestSkipped('TEMPORAL_APP_INTERCEPTOR_MARKER not set; cannot observe the app interceptor.');
+        }
+
+        $this->greet('App interceptor');
+
+        self::assertTrue(self::waitForFileContaining($marker, 'fired'), "App-defined interceptor never wrote the marker at {$marker}");
+    }
+
+    public function testActivityFailureIsLogged(): void
+    {
+        $channelLog = self::getEnvironmentValue('TEMPORAL_CHANNEL_LOG');
+        if ($channelLog === null) {
+            self::markTestSkipped('TEMPORAL_CHANNEL_LOG not set; cannot observe the temporal channel.');
+        }
+
+        $workflow = self::$client->newWorkflowStub(
+            FailingWorkflowInterface::class,
+            WorkflowOptions::new()
+                ->withTaskQueue(self::TASK_QUEUE)
+                ->withWorkflowExecutionTimeout(30),
+        );
+
+        try {
+            $workflow->run();
+        } catch (WorkflowFailedException) {
+        }
+
+        self::assertTrue(self::waitForFileContaining($channelLog, 'Temporal: activity failed'), "No activity failure logged in {$channelLog}");
+        self::assertStringContainsString('boom from activity', (string) file_get_contents($channelLog));
+    }
+
+    public function testWorkflowAndActivityLogLinesCarryTheTemporalContext(): void
+    {
+        $channelLog = self::getEnvironmentValue('TEMPORAL_CHANNEL_LOG');
+        if ($channelLog === null) {
+            self::markTestSkipped('TEMPORAL_CHANNEL_LOG not set; cannot observe the temporal channel.');
+        }
+
+        $workflowId = 'log-context-' . bin2hex(random_bytes(4));
+        $workflow = self::$client->newWorkflowStub(
+            FailingWorkflowInterface::class,
+            WorkflowOptions::new()
+                ->withWorkflowId($workflowId)
+                ->withTaskQueue(self::TASK_QUEUE)
+                ->withWorkflowExecutionTimeout(30),
+        );
+
+        try {
+            $workflow->run();
+        } catch (WorkflowFailedException) {
+        }
+
+        $temporalExtra = sprintf('"temporal":{"workflowType":"FailingWorkflow","workflowId":"%s"', $workflowId);
+
+        self::assertTrue(self::waitForFileContaining($channelLog, $temporalExtra), "No log line carries the temporal context of {$workflowId}");
+
+        $logLines = file($channelLog) ?: [];
+        $workflowSideLines = array_filter(
+            $logLines,
+            static fn (string $line): bool => str_contains($line, 'Temporal: executing activity') && str_contains($line, $temporalExtra),
+        );
+        $activitySideLines = array_filter(
+            $logLines,
+            static fn (string $line): bool => str_contains($line, 'Temporal: activity failed') && str_contains($line, $temporalExtra) && str_contains($line, '"activityType":"failing.boom"'),
+        );
+
+        self::assertNotEmpty($workflowSideLines, 'The workflow-side activity call line lacks the workflow context.');
+        self::assertNotEmpty($activitySideLines, 'The activity failure line lacks the activity context.');
+    }
+
+    public function testBundleClientRunsAppGrpcInterceptor(): void
+    {
+        $kernelClass = self::getEnvironmentValue('TEMPORAL_APP_KERNEL_CLASS');
+        $grpcMarker = self::getEnvironmentValue('TEMPORAL_GRPC_INTERCEPTOR_MARKER');
+        $isProvisioned = $kernelClass !== null && $grpcMarker !== null;
+        if (!$isProvisioned) {
+            self::markTestSkipped('gRPC check needs TEMPORAL_APP_KERNEL_CLASS and TEMPORAL_GRPC_INTERCEPTOR_MARKER.');
+        }
+
+        $kernel = new $kernelClass('prod', false);
+        $kernel->boot();
+        $bundleClient = $kernel->getContainer()->get(WorkflowClientInterface::class);
+
+        $workflow = $bundleClient->newWorkflowStub(
+            GreetingWorkflowInterface::class,
+            WorkflowOptions::new()
+                ->withTaskQueue(self::TASK_QUEUE)
+                ->withWorkflowExecutionTimeout(30),
+        );
+
+        self::assertSame('Hello, gRPC', $workflow->greet('gRPC'));
+        self::assertTrue(self::waitForFileContaining($grpcMarker, 'StartWorkflowExecution'), 'The app-defined gRPC interceptor never saw the bundle client\'s call.');
+
+        $kernel->shutdown();
+    }
+
+    public function testTracingLogsAnActivityCallOnceAcrossAReplay(): void
+    {
+        $channelLog = self::getEnvironmentValue('TEMPORAL_CHANNEL_LOG');
+        $replayMarker = self::getEnvironmentValue('TEMPORAL_REPLAY_MARKER');
+        $roadRunnerBinary = self::getEnvironmentValue('TEMPORAL_RR_BINARY');
+        $roadRunnerConfig = self::getEnvironmentValue('TEMPORAL_RR_CONFIG');
+        $isProvisioned = $channelLog !== null && $replayMarker !== null && $roadRunnerBinary !== null && $roadRunnerConfig !== null;
+        if (!$isProvisioned) {
+            self::markTestSkipped('Replay check needs TEMPORAL_CHANNEL_LOG, TEMPORAL_REPLAY_MARKER, TEMPORAL_RR_BINARY and TEMPORAL_RR_CONFIG.');
+        }
+
+        $workflow = self::$client->newWorkflowStub(
+            ReplayWorkflowInterface::class,
+            WorkflowOptions::new()
+                ->withTaskQueue(self::TASK_QUEUE)
+                ->withWorkflowExecutionTimeout(60),
+        );
+        $run = self::$client->start($workflow);
+
+        self::assertTrue(self::waitForFileContaining($channelLog, '"activity":"replay.touch"'), 'The tracing listener never logged the replay.touch activity call.');
+
+        exec(sprintf('%s reset -c %s 2>&1', escapeshellarg($roadRunnerBinary), escapeshellarg($roadRunnerConfig)), $resetOutput, $resetExitCode);
+        self::assertSame(0, $resetExitCode, 'rr reset failed: ' . implode("\n", $resetOutput));
+
+        $workflow->proceed();
+
+        self::assertSame('done', $run->getResult('string'));
+        self::assertTrue(self::waitForFileContaining($replayMarker, 'replaying'), 'The workflow was never replayed, so the check proves nothing.');
+
+        $activityCallLines = array_filter(
+            file($channelLog) ?: [],
+            static fn (string $line): bool => str_contains($line, 'Temporal: executing activity') && str_contains($line, '"activity":"replay.touch"'),
+        );
+        self::assertCount(1, $activityCallLines, 'The activity call was logged again while the workflow replayed.');
+    }
+
+    private static function waitForFileContaining(string $path, string $needle): bool
+    {
+        for ($attempt = 0; $attempt < 50; ++$attempt) {
+            $contents = is_file($path) ? (string) file_get_contents($path) : '';
+            if (str_contains($contents, $needle)) {
+                return true;
+            }
+            usleep(200_000);
+        }
+
+        return false;
+    }
+
+    private static function getEnvironmentValue(string $name): ?string
+    {
+        $value = $_SERVER[$name] ?? $_ENV[$name] ?? getenv($name);
+
+        return is_string($value) && $value !== '' ? $value : null;
     }
 
     private function greet(string $name): string

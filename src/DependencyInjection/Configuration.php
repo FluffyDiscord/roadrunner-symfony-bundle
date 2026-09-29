@@ -2,11 +2,18 @@
 
 namespace FluffyDiscord\RoadRunnerBundle\DependencyInjection;
 
-use FluffyDiscord\RoadRunnerBundle\Temporal\TemporalWorkerInterface;
 use Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition;
+use Symfony\Component\Config\Definition\Builder\BooleanNodeDefinition;
+use Symfony\Component\Config\Definition\Builder\EnumNodeDefinition;
+use Symfony\Component\Config\Definition\Builder\FloatNodeDefinition;
+use Symfony\Component\Config\Definition\Builder\IntegerNodeDefinition;
+use Symfony\Component\Config\Definition\Builder\NodeDefinition;
+use Symfony\Component\Config\Definition\Builder\ScalarNodeDefinition;
+use Symfony\Component\Config\Definition\Builder\StringNodeDefinition;
 use Symfony\Component\Config\Definition\Builder\TreeBuilder;
 use Symfony\Component\Config\Definition\ConfigurationInterface;
 use Temporal\Exception\ExceptionInterceptorInterface;
+use Temporal\Internal\Support\DateInterval;
 use Temporal\Worker\WorkerOptions;
 
 class Configuration implements ConfigurationInterface
@@ -191,7 +198,6 @@ class Configuration implements ConfigurationInterface
                         'before RoadRunner marks it ready. First request then performs',
                         'at steady-state latency. Runs for every worker type on every',
                         'worker boot regardless of "lazy_boot".',
-                        'See docs/specs/worker-warmup.md.',
                     ]))
                     ->children()
                         ->booleanNode("enabled")
@@ -308,32 +314,7 @@ class Configuration implements ConfigurationInterface
                                 \Error::class,
                             ])
                         ->end()
-                        ->arrayNode('default_worker_options')
-                            ->info($this->toInfo([
-                                'Shortcut to set default worker options,',
-                                'instead of creating your own class just for that. '.
-                                'Available options: '.WorkerOptions::class,
-                            ]))
-                            ->prototype('variable')->end()
-                            ->validate()
-                                ->always($this->workerOptionsValidator())
-                            ->end()
-                        ->end()
-                        ->arrayNode('worker_options')
-                            ->info($this->toInfo([
-                                'Per-task-queue worker options, keyed by task queue name.',
-                                'Applies to the workers the bundle auto-registers for queues',
-                                'declared via #[TaskQueue]. The "default" queue is covered',
-                                'by "default_worker_options" above. Available options: '.WorkerOptions::class,
-                            ]))
-                            ->useAttributeAsKey('task_queue')
-                            ->arrayPrototype()
-                                ->prototype('variable')->end()
-                                ->validate()
-                                    ->always($this->workerOptionsValidator())
-                                ->end()
-                            ->end()
-                        ->end()
+                        ->append($this->getWorkerOptionsNode())
                     ->end()
                     ->addDefaultsIfNotSet()
                 ->end()
@@ -341,42 +322,128 @@ class Configuration implements ConfigurationInterface
         ;
     }
 
-    /**
-     * @return \Closure(mixed): mixed
-     */
-    private function workerOptionsValidator(): \Closure
+    private function getWorkerOptionsNode(): ArrayNodeDefinition
     {
-        return static function ($v) {
-            if (!is_array($v)) {
-                return $v;
+        $workerOptionsNode = new ArrayNodeDefinition('worker_options');
+        $workerOptionsNode
+            ->info($this->toInfo([
+                'Temporal SDK worker options per task queue, keyed by queue name',
+                '(the name from #[TaskQueue], "default" for the default queue).',
+                'Durations take seconds or a duration string ("30 seconds").',
+                'Reference: '.WorkerOptions::class,
+            ]))
+            ->normalizeKeys(false)
+            ->useAttributeAsKey('task_queue')
+        ;
+
+        $queueNode = $workerOptionsNode->arrayPrototype();
+        $propertyNamesByOptionName = [];
+
+        foreach ((new \ReflectionClass(WorkerOptions::class))->getProperties(\ReflectionProperty::IS_PUBLIC) as $property) {
+            $type = $property->getType();
+            $hasNamedType = $type instanceof \ReflectionNamedType;
+            if (!$hasNamedType) {
+                continue;
             }
 
-            $validOptions = array_keys(get_class_vars(WorkerOptions::class));
-            foreach (array_keys($v) as $rawKey) {
-                $key = (string) $rawKey;
-                if (!in_array($key, $validOptions, true)) {
-                    throw new \InvalidArgumentException(sprintf(
-                        'Unknown worker option "%s". Available options are: %s',
-                        $key,
-                        implode(', ', $validOptions),
-                    ));
-                }
-
-                // Only scalar and \DateInterval options can be carried by the array config; the
-                // remaining properties (enums like workflowPanicPolicy, value objects) would be
-                // accepted here yet TypeError when the worker assigns them at boot.
-                $type = (new \ReflectionProperty(WorkerOptions::class, $key))->getType();
-                if (!$type instanceof \ReflectionNamedType || !in_array($type->getName(), ['int', 'float', 'bool', 'string', 'DateInterval'], true)) {
-                    throw new \InvalidArgumentException(sprintf(
-                        'Worker option "%s" cannot be set from configuration; set it via a custom %s.',
-                        $key,
-                        TemporalWorkerInterface::class,
-                    ));
-                }
+            $optionName = $this->getSnakeCaseName($property->getName());
+            $optionNode = $this->getWorkerOptionNode($optionName, $type->getName());
+            if ($optionNode === null) {
+                continue;
             }
 
-            return $v;
+            $queueNode->append($optionNode);
+            $propertyNamesByOptionName[$optionName] = $property->getName();
+        }
+
+        $queueNode
+            ->validate()
+                ->always(function (array $options) use ($propertyNamesByOptionName): array {
+                    $optionsByPropertyName = [];
+                    foreach ($options as $optionName => $value) {
+                        $optionsByPropertyName[$propertyNamesByOptionName[$optionName]] = $value;
+                    }
+
+                    return $optionsByPropertyName;
+                })
+            ->end()
+        ;
+
+        return $workerOptionsNode;
+    }
+
+    private function getWorkerOptionNode(string $optionName, string $typeName): ?NodeDefinition
+    {
+        $isEnum = is_a($typeName, \UnitEnum::class, true);
+        if ($isEnum) {
+            $caseNames = array_map(fn (\UnitEnum $case): string => $case->name, $typeName::cases());
+
+            return (new EnumNodeDefinition($optionName))->values($caseNames);
+        }
+
+        return match ($typeName) {
+            'int'          => new IntegerNodeDefinition($optionName),
+            'float'        => new FloatNodeDefinition($optionName),
+            'bool'         => new BooleanNodeDefinition($optionName),
+            'string'       => new StringNodeDefinition($optionName),
+            'DateInterval' => $this->getDurationNode($optionName),
+            default        => null,
         };
+    }
+
+    private function getDurationNode(string $optionName): ScalarNodeDefinition
+    {
+        $durationNode = new ScalarNodeDefinition($optionName);
+        $durationNode
+            ->validate()
+                ->ifTrue(fn (mixed $duration): bool => !$this->isDuration($duration))
+                ->thenInvalid('Expected seconds or a duration string such as "30 seconds", got %s.')
+            ->end()
+        ;
+
+        return $durationNode;
+    }
+
+    private function isDuration(mixed $duration): bool
+    {
+        $isSeconds = is_int($duration);
+        if ($isSeconds) {
+            return true;
+        }
+
+        $isString = is_string($duration);
+        if (!$isString) {
+            return false;
+        }
+
+        $isUnresolvedEnvValue = $duration === '';
+        $isNumericSeconds = is_numeric($duration);
+        if ($isUnresolvedEnvValue || $isNumericSeconds) {
+            return true;
+        }
+
+        $hasAmount = preg_match('/\d/', $duration) === 1;
+        if (!$hasAmount) {
+            return false;
+        }
+
+        try {
+            DateInterval::parse($duration, DateInterval::FORMAT_SECONDS);
+        } catch (\Throwable) {
+            return false;
+        }
+
+        return true;
+    }
+
+    private function getSnakeCaseName(string $camelCaseName): string
+    {
+        $snakeCaseName = preg_replace('/(?<=[a-z0-9])([A-Z])|(?<=[A-Z])([A-Z][a-z])/', '_$1$2', $camelCaseName);
+        if ($snakeCaseName === null) {
+            throw new \LogicException(sprintf('Unable to derive the configuration name of worker option "%s".', $camelCaseName));
+        }
+
+        return strtolower($snakeCaseName);
     }
 
     /** @param array<string> $lines */
