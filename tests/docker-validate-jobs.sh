@@ -88,6 +88,7 @@ cat > "$CTX/app/composer.json" <<'JSON'
     "require": {
         "php": ">=8.4",
         "fluffydiscord/roadrunner-symfony-bundle": "*",
+        "spiral/roadrunner-jobs": "^4.7",
         "symfony/framework-bundle": "^7.4 || ^8",
         "symfony/messenger": "^7.4 || ^8",
         "symfony/runtime": "^7.4 || ^8",
@@ -171,6 +172,53 @@ final class CountPingHandler
         $file = '/app/var/count-' . $message->token . '.txt';
         $count = is_file($file) ? (int) file_get_contents($file) : 0;
         file_put_contents($file, (string) ($count + 1));
+        file_put_contents('/app/var/pid-' . $message->token . '.txt', (string) getmypid());
+    }
+}
+PHP
+
+# --- Crash-once message: its first delivery throws \Error in the worker, so the worker must recycle. --
+cat > "$CTX/app/src/CrashPing.php" <<'PHP'
+<?php
+namespace App;
+
+use FluffyDiscord\RoadRunnerBundle\Job\Attribute\AsJob;
+
+#[AsJob(queue: 'default')]
+final class CrashPing
+{
+}
+PHP
+
+cat > "$CTX/app/src/CrashOnceListener.php" <<'PHP'
+<?php
+namespace App;
+
+use FluffyDiscord\RoadRunnerBundle\Event\Worker\Jobs\JobsRunEvent;
+use FluffyDiscord\RoadRunnerBundle\Job\JobEnvelope;
+use Symfony\Component\EventDispatcher\Attribute\AsEventListener;
+
+final class CrashOnceListener
+{
+    #[AsEventListener(event: JobsRunEvent::class)]
+    public function onJobsRun(JobsRunEvent $event): void
+    {
+        $messageClass = $event->getHeaders()[JobEnvelope::HEADER_CLASS][0] ?? null;
+        if ($messageClass !== CrashPing::class) {
+            return;
+        }
+
+        $crashedBefore = is_file('/app/var/crash-once.flag');
+        if ($crashedBefore) {
+            file_put_contents('/app/var/crash-redelivered.txt', getmypid() . "\n", FILE_APPEND);
+
+            return;
+        }
+
+        file_put_contents('/app/var/crash-once.flag', '1');
+        file_put_contents('/app/var/crash-pid.txt', (string) getmypid());
+
+        throw new \Error('worker state corrupted by the crashing task');
     }
 }
 PHP
@@ -248,6 +296,15 @@ class Kernel extends BaseKernel
         return new Response('dispatched count token=' . $token);
     }
 
+    public function dispatchCrash(): Response
+    {
+        /** @var JobDispatcher $dispatcher */
+        $dispatcher = $this->getContainer()->get(JobDispatcher::class);
+        $dispatcher->dispatch(new CrashPing());
+
+        return new Response('dispatched crash');
+    }
+
     protected function configureContainer(ContainerConfigurator $c): void
     {
         $c->extension('framework', [
@@ -261,6 +318,7 @@ class Kernel extends BaseKernel
         $services->set(PingHandler::class);
         $services->set(CountPingHandler::class);
         $services->set(RawTaskListener::class);
+        $services->set(CrashOnceListener::class);
     }
 
     protected function configureRoutes(RoutingConfigurator $r): void
@@ -268,6 +326,7 @@ class Kernel extends BaseKernel
         $r->add('health', '/health')->controller([self::class, 'health']);
         $r->add('dispatch', '/dispatch')->controller([self::class, 'dispatch']);
         $r->add('dispatch_count', '/dispatch-count')->controller([self::class, 'dispatchCount']);
+        $r->add('dispatch_crash', '/dispatch-crash')->controller([self::class, 'dispatchCrash']);
     }
 }
 PHP
@@ -319,7 +378,7 @@ cat > "$CTX/app/entrypoint.sh" <<'BASH'
 set -uo pipefail
 cd /app
 
-rm -f /app/var/handled.json /app/var/raw-handled.json /app/var/count-*.txt
+rm -f /app/var/handled.json /app/var/raw-handled.json /app/var/count-*.txt /app/var/pid-*.txt /app/var/crash-once.flag /app/var/crash-pid.txt /app/var/crash-redelivered.txt
 
 # The PHPUnit live tests read these: the gate, the proof dir, the HTTP base, and the RR RPC endpoint.
 export RR_JOBS_LIVE=1
