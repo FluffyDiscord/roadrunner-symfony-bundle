@@ -5,6 +5,7 @@ namespace FluffyDiscord\RoadRunnerBundle\Tests\Worker;
 use FluffyDiscord\RoadRunnerBundle\Event\Worker\WorkerRequestReceivedEvent;
 use FluffyDiscord\RoadRunnerBundle\Event\Worker\WorkerResponseSentEvent;
 use PHPUnit\Framework\Attributes\AllowMockObjectsWithoutExpectations;
+use Spiral\Goridge\Exception\HeaderException;
 use Symfony\Component\HttpFoundation\Response;
 
 #[AllowMockObjectsWithoutExpectations]
@@ -40,6 +41,27 @@ class HttpWorkerRequestLoopTest extends AbstractHttpWorkerTestCase
         ;
 
         $this->makeWorker()->start();
+    }
+
+    public function testRelayFailureEndsTheLoopWithoutAnsweringTheDeadRelay(): void
+    {
+        $callCount = 0;
+        $this->spiralHttpWorker
+            ->method('waitRequest')
+            ->willReturnCallback(function () use (&$callCount) {
+                return ++$callCount === 1 ? throw new HeaderException('Unable to read frame header: Incorrect header size') : null;
+            })
+        ;
+
+        $this->psr7Worker->expects($this->never())->method('respond');
+
+        try {
+            $this->makeWorker()->start();
+            self::fail('The relay failure must end the worker loop.');
+        } catch (HeaderException) {
+        }
+
+        self::assertSame(1, $callCount);
     }
 
     public function testServerSuperglobalNotMutatedByRequestHandling(): void

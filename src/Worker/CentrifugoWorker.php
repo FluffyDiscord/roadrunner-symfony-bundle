@@ -26,6 +26,7 @@ use RoadRunner\Centrifugo\Payload\RefreshResponse;
 use RoadRunner\Centrifugo\Payload\SubRefreshResponse;
 use RoadRunner\Centrifugo\Request;
 use Sentry\State\HubInterface as SentryHubInterface;
+use Spiral\Goridge\Exception\RelayException;
 use Spiral\RoadRunner\Environment\Mode;
 use Symfony\Component\EventDispatcher\EventDispatcherInterface;
 use Symfony\Component\HttpFoundation\Response;
@@ -285,7 +286,19 @@ class CentrifugoWorker implements WorkerInterface
 
     protected function waitRequest(): ?Request\RequestInterface
     {
-        return $this->worker->waitRequest();
+        $request = $this->worker->waitRequest();
+
+        if (!$request instanceof Request\Invalid) {
+            return $request;
+        }
+
+        $requestException = $request->getException();
+
+        if ($requestException instanceof RelayException) {
+            throw $requestException;
+        }
+
+        return $request;
     }
 
     protected function registerShutdown(callable $handler): void

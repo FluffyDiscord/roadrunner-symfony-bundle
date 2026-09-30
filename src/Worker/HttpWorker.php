@@ -20,6 +20,7 @@ use FluffyDiscord\RoadRunnerBundle\Factory\SymfonyRequestFactoryInterface;
 use FluffyDiscord\RoadRunnerBundle\Http\InformationalHeaders;
 use Nyholm\Psr7;
 use Sentry\State\HubInterface as SentryHubInterface;
+use Spiral\Goridge\Exception\RelayException;
 use Spiral\RoadRunner;
 use Symfony\Bridge\PsrHttpMessage\HttpFoundationFactoryInterface;
 use Symfony\Component\EventDispatcher\EventDispatcherInterface;
@@ -146,6 +147,8 @@ class HttpWorker implements WorkerInterface
                 if ($rrRequest === null) {
                     break;
                 }
+            } catch (RelayException $relayException) {
+                throw $relayException;
             } catch (\Throwable) {
                 $worker->respond(new Psr7\Response(Response::HTTP_I_AM_A_TEAPOT));
                 continue;
