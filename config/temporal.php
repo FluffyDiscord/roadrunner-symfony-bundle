@@ -32,6 +32,7 @@ use Spiral\RoadRunner\EnvironmentInterface;
 use Symfony\Component\EventDispatcher\EventDispatcherInterface;
 use Symfony\Component\HttpKernel\KernelInterface;
 use Temporal\Client\ClientOptions;
+use Temporal\Client\GRPC\ServiceClient;
 use Temporal\Client\GRPC\ServiceClientInterface;
 use Temporal\Client\ScheduleClient;
 use Temporal\Client\ScheduleClientInterface;
@@ -223,7 +224,7 @@ return static function (ContainerConfigurator $container): void {
     $services
         ->set(ServiceClientInterface::class)
         ->factory([
-            inline_service(ServiceClientInterface::class)
+            inline_service(ServiceClient::class)
                 ->factory([TemporalClientFactory::class, 'serviceClient'])
                 ->args([
                     param('fluffy_discord.roadrunner.temporal.address'),
