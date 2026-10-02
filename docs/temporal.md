@@ -159,16 +159,23 @@ $run = $this->launcher->of(GreetingWorkflowInterface::class)
 
 ### Temporal down
 
-**Client calls throw instead of hanging the request.** Each attempt gets `temporal.client.rpc_timeout` (5 s), at most `rpc_max_attempts` (3) attempts:
+**Calling Temporal from web requests? Set `rpc_timeout`**, so a call throws instead of pinning the worker:
 
-| Temporal | Call throws after |
-|---|---|
-| Port closed | ~1.6 s |
-| Host unreachable | ~6.5 s |
+```yaml
+fluffy_discord_road_runner:
+    temporal:
+        client:
+            rpc_timeout: 5
+```
+
+| Temporal | Default (3 attempts) | `rpc_timeout: 5` |
+|---|---|---|
+| Port closed | throws after ~1.5 s | throws after ~1.5 s |
+| Host unreachable | throws after ~21 s | throws after ~6.5 s |
 
 Worst case: `rpc_timeout × rpc_max_attempts` + ~1.5 s backoff. Workers aren't affected — RoadRunner polls Temporal itself.
 
-> `getResult()` and update results without a timeout give up after `rpc_timeout` while the workflow still runs. Waiting longer? Pass one: `$run->getResult(timeout: 300)`.
+> `rpc_timeout` also limits `getResult()` and update results: they give up after `rpc_timeout` while the workflow still runs. Waiting longer? Pass a timeout: `$run->getResult(timeout: 300)`.
 
 One slow call? `$workflowClient->withTimeout(30)` — seconds, for that client only.
 
@@ -182,7 +189,7 @@ fluffy_discord_road_runner:
         tracing: false
         retryable_errors: [\Error]
         client:
-            rpc_timeout: 5
+            rpc_timeout: null
             rpc_max_attempts: 3
         non_retryable_activity_errors: true
         worker_options:
@@ -200,7 +207,7 @@ fluffy_discord_road_runner:
 | `api_key` | `null` | Temporal Cloud API key. |
 | `tracing` | `false` | [Correlation id](#correlation-id). |
 | `retryable_errors` | `[\Error]` | Exceptions Temporal may retry. |
-| `client.rpc_timeout` | `5` | Seconds per client call attempt. See [Temporal down](#temporal-down). |
+| `client.rpc_timeout` | `null` | Seconds per client call attempt; `null` = no limit. See [Temporal down](#temporal-down). |
 | `client.rpc_max_attempts` | `3` | Attempts while Temporal is unreachable. `0` = forever. |
 | `non_retryable_activity_errors` | `true` | Activity throws a PHP `\Error` → fails, no retry. See [Activity errors](#activity-errors). |
 | `worker_options.<queue>` | — | SDK `WorkerOptions` per task queue. |

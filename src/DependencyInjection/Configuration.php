@@ -323,9 +323,10 @@ class Configuration implements ConfigurationInterface
                             ->children()
                                 ->floatNode('rpc_timeout')
                                     ->info($this->toInfo([
-                                        'Seconds one gRPC attempt may take.',
+                                        'Seconds one gRPC attempt may take. null = no limit (SDK default).',
+                                        'Set it (e.g. 5) when you call Temporal from web requests.',
                                     ]))
-                                    ->defaultValue(5.0)
+                                    ->defaultNull()
                                     ->min(0.001)
                                 ->end()
                                 ->integerNode('rpc_max_attempts')

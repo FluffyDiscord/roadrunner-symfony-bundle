@@ -30,7 +30,15 @@ class TemporalClientFactoryTest extends BaseTestCase
         $this->expectException(\InvalidArgumentException::class);
         $this->expectExceptionMessage('address must not be empty');
 
-        TemporalClientFactory::serviceClient('', null, 5.0, 3);
+        TemporalClientFactory::serviceClient('');
+    }
+
+    public function testContextWithoutTimeoutOnlyLimitsAttempts(): void
+    {
+        $context = TemporalClientFactory::createContext(null, 3);
+
+        self::assertNull($context->getDeadline());
+        self::assertSame(3, $context->getRetryOptions()->maximumAttempts);
     }
 
     public function testContextLimitsEachAttemptAndTheNumberOfAttempts(): void
@@ -50,9 +58,36 @@ class TemporalClientFactoryTest extends BaseTestCase
 
         $client = TemporalClientFactory::serviceClient('127.0.0.1:7233', 'an-api-key', 2.5, 4);
 
-        self::assertInstanceOf(ServiceClientInterface::class, TemporalClientFactory::serviceClient('127.0.0.1:7233', null, 5.0, 3));
         self::assertSame(4, $client->getContext()->getRetryOptions()->maximumAttempts);
         self::assertNotNull($client->getContext()->getDeadline());
+    }
+
+    public function testDefaultServiceClientHasNoTimeoutAndThreeAttempts(): void
+    {
+        $this->skipWithoutGrpc();
+
+        $client = TemporalClientFactory::serviceClient('127.0.0.1:7233');
+
+        self::assertInstanceOf(ServiceClientInterface::class, $client);
+        self::assertNull($client->getContext()->getDeadline());
+        self::assertSame(3, $client->getContext()->getRetryOptions()->maximumAttempts);
+    }
+
+    public function testDefaultServiceClientFailsFastWhenThePortIsClosed(): void
+    {
+        $this->skipWithoutGrpc();
+
+        $client = TemporalClientFactory::serviceClient('127.0.0.1:1');
+        $startedAt = microtime(true);
+
+        try {
+            $client->GetSystemInfo(new GetSystemInfoRequest());
+            self::fail('A call to a closed port must fail.');
+        } catch (ServiceClientException) {
+        }
+
+        $elapsedSeconds = microtime(true) - $startedAt;
+        self::assertLessThan(5.0, $elapsedSeconds, 'Three refused attempts plus ~1.5 s backoff must not take longer.');
     }
 
     public function testUnreachableTemporalFailsWithinTheLimit(): void

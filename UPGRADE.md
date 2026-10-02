@@ -4,11 +4,9 @@
 
 ### Temporal (beta)
 
-**Client calls give up when Temporal is down** — 5 s per attempt, 3 attempts — instead of hanging the request. See [Temporal down](docs/temporal.md#temporal-down).
+**Client calls stop retrying after 3 attempts** when Temporal is unavailable — they used to retry forever. Old behaviour: `temporal.client.rpc_max_attempts: 0`.
 
-- `getResult()` / update results without a timeout now throw `TimeoutException` after 5 s while the workflow still runs. Pass a timeout: `$run->getResult(timeout: 300)`.
-- Tune: `temporal.client.rpc_timeout`, `temporal.client.rpc_max_attempts` (`0` = retry forever, as before).
-- **Breaking:** `TemporalClientFactory::serviceClient()` takes `$rpcTimeoutSeconds` and `$rpcMaxAttempts`; `$apiKey` is no longer optional.
+- Calling Temporal from web requests? Set `temporal.client.rpc_timeout: 5` — see [Temporal down](docs/temporal.md#temporal-down). It also limits `getResult()` without a timeout.
 
 **A PHP `\Error` in an activity fails it for good** — no retry. See [Activity errors](docs/temporal.md#activity-errors).
 

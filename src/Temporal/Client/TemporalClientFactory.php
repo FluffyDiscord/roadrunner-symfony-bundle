@@ -13,7 +13,7 @@ final class TemporalClientFactory
     /**
      * @param int<0, max> $rpcMaxAttempts
      */
-    public static function serviceClient(string $address, ?string $apiKey, float $rpcTimeoutSeconds, int $rpcMaxAttempts): ServiceClient
+    public static function serviceClient(string $address, ?string $apiKey = null, ?float $rpcTimeoutSeconds = null, int $rpcMaxAttempts = 3): ServiceClient
     {
         if ($address === '') {
             throw new \InvalidArgumentException('Temporal frontend address must not be empty.');
@@ -31,15 +31,19 @@ final class TemporalClientFactory
     /**
      * @param int<0, max> $rpcMaxAttempts
      */
-    public static function createContext(float $rpcTimeoutSeconds, int $rpcMaxAttempts): ContextInterface
+    public static function createContext(?float $rpcTimeoutSeconds, int $rpcMaxAttempts): ContextInterface
     {
         $context = Context::default();
-        $rpcTimeoutMilliseconds = (int) round($rpcTimeoutSeconds * 1000);
         $retryOptions = $context->getRetryOptions()->withMaximumAttempts($rpcMaxAttempts);
+        $context = $context->withRetryOptions($retryOptions);
 
-        return $context
-            ->withTimeout($rpcTimeoutMilliseconds, DateInterval::FORMAT_MILLISECONDS)
-            ->withRetryOptions($retryOptions);
+        if ($rpcTimeoutSeconds === null) {
+            return $context;
+        }
+
+        $rpcTimeoutMilliseconds = (int) round($rpcTimeoutSeconds * 1000);
+
+        return $context->withTimeout($rpcTimeoutMilliseconds, DateInterval::FORMAT_MILLISECONDS);
     }
 
     public static function clientOptions(string $namespace): ClientOptions

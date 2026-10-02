@@ -96,7 +96,7 @@ class TemporalParametersTest extends BaseTestCase
         self::assertNull($container->getParameter('fluffy_discord.roadrunner.temporal.api_key'));
         self::assertSame([\Error::class], $container->getParameter('fluffy_discord.roadrunner.temporal.retryable_errors'));
         self::assertSame([], $container->getParameter('fluffy_discord.roadrunner.temporal.worker_options'));
-        self::assertSame(5.0, $container->getParameter('fluffy_discord.roadrunner.temporal.client.rpc_timeout'));
+        self::assertNull($container->getParameter('fluffy_discord.roadrunner.temporal.client.rpc_timeout'));
         self::assertSame(3, $container->getParameter('fluffy_discord.roadrunner.temporal.client.rpc_max_attempts'));
     }
 
