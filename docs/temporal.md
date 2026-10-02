@@ -56,6 +56,26 @@ class GreetingActivity
 
 Prefer an interface? Put `#[ActivityInterface]` on the interface and `#[TaskQueue]` on either.
 
+### Activity errors
+
+**A PHP `\Error` fails the activity for good** — `TypeError`, `ValueError`, arguments the SDK can't decode. No retry, whatever the stub's `retryAttempts`; the worker restarts after the job. Any other exception retries as usual.
+
+Turn it off: `temporal.non_retryable_activity_errors: false`.
+
+The failure's `getMessage()` comes back decorated by the SDK. Read the cause's `getOriginalMessage()`:
+
+```php
+use Temporal\Exception\Failure\ActivityFailure;
+use Temporal\Exception\Failure\TemporalFailure;
+
+try {
+    yield $this->greeting->greet($name);
+} catch (ActivityFailure $failure) {
+    $cause = $failure->getPrevious();   // ApplicationFailure, getType() = the original class
+    $message = $cause instanceof TemporalFailure ? $cause->getOriginalMessage() : $failure->getMessage();
+}
+```
+
 ## 3. Workflow
 
 ```php
@@ -137,6 +157,21 @@ $run = $this->launcher->of(GreetingWorkflowInterface::class)
 - `#[WorkflowDefaults]` fields: `queue`, `reusePolicy`, `conflictPolicy`, `executionTimeout`, `retryAttempts`, `retryBackoff`.
 - Need the raw SDK? Inject `Temporal\Client\WorkflowClientInterface` or `ScheduleClientInterface`.
 
+### Temporal down
+
+**Client calls throw instead of hanging the request.** Each attempt gets `temporal.client.rpc_timeout` (5 s), at most `rpc_max_attempts` (3) attempts:
+
+| Temporal | Call throws after |
+|---|---|
+| Port closed | ~1.6 s |
+| Host unreachable | ~6.5 s |
+
+Worst case: `rpc_timeout × rpc_max_attempts` + ~1.5 s backoff. Workers aren't affected — RoadRunner polls Temporal itself.
+
+> `getResult()` and update results without a timeout give up after `rpc_timeout` while the workflow still runs. Waiting longer? Pass one: `$run->getResult(timeout: 300)`.
+
+One slow call? `$workflowClient->withTimeout(30)` — seconds, for that client only.
+
 ## 5. Configuration
 
 ```yaml
@@ -144,8 +179,13 @@ fluffy_discord_road_runner:
     temporal:
         namespace: 'default'
         api_key: '%env(TEMPORAL_API_KEY)%'
-        retryable_errors: [\Error]     # exceptions Temporal may retry
-        worker_options:                # SDK WorkerOptions, per task queue
+        tracing: false
+        retryable_errors: [\Error]
+        client:
+            rpc_timeout: 5
+            rpc_max_attempts: 3
+        non_retryable_activity_errors: true
+        worker_options:
             default:
                 max_concurrent_activity_execution_size: 10
             billing:
@@ -154,7 +194,18 @@ fluffy_discord_road_runner:
                 workflow_panic_policy: FailWorkflow
 ```
 
-- Keys are the `Temporal\Worker\WorkerOptions` properties in snake_case — `bin/console config:dump-reference fluffy_discord_road_runner` lists them.
+| Option | Default | Meaning |
+|---|---|---|
+| `namespace` | `default` | Namespace of the autowired clients. |
+| `api_key` | `null` | Temporal Cloud API key. |
+| `tracing` | `false` | [Correlation id](#correlation-id). |
+| `retryable_errors` | `[\Error]` | Exceptions Temporal may retry. |
+| `client.rpc_timeout` | `5` | Seconds per client call attempt. See [Temporal down](#temporal-down). |
+| `client.rpc_max_attempts` | `3` | Attempts while Temporal is unreachable. `0` = forever. |
+| `non_retryable_activity_errors` | `true` | Activity throws a PHP `\Error` → fails, no retry. See [Activity errors](#activity-errors). |
+| `worker_options.<queue>` | — | SDK `WorkerOptions` per task queue. |
+
+- `worker_options` keys are the `Temporal\Worker\WorkerOptions` properties in snake_case — `bin/console config:dump-reference fluffy_discord_road_runner` lists them.
 - Durations take seconds or a duration string. Enums take the case name.
 
 ## 6. Observability

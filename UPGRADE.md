@@ -1,5 +1,22 @@
 # Upgrade guide
 
+## v8.1.1 → v8.1.2
+
+### Temporal (beta)
+
+**Client calls give up when Temporal is down** — 5 s per attempt, 3 attempts — instead of hanging the request. See [Temporal down](docs/temporal.md#temporal-down).
+
+- `getResult()` / update results without a timeout now throw `TimeoutException` after 5 s while the workflow still runs. Pass a timeout: `$run->getResult(timeout: 300)`.
+- Tune: `temporal.client.rpc_timeout`, `temporal.client.rpc_max_attempts` (`0` = retry forever, as before).
+- **Breaking:** `TemporalClientFactory::serviceClient()` takes `$rpcTimeoutSeconds` and `$rpcMaxAttempts`; `$apiKey` is no longer optional.
+
+**A PHP `\Error` in an activity fails it for good** — no retry. See [Activity errors](docs/temporal.md#activity-errors).
+
+- Own interceptor doing the same? Delete it.
+- Relied on retries? `temporal.non_retryable_activity_errors: false`.
+- Read failure messages with the cause's `getOriginalMessage()` — `getMessage()` is decorated by the SDK.
+- The worker now also restarts when the `\Error` is wrapped (anywhere in the `previous` chain), e.g. a `TypeError` inside the SDK's `InvalidArgumentException`.
+
 ## v8.0 → v8.1
 
 ### Temporal (beta)
