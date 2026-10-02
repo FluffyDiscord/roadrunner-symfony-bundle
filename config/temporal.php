@@ -229,6 +229,8 @@ return static function (ContainerConfigurator $container): void {
                 ->args([
                     param('fluffy_discord.roadrunner.temporal.address'),
                     param('fluffy_discord.roadrunner.temporal.api_key'),
+                    param('fluffy_discord.roadrunner.temporal.client.rpc_timeout'),
+                    param('fluffy_discord.roadrunner.temporal.client.rpc_max_attempts'),
                 ]),
             'withInterceptorPipeline',
         ])

@@ -4,8 +4,11 @@ namespace FluffyDiscord\RoadRunnerBundle\Tests\Temporal;
 
 use FluffyDiscord\RoadRunnerBundle\Temporal\Client\TemporalClientFactory;
 use FluffyDiscord\RoadRunnerBundle\Tests\BaseTestCase;
+use Temporal\Api\Workflowservice\V1\GetSystemInfoRequest;
 use Temporal\Client\ClientOptions;
 use Temporal\Client\GRPC\ServiceClientInterface;
+use Temporal\Exception\Client\ServiceClientException;
+use Temporal\Exception\Client\TimeoutException;
 
 /**
  * TC-D1..D3 — the factory that builds the autowired Temporal client dependencies.
@@ -27,16 +30,52 @@ class TemporalClientFactoryTest extends BaseTestCase
         $this->expectException(\InvalidArgumentException::class);
         $this->expectExceptionMessage('address must not be empty');
 
-        TemporalClientFactory::serviceClient('');
+        TemporalClientFactory::serviceClient('', null, 5.0, 3);
     }
 
-    public function testServiceClientIsBuilt(): void
+    public function testContextLimitsEachAttemptAndTheNumberOfAttempts(): void
+    {
+        $before = microtime(true);
+        $context = TemporalClientFactory::createContext(2.5, 4);
+        $deadline = $context->getDeadline();
+
+        self::assertNotNull($deadline);
+        self::assertEqualsWithDelta($before + 2.5, (float) $deadline->format('U.u'), 0.5);
+        self::assertSame(4, $context->getRetryOptions()->maximumAttempts);
+    }
+
+    public function testServiceClientIsBuiltWithTheLimitedContext(): void
+    {
+        $this->skipWithoutGrpc();
+
+        $client = TemporalClientFactory::serviceClient('127.0.0.1:7233', 'an-api-key', 2.5, 4);
+
+        self::assertInstanceOf(ServiceClientInterface::class, TemporalClientFactory::serviceClient('127.0.0.1:7233', null, 5.0, 3));
+        self::assertSame(4, $client->getContext()->getRetryOptions()->maximumAttempts);
+        self::assertNotNull($client->getContext()->getDeadline());
+    }
+
+    public function testUnreachableTemporalFailsWithinTheLimit(): void
+    {
+        $this->skipWithoutGrpc();
+
+        $client = TemporalClientFactory::serviceClient('127.0.0.1:1', null, 1.0, 3);
+        $startedAt = microtime(true);
+
+        try {
+            $client->GetSystemInfo(new GetSystemInfoRequest());
+            self::fail('A call to a dead address must fail.');
+        } catch (ServiceClientException|TimeoutException) {
+        }
+
+        $elapsedSeconds = microtime(true) - $startedAt;
+        self::assertLessThan(6.0, $elapsedSeconds, 'Three 1 s attempts plus ~1.5 s backoff must not take longer.');
+    }
+
+    private function skipWithoutGrpc(): void
     {
         if (!extension_loaded('grpc')) {
             self::markTestSkipped('The grpc extension is required to build a Temporal ServiceClient.');
         }
-
-        self::assertInstanceOf(ServiceClientInterface::class, TemporalClientFactory::serviceClient('127.0.0.1:7233'));
-        self::assertInstanceOf(ServiceClientInterface::class, TemporalClientFactory::serviceClient('127.0.0.1:7233', 'an-api-key'));
     }
 }

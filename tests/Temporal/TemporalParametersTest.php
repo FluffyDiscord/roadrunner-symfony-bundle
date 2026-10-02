@@ -52,6 +52,7 @@ class TemporalParametersTest extends BaseTestCase
             'namespace'              => 'my_ns',
             'api_key'                => 'secret',
             'retryable_errors'       => [\LogicException::class],
+            'client'                 => ['rpc_timeout' => 1.5, 'rpc_max_attempts' => 2],
             'worker_options'         => [
                 'default'    => ['max_concurrent_activity_execution_size' => 7],
                 'billing-eu' => ['max_concurrent_activity_execution_size' => 3, 'workflow_panic_policy' => 'FailWorkflow'],
@@ -69,6 +70,8 @@ class TemporalParametersTest extends BaseTestCase
             $container->getParameter('fluffy_discord.roadrunner.temporal.worker_options'),
         );
         self::assertSame('127.0.0.1:7233', $container->getParameter('fluffy_discord.roadrunner.temporal.address'));
+        self::assertSame(1.5, $container->getParameter('fluffy_discord.roadrunner.temporal.client.rpc_timeout'));
+        self::assertSame(2, $container->getParameter('fluffy_discord.roadrunner.temporal.client.rpc_max_attempts'));
 
         // The autowired clients must reference those parameters, not literal values — guards against a
         // dropped param() reference re-introducing the old hardcoded-then-overwritten wiring.
@@ -76,6 +79,8 @@ class TemporalParametersTest extends BaseTestCase
         self::assertInstanceOf(Definition::class, $baseServiceClient);
         self::assertSame('%fluffy_discord.roadrunner.temporal.address%', (string) $baseServiceClient->getArgument(0));
         self::assertSame('%fluffy_discord.roadrunner.temporal.api_key%', (string) $baseServiceClient->getArgument(1));
+        self::assertSame('%fluffy_discord.roadrunner.temporal.client.rpc_timeout%', (string) $baseServiceClient->getArgument(2));
+        self::assertSame('%fluffy_discord.roadrunner.temporal.client.rpc_max_attempts%', (string) $baseServiceClient->getArgument(3));
         self::assertSame('%fluffy_discord.roadrunner.temporal.namespace%', (string) $container->getDefinition(ClientOptions::class)->getArgument(0));
         self::assertSame('%fluffy_discord.roadrunner.temporal.api_key%', (string) $container->getDefinition(ServiceCredentials::class)->getArgument(0));
         self::assertSame('%fluffy_discord.roadrunner.temporal.retryable_errors%', (string) $container->getDefinition(ExceptionInterceptor::class)->getArgument(0));
@@ -90,6 +95,8 @@ class TemporalParametersTest extends BaseTestCase
         self::assertNull($container->getParameter('fluffy_discord.roadrunner.temporal.api_key'));
         self::assertSame([\Error::class], $container->getParameter('fluffy_discord.roadrunner.temporal.retryable_errors'));
         self::assertSame([], $container->getParameter('fluffy_discord.roadrunner.temporal.worker_options'));
+        self::assertSame(5.0, $container->getParameter('fluffy_discord.roadrunner.temporal.client.rpc_timeout'));
+        self::assertSame(3, $container->getParameter('fluffy_discord.roadrunner.temporal.client.rpc_max_attempts'));
     }
 
     public function testIntrospectorInterfaceAliasResolves(): void

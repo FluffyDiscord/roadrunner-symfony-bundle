@@ -314,6 +314,29 @@ class Configuration implements ConfigurationInterface
                                 \Error::class,
                             ])
                         ->end()
+                        ->arrayNode('client')
+                            ->info($this->toInfo([
+                                'Limits for calls made by the autowired clients (signal, start, describe, list…).',
+                                'Workers are not affected: RoadRunner polls Temporal itself.',
+                            ]))
+                            ->addDefaultsIfNotSet()
+                            ->children()
+                                ->floatNode('rpc_timeout')
+                                    ->info($this->toInfo([
+                                        'Seconds one gRPC attempt may take.',
+                                    ]))
+                                    ->defaultValue(5.0)
+                                    ->min(0.001)
+                                ->end()
+                                ->integerNode('rpc_max_attempts')
+                                    ->info($this->toInfo([
+                                        'Attempts per call while Temporal is unavailable. 0 = retry forever.',
+                                    ]))
+                                    ->defaultValue(3)
+                                    ->min(0)
+                                ->end()
+                            ->end()
+                        ->end()
                         ->append($this->getWorkerOptionsNode())
                     ->end()
                     ->addDefaultsIfNotSet()

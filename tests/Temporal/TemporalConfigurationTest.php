@@ -48,7 +48,30 @@ class TemporalConfigurationTest extends BaseTestCase
         self::assertSame([\Error::class], $config['temporal']['retryable_errors']);
         self::assertSame('default', $config['temporal']['namespace']);
         self::assertFalse($config['temporal']['tracing']);
+        self::assertSame(['rpc_timeout' => 5.0, 'rpc_max_attempts' => 3], $config['temporal']['client']);
         self::assertSame([], $config['temporal']['worker_options']);
+    }
+
+    public function testClientLimitsPassThrough(): void
+    {
+        $config = $this->processConfig([[
+            'temporal' => [
+                'client' => ['rpc_timeout' => 2.5, 'rpc_max_attempts' => 0],
+            ],
+        ]]);
+
+        self::assertSame(['rpc_timeout' => 2.5, 'rpc_max_attempts' => 0], $config['temporal']['client']);
+    }
+
+    public function testZeroRpcTimeoutIsRejected(): void
+    {
+        $this->expectException(InvalidConfigurationException::class);
+
+        $this->processConfig([[
+            'temporal' => [
+                'client' => ['rpc_timeout' => 0],
+            ],
+        ]]);
     }
 
     public function testApiKeyAndRetryableErrorsPassThrough(): void
