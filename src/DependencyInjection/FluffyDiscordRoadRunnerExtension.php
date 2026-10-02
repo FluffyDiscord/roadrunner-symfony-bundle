@@ -20,6 +20,7 @@ use FluffyDiscord\RoadRunnerBundle\Job\Serializer\SymfonyJobSerializer;
 use FluffyDiscord\RoadRunnerBundle\Temporal\Interceptor\Event\ActivityInbound\ActivityEvent;
 use FluffyDiscord\RoadRunnerBundle\Temporal\Interceptor\Event\WorkflowClient\StartEvent;
 use FluffyDiscord\RoadRunnerBundle\Temporal\Interceptor\Event\WorkflowOutboundCalls\ExecuteActivityEvent;
+use FluffyDiscord\RoadRunnerBundle\Temporal\Interceptor\NonRetryableErrorInterceptor;
 use FluffyDiscord\RoadRunnerBundle\Temporal\Tracing\TemporalTracingListener;
 use FluffyDiscord\RoadRunnerBundle\Warmup\ContainerPreloadWarmer;
 use FluffyDiscord\RoadRunnerBundle\Warmup\DoctrineWarmer;
@@ -124,7 +125,7 @@ class FluffyDiscordRoadRunnerExtension extends Extension implements PrependExten
         }
 
         $configuration = $this->getConfiguration([], $container);
-        /** @var array{http: array{lazy_boot: bool, request_factory: 'auto'|'native'|'psr7'}, warmup: array{enabled: bool, learn: bool, learn_requests: int, manifest_path: ?string}, centrifugo: array{lazy_boot: bool}, jobs: array{lazy_boot: bool, serializer: 'native'|'igbinary'|'symfony'|null, default_queue: non-empty-string, bus: ?string}, doctrine: array{preconnect: bool}, kv: array{auto_register: bool, serializer: ?string, keypair_path: ?string}, rr_config_path: ?string, temporal?: array{namespace?: string, tracing?: bool, api_key?: ?string, retryable_errors?: list<string>, client?: array{rpc_timeout: float, rpc_max_attempts: int<0, max>}, worker_options?: array<string, array<string, mixed>>}} $config */
+        /** @var array{http: array{lazy_boot: bool, request_factory: 'auto'|'native'|'psr7'}, warmup: array{enabled: bool, learn: bool, learn_requests: int, manifest_path: ?string}, centrifugo: array{lazy_boot: bool}, jobs: array{lazy_boot: bool, serializer: 'native'|'igbinary'|'symfony'|null, default_queue: non-empty-string, bus: ?string}, doctrine: array{preconnect: bool}, kv: array{auto_register: bool, serializer: ?string, keypair_path: ?string}, rr_config_path: ?string, temporal?: array{namespace?: string, tracing?: bool, api_key?: ?string, retryable_errors?: list<string>, client?: array{rpc_timeout: float, rpc_max_attempts: int<0, max>}, non_retryable_activity_errors?: bool, worker_options?: array<string, array<string, mixed>>}} $config */
         $config = $this->processConfiguration($configuration, $configs);
 
         if ($container->hasDefinition(HttpWorker::class)) {
@@ -175,6 +176,10 @@ class FluffyDiscordRoadRunnerExtension extends Extension implements PrependExten
 
         if (class_exists(WorkflowInterface::class) && ($config['temporal']['tracing'] ?? false) === true) {
             $this->registerTemporalTracing($container);
+        }
+
+        if (class_exists(WorkflowInterface::class) && ($config['temporal']['non_retryable_activity_errors'] ?? true) === true) {
+            $container->register(NonRetryableErrorInterceptor::class)->addTag('fluffy_discord.roadrunner.temporal.interceptor');
         }
 
         if (class_exists(\Doctrine\DBAL\Connection::class) && $config["doctrine"]["preconnect"] === true) {

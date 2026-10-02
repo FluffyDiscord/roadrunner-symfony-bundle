@@ -49,6 +49,7 @@ class TemporalConfigurationTest extends BaseTestCase
         self::assertSame('default', $config['temporal']['namespace']);
         self::assertFalse($config['temporal']['tracing']);
         self::assertSame(['rpc_timeout' => 5.0, 'rpc_max_attempts' => 3], $config['temporal']['client']);
+        self::assertTrue($config['temporal']['non_retryable_activity_errors']);
         self::assertSame([], $config['temporal']['worker_options']);
     }
 

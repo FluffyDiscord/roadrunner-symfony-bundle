@@ -160,12 +160,24 @@ class TemporalWorkerInitializer
         try {
             $this->reportActivityFailure($failure);
         } finally {
-            if ($failure instanceof \Error) {
+            $isCausedByError = $this->isCausedByError($failure);
+            if ($isCausedByError) {
                 $this->batchIsolatingHostConnection->recycleAfterBatch();
             }
 
             $this->batchIsolatingHostConnection->resetServices();
         }
+    }
+
+    private function isCausedByError(?\Throwable $failure): bool
+    {
+        for ($cause = $failure; $cause !== null; $cause = $cause->getPrevious()) {
+            if ($cause instanceof \Error) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

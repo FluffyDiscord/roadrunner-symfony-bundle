@@ -7,6 +7,7 @@ use FluffyDiscord\RoadRunnerBundle\DependencyInjection\FluffyDiscordRoadRunnerEx
 use FluffyDiscord\RoadRunnerBundle\FluffyDiscordRoadRunnerBundle;
 use FluffyDiscord\RoadRunnerBundle\Temporal\Debug\TemporalIntrospector;
 use FluffyDiscord\RoadRunnerBundle\Temporal\Debug\TemporalIntrospectorInterface;
+use FluffyDiscord\RoadRunnerBundle\Temporal\Interceptor\NonRetryableErrorInterceptor;
 use FluffyDiscord\RoadRunnerBundle\Temporal\TemporalWorkerInitializer;
 use FluffyDiscord\RoadRunnerBundle\Tests\BaseTestCase;
 use Symfony\Component\DependencyInjection\Compiler\CompilerPassInterface;
@@ -97,6 +98,20 @@ class TemporalParametersTest extends BaseTestCase
         self::assertSame([], $container->getParameter('fluffy_discord.roadrunner.temporal.worker_options'));
         self::assertSame(5.0, $container->getParameter('fluffy_discord.roadrunner.temporal.client.rpc_timeout'));
         self::assertSame(3, $container->getParameter('fluffy_discord.roadrunner.temporal.client.rpc_max_attempts'));
+    }
+
+    public function testNonRetryableErrorInterceptorJoinsThePipelineByDefault(): void
+    {
+        $container = $this->load([]);
+
+        self::assertTrue($container->getDefinition(NonRetryableErrorInterceptor::class)->hasTag('fluffy_discord.roadrunner.temporal.interceptor'));
+    }
+
+    public function testNonRetryableErrorInterceptorCanBeTurnedOff(): void
+    {
+        $container = $this->load(['non_retryable_activity_errors' => false]);
+
+        self::assertFalse($container->hasDefinition(NonRetryableErrorInterceptor::class));
     }
 
     public function testIntrospectorInterfaceAliasResolves(): void

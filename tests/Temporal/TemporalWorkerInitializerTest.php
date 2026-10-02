@@ -7,6 +7,7 @@ use FluffyDiscord\RoadRunnerBundle\Temporal\Transport\BatchIsolatingHostConnecti
 use FluffyDiscord\RoadRunnerBundle\Tests\BaseTestCase;
 use FluffyDiscord\RoadRunnerBundle\Tests\Temporal\Fixtures\GreetingActivity;
 use FluffyDiscord\RoadRunnerBundle\Tests\Temporal\Fixtures\GreetingWorkflow;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Psr\Log\LoggerInterface;
 use Sentry\State\HubInterface;
 use Symfony\Component\HttpKernel\KernelInterface;
@@ -16,6 +17,8 @@ use Temporal\Activity\ActivityInfo;
 use Temporal\DataConverter\DataConverter;
 use Temporal\Exception\Client\ActivityCanceledException;
 use Temporal\Exception\ExceptionInterceptor;
+use Temporal\Exception\Failure\ApplicationFailure;
+use Temporal\Exception\InvalidArgumentException;
 use Temporal\Interceptor\SimplePipelineProvider;
 use Temporal\Worker\Transport\RPCConnectionInterface;
 use Temporal\Worker\WorkflowPanicPolicy;
@@ -227,5 +230,26 @@ class TemporalWorkerInitializerTest extends BaseTestCase
         $batchIsolatingHostConnection->expects(self::once())->method('recycleAfterBatch');
 
         $this->initializer(batchIsolatingHostConnection: $batchIsolatingHostConnection)->finalizeActivity(new \TypeError('corrupted state'));
+    }
+
+    /**
+     * @return iterable<string, array{\Throwable}>
+     */
+    public static function wrappedErrors(): iterable
+    {
+        $typeError = new \TypeError('corrupted state');
+
+        yield 'non-retryable failure' => [new ApplicationFailure('corrupted state', \TypeError::class, true, previous: $typeError)];
+        yield 'SDK argument wrapper' => [new InvalidArgumentException('corrupted state', previous: $typeError)];
+    }
+
+    #[DataProvider('wrappedErrors')]
+    public function testWrappedActivityErrorRecyclesTheWorkerAfterThisJob(\Throwable $failure): void
+    {
+        $batchIsolatingHostConnection = $this->createMock(BatchIsolatingHostConnection::class);
+        $batchIsolatingHostConnection->expects(self::once())->method('resetServices');
+        $batchIsolatingHostConnection->expects(self::once())->method('recycleAfterBatch');
+
+        $this->initializer(batchIsolatingHostConnection: $batchIsolatingHostConnection)->finalizeActivity($failure);
     }
 }

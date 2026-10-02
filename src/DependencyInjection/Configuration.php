@@ -337,6 +337,13 @@ class Configuration implements ConfigurationInterface
                                 ->end()
                             ->end()
                         ->end()
+                        ->booleanNode('non_retryable_activity_errors')
+                            ->info($this->toInfo([
+                                'Fail an activity for good when it throws a PHP '.\Error::class.' (TypeError, ValueError…)',
+                                'or the SDK cannot pass it its arguments, instead of retrying it.',
+                            ]))
+                            ->defaultTrue()
+                        ->end()
                         ->append($this->getWorkerOptionsNode())
                     ->end()
                     ->addDefaultsIfNotSet()
