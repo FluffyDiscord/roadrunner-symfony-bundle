@@ -18,6 +18,7 @@ use FluffyDiscord\RoadRunnerBundle\Job\Serializer\JobSerializerInterface;
 use FluffyDiscord\RoadRunnerBundle\Job\Serializer\NativeJobSerializer;
 use FluffyDiscord\RoadRunnerBundle\Job\Serializer\SymfonyJobSerializer;
 use FluffyDiscord\RoadRunnerBundle\Temporal\Interceptor\Event\ActivityInbound\ActivityEvent;
+use FluffyDiscord\RoadRunnerBundle\Temporal\Interceptor\Event\WorkflowClient\SignalWithStartEvent;
 use FluffyDiscord\RoadRunnerBundle\Temporal\Interceptor\Event\WorkflowClient\StartEvent;
 use FluffyDiscord\RoadRunnerBundle\Temporal\Interceptor\Event\WorkflowOutboundCalls\ExecuteActivityEvent;
 use FluffyDiscord\RoadRunnerBundle\Temporal\Interceptor\NonRetryableErrorInterceptor;
@@ -322,6 +323,7 @@ class FluffyDiscordRoadRunnerExtension extends Extension implements PrependExten
             new Reference(SentryHubInterface::class, ContainerInterface::NULL_ON_INVALID_REFERENCE),
         ]);
         $definition->addTag('kernel.event_listener', ['event' => StartEvent::class, 'method' => 'onWorkflowStart']);
+        $definition->addTag('kernel.event_listener', ['event' => SignalWithStartEvent::class, 'method' => 'onWorkflowSignalWithStart']);
         $definition->addTag('kernel.event_listener', ['event' => ExecuteActivityEvent::class, 'method' => 'onExecuteActivity']);
         $definition->addTag('kernel.event_listener', ['event' => ActivityEvent::class, 'method' => 'onActivityInbound']);
 

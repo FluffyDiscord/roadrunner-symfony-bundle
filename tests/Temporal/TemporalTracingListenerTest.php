@@ -5,6 +5,7 @@ namespace FluffyDiscord\RoadRunnerBundle\Tests\Temporal;
 use FluffyDiscord\RoadRunnerBundle\DependencyInjection\FluffyDiscordRoadRunnerExtension;
 use FluffyDiscord\RoadRunnerBundle\Exception\TemporalAddressException;
 use FluffyDiscord\RoadRunnerBundle\Temporal\Interceptor\Event\ActivityInbound\ActivityEvent;
+use FluffyDiscord\RoadRunnerBundle\Temporal\Interceptor\Event\WorkflowClient\SignalWithStartEvent;
 use FluffyDiscord\RoadRunnerBundle\Temporal\Interceptor\Event\WorkflowClient\StartEvent;
 use FluffyDiscord\RoadRunnerBundle\Temporal\Interceptor\Event\WorkflowOutboundCalls\ExecuteActivityEvent;
 use FluffyDiscord\RoadRunnerBundle\Temporal\Tracing\TemporalTracingListener;
@@ -18,6 +19,7 @@ use Temporal\Client\WorkflowOptions;
 use Temporal\DataConverter\EncodedValues;
 use Temporal\Interceptor\ActivityInbound\ActivityInput;
 use Temporal\Interceptor\Header;
+use Temporal\Interceptor\WorkflowClient\SignalWithStartInput;
 use Temporal\Interceptor\WorkflowClient\StartInput;
 use Temporal\Interceptor\WorkflowOutboundCalls\ExecuteActivityInput;
 use Temporal\Workflow;
@@ -50,6 +52,25 @@ class TemporalTracingListenerTest extends BaseTestCase
         (new TemporalTracingListener(null, $requestStack, null))->onWorkflowStart($event);
 
         self::assertSame('req-123', $event->getInput()->header->getValue(TemporalTracingListener::CORRELATION_HEADER));
+    }
+
+    public function testPropagatesRequestIdIntoTheWorkflowStartedBySignalWithStart(): void
+    {
+        $requestStack = new RequestStack();
+        $request = new Request();
+        $request->headers->set('X-Request-Id', 'req-456');
+        $requestStack->push($request);
+
+        $event = new SignalWithStartEvent(new SignalWithStartInput(
+            $this->startEvent()->getInput(),
+            'changes',
+            EncodedValues::empty(),
+        ));
+        (new TemporalTracingListener(null, $requestStack, null))->onWorkflowSignalWithStart($event);
+
+        $header = $event->getInput()->workflowStartInput->header;
+        self::assertSame('req-456', $header->getValue(TemporalTracingListener::CORRELATION_HEADER));
+        self::assertSame('changes', $event->getInput()->signalName);
     }
 
     public function testGeneratesCorrelationWhenNoRequest(): void
@@ -138,6 +159,7 @@ class TemporalTracingListenerTest extends BaseTestCase
             $container->getDefinition(TemporalTracingListener::class)->getTag('kernel.event_listener'),
         );
         self::assertContains(StartEvent::class, $events);
+        self::assertContains(SignalWithStartEvent::class, $events);
         self::assertContains(ExecuteActivityEvent::class, $events);
         self::assertContains(ActivityEvent::class, $events);
     }

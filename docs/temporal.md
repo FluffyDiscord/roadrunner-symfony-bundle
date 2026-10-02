@@ -323,7 +323,7 @@ Namespaces: `…\Temporal\Interceptor\Event\{WorkflowClient, WorkflowInboundCall
 
 ### Correlation id
 
-`temporal.tracing: true` — propagates `X-Request-Id` to started workflows as `x-correlation-id`.
+`temporal.tracing: true` — propagates `X-Request-Id` to started workflows as `x-correlation-id`, including workflows started by `signalWithStart()`.
 
 ### Live workers
 

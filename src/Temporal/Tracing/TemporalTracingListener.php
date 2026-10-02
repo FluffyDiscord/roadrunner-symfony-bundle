@@ -3,12 +3,14 @@
 namespace FluffyDiscord\RoadRunnerBundle\Temporal\Tracing;
 
 use FluffyDiscord\RoadRunnerBundle\Temporal\Interceptor\Event\ActivityInbound\ActivityEvent;
+use FluffyDiscord\RoadRunnerBundle\Temporal\Interceptor\Event\WorkflowClient\SignalWithStartEvent;
 use FluffyDiscord\RoadRunnerBundle\Temporal\Interceptor\Event\WorkflowClient\StartEvent;
 use FluffyDiscord\RoadRunnerBundle\Temporal\Interceptor\Event\WorkflowOutboundCalls\ExecuteActivityEvent;
 use Psr\Log\LoggerInterface;
 use Sentry\Breadcrumb;
 use Sentry\State\HubInterface as SentryHubInterface;
 use Symfony\Component\HttpFoundation\RequestStack;
+use Temporal\Interceptor\WorkflowClient\StartInput;
 use Temporal\Workflow;
 
 class TemporalTracingListener
@@ -29,15 +31,47 @@ class TemporalTracingListener
         $correlationId = $this->correlationId();
 
         try {
-            $event->setInput($input->with(
-                header: $input->header->withValue(self::CORRELATION_HEADER, $correlationId),
-            ));
+            $event->setInput($this->withCorrelationHeader($input, $correlationId));
         } catch (\Throwable $throwable) {
-            $this->logger?->warning('Temporal: failed to propagate correlation id into the workflow header', [
-                'exception' => $throwable,
-            ]);
+            $this->logFailedPropagation($throwable);
         }
 
+        $this->logWorkflowStart($input, $correlationId);
+    }
+
+    public function onWorkflowSignalWithStart(SignalWithStartEvent $event): void
+    {
+        $input = $event->getInput();
+        $startInput = $input->workflowStartInput;
+        $correlationId = $this->correlationId();
+
+        try {
+            $event->setInput($input->with(
+                workflowStartInput: $this->withCorrelationHeader($startInput, $correlationId),
+            ));
+        } catch (\Throwable $throwable) {
+            $this->logFailedPropagation($throwable);
+        }
+
+        $this->logWorkflowStart($startInput, $correlationId);
+    }
+
+    private function withCorrelationHeader(StartInput $input, string $correlationId): StartInput
+    {
+        return $input->with(
+            header: $input->header->withValue(self::CORRELATION_HEADER, $correlationId),
+        );
+    }
+
+    private function logFailedPropagation(\Throwable $throwable): void
+    {
+        $this->logger?->warning('Temporal: failed to propagate correlation id into the workflow header', [
+            'exception' => $throwable,
+        ]);
+    }
+
+    private function logWorkflowStart(StartInput $input, string $correlationId): void
+    {
         $this->logger?->info('Temporal: starting workflow', [
             'workflowType'           => $input->workflowType,
             'workflowId'             => $input->workflowId,
