@@ -36,14 +36,22 @@ class DoctrinePreconnectListenerTest extends BaseTestCase
     private function registry(array $connections): ConnectionRegistry&MockObject
     {
         $registry = $this->createMock(ConnectionRegistry::class);
-        $registry->method('getConnections')->willReturn($connections);
+        $registry->method('getConnectionNames')->willReturn(array_map(
+            static fn (string $name): string => 'doctrine.dbal.' . $name . '_connection',
+            array_combine(array_keys($connections), array_keys($connections)),
+        ));
+        $registry->method('getConnection')->willReturnCallback(
+            static fn (?string $name = null): object => $connections[$name]
+                ?? throw new \InvalidArgumentException(sprintf('Doctrine Connection named "%s" does not exist.', $name)),
+        );
 
         return $registry;
     }
 
-    private function dispatch(?ConnectionRegistry $registry, ?LoggerInterface $logger): void
+    /** @param list<string>|null $connectionNames */
+    private function dispatch(?ConnectionRegistry $registry, ?LoggerInterface $logger, ?array $connectionNames = null): void
     {
-        (new DoctrinePreconnectListener($registry, $logger))->__invoke(new WorkerBootingEvent());
+        (new DoctrinePreconnectListener($registry, $logger, $connectionNames))->__invoke(new WorkerBootingEvent());
     }
 
     public function testPdoPostgresConnectionIsPreconnected(): void
@@ -89,22 +97,56 @@ class DoctrinePreconnectListenerTest extends BaseTestCase
         $this->dispatch($this->registry(['default' => $connection]), null);
     }
 
-    public function testOnlyPostgresIsPreconnectedInAMixedRegistry(): void
+    public function testEveryPostgresConnectionIsPreconnectedWhenNoNamesAreGiven(): void
     {
-        $postgres = $this->connection(['driver' => 'pdo_pgsql']);
-        $postgres->expects($this->once())->method('getNativeConnection')->willReturn(new \stdClass());
+        $default = $this->connection(['driver' => 'pdo_pgsql']);
+        $default->expects($this->once())->method('getNativeConnection')->willReturn(new \stdClass());
+
+        $messenger = $this->connection(['driver' => 'pgsql']);
+        $messenger->expects($this->once())->method('getNativeConnection')->willReturn(new \stdClass());
 
         $mysql = $this->connection(['driver' => 'pdo_mysql']);
         $mysql->expects($this->never())->method('getNativeConnection');
 
-        $sqlite = $this->connection(['driver' => 'pdo_sqlite']);
-        $sqlite->expects($this->never())->method('getNativeConnection');
+        $this->dispatch($this->registry([
+            'default'   => $default,
+            'messenger' => $messenger,
+            'legacy'    => $mysql,
+        ]), null);
+    }
+
+    public function testOnlyTheListedConnectionsArePreconnected(): void
+    {
+        $default = $this->connection(['driver' => 'pgsql']);
+        $default->expects($this->once())->method('getNativeConnection')->willReturn(new \stdClass());
+
+        $messenger = $this->connection(['driver' => 'pdo_pgsql']);
+        $messenger->expects($this->never())->method('getNativeConnection');
+
+        $audit = $this->connection(['driver' => 'pgsql']);
+        $audit->expects($this->once())->method('getNativeConnection')->willReturn(new \stdClass());
 
         $this->dispatch($this->registry([
-            'default' => $postgres,
-            'legacy'  => $mysql,
-            'cache'   => $sqlite,
-        ]), null);
+            'messenger' => $messenger,
+            'default'   => $default,
+            'audit'     => $audit,
+        ]), null, ['default', 'audit']);
+    }
+
+    public function testUnknownListedConnectionIsLoggedAndTheOthersStillPreconnect(): void
+    {
+        $default = $this->connection(['driver' => 'pgsql']);
+        $default->expects($this->once())->method('getNativeConnection')->willReturn(new \stdClass());
+
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->expects($this->once())
+            ->method('warning')
+            ->with(
+                $this->stringContains('does not exist'),
+                $this->callback(static fn (array $context): bool => ($context['connection'] ?? null) === 'typo' && ($context['known'] ?? null) === 'default'),
+            );
+
+        $this->dispatch($this->registry(['default' => $default]), $logger, ['typo', 'default']);
     }
 
     public function testMiddlewareWrappedPostgresIsStillDetected(): void
@@ -179,19 +221,5 @@ class DoctrinePreconnectListenerTest extends BaseTestCase
             'broken'  => $failing,
             'default' => $healthy,
         ]), $logger);
-    }
-
-    public function testFailureToEnumerateConnectionsIsLoggedAndSwallowed(): void
-    {
-        $registry = $this->createMock(ConnectionRegistry::class);
-        $registry->method('getConnections')->willThrowException(new \RuntimeException('container error'));
-
-        $logger = $this->createMock(LoggerInterface::class);
-        $logger->expects($this->once())
-            ->method('warning')
-            ->with($this->callback(static fn (string $message): bool =>
-                str_contains($message, 'unable to enumerate') && stripos($message, 'postgres') === false));
-
-        $this->dispatch($registry, $logger);
     }
 }

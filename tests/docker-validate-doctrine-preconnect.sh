@@ -2,7 +2,7 @@
 # Real end-to-end live validation of the Doctrine PostgreSQL boot-time preconnect.
 #
 # Builds a minimal Symfony app on top of this bundle with doctrine-bundle and TWO DBAL
-# connections — `default` (PostgreSQL) and `secondary` (sqlite) — inside a single Docker
+# connections — `default` + `secondary` (PostgreSQL), `tertiary` (sqlite) — inside a single Docker
 # container running a REAL PostgreSQL server and a REAL RoadRunner HTTP worker.
 #
 # The assertion lives in the bundle's PHPUnit live test (tests/Doctrine/Live/
@@ -13,8 +13,10 @@
 #   /db-status runs NO query, only reports each connection's isConnected() + driver. So:
 #     - default (PostgreSQL) MUST report connected=true  -> the boot-time listener opened the
 #       socket before the first request (lazy connections are otherwise closed at boot).
-#     - secondary (sqlite)   MUST report connected=false -> the listener skips non-PG drivers
-#       (it must NOT connect or warn for them).
+#     - secondary (PostgreSQL) MUST report connected=false -> `preconnect: [default, tertiary]`
+#       opens only the named connections; any other opens lazily on first use.
+#     - tertiary (sqlite)      MUST report connected=false -> named, but the listener skips
+#       non-PG drivers.
 #
 # Runs against each PHP version below — edit PHP_VERSIONS or pass one as an arg:
 #   ./tests/docker-validate-doctrine-preconnect.sh           # all versions
@@ -75,7 +77,7 @@ mkdir -p "$CTX/app/src" "$CTX/app/public"
 cp -r tests "$CTX/app/bundle-tests"
 
 # =============================================================================
-# 2. Test app — doctrine-bundle with a PostgreSQL default + sqlite secondary,
+# 2. Test app — doctrine-bundle with PostgreSQL default + secondary, sqlite tertiary,
 #    and a /db-status route that reports isConnected() without querying
 # =============================================================================
 cat > "$CTX/app/composer.json" <<'JSON'
@@ -140,11 +142,12 @@ class Kernel extends BaseKernel
                 'connections' => [
                     'default'   => ['url' => '%env(resolve:DATABASE_URL)%'],
                     'secondary' => ['url' => '%env(resolve:SECONDARY_DATABASE_URL)%'],
+                    'tertiary'  => ['url' => '%env(resolve:TERTIARY_DATABASE_URL)%'],
                 ],
             ],
         ]);
 
-        $c->extension('fluffy_discord_road_runner', ['doctrine' => ['preconnect' => true]]);
+        $c->extension('fluffy_discord_road_runner', ['doctrine' => ['preconnect' => ['default', 'tertiary']]]);
 
         $services = $c->services()->defaults()->autowire()->autoconfigure();
         $services->load('App\\', '../src/');
@@ -191,6 +194,7 @@ class DbStatusController extends AbstractController
     public function __construct(
         #[Autowire(service: 'doctrine.dbal.default_connection')] private Connection $default,
         #[Autowire(service: 'doctrine.dbal.secondary_connection')] private Connection $secondary,
+        #[Autowire(service: 'doctrine.dbal.tertiary_connection')] private Connection $tertiary,
     ) {
     }
 
@@ -201,6 +205,7 @@ class DbStatusController extends AbstractController
         return $this->json([
             'default'   => ['connected' => $this->default->isConnected(),   'driver' => $this->default->getParams()['driver'] ?? null],
             'secondary' => ['connected' => $this->secondary->isConnected(), 'driver' => $this->secondary->getParams()['driver'] ?? null],
+            'tertiary'  => ['connected' => $this->tertiary->isConnected(),  'driver' => $this->tertiary->getParams()['driver'] ?? null],
         ]);
     }
 }
@@ -229,7 +234,8 @@ server:
         APP_DEBUG: "0"
         APP_SECRET: "validation-secret"
         DATABASE_URL: "postgresql://app:app@127.0.0.1:5432/app?charset=utf8"
-        SECONDARY_DATABASE_URL: "pdo-sqlite:///:memory:"
+        SECONDARY_DATABASE_URL: "postgresql://app:app@127.0.0.1:5432/app?charset=utf8"
+        TERTIARY_DATABASE_URL: "pdo-sqlite:///:memory:"
 http:
     address: "0.0.0.0:8080"
     pool:

@@ -241,18 +241,28 @@ class Configuration implements ConfigurationInterface
                         'Will activate only when "doctrine/dbal" is installed.',
                     ]))
                     ->children()
-                        ->booleanNode("preconnect")
+                        ->variableNode("preconnect")
                             ->info($this->toInfo([
                                 'Open PostgreSQL Doctrine connections at worker boot',
                                 '(after the kernel boots, before the first request) so',
                                 'the first request skips the PostgreSQL connection',
-                                'handshake. Only PostgreSQL connections are touched;',
+                                'handshake. true = every connection, a connection name',
+                                'or a list of names = only those; the rest open lazily',
+                                'on first use. Only PostgreSQL connections are touched;',
                                 'other drivers are ignored. Requires doctrine/dbal;',
                                 'inert without it. Runs on every worker boot regardless',
                                 'of "lazy_boot". Set false to opt out (no listener is',
                                 'registered).',
                             ]))
                             ->defaultTrue()
+                            ->beforeNormalization()
+                                ->ifString()
+                                ->then(static fn (string $connectionName): array => [$connectionName])
+                            ->end()
+                            ->validate()
+                                ->ifTrue(fn (mixed $value): bool => !$this->isPreconnectValue($value))
+                                ->thenInvalid('doctrine.preconnect must be true, false, a connection name or a non-empty list of connection names, got %s.')
+                            ->end()
                         ->end()
                     ->end()
                     ->addDefaultsIfNotSet()
@@ -475,6 +485,33 @@ class Configuration implements ConfigurationInterface
         }
 
         return strtolower($snakeCaseName);
+    }
+
+    private function isPreconnectValue(mixed $value): bool
+    {
+        $isBoolean = is_bool($value);
+        if ($isBoolean) {
+            return true;
+        }
+
+        $isArray = is_array($value);
+        if (!$isArray || $value === []) {
+            return false;
+        }
+
+        $isList = array_is_list($value);
+        if (!$isList) {
+            return false;
+        }
+
+        foreach ($value as $connectionName) {
+            $isString = is_string($connectionName);
+            if (!$isString || $connectionName === '') {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /** @param array<string> $lines */

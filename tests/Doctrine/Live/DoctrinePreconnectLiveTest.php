@@ -5,10 +5,6 @@ namespace FluffyDiscord\RoadRunnerBundle\Tests\Doctrine\Live;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 
-/**
- * /db-status runs no query, so a "connected" PostgreSQL socket proves the boot-time preconnect
- * opened it before the first request; sqlite must stay unconnected.
- */
 #[Group('doctrine-preconnect-live')]
 class DoctrinePreconnectLiveTest extends TestCase
 {
@@ -19,7 +15,7 @@ class DoctrinePreconnectLiveTest extends TestCase
         }
     }
 
-    public function testPostgresIsPreconnectedAtBootButNonPostgresIsNot(): void
+    public function testOnlyTheNamedConnectionIsPreconnectedAtBoot(): void
     {
         $base = getenv('APP_BASE_URL') ?: 'http://127.0.0.1:8080';
 
@@ -35,7 +31,11 @@ class DoctrinePreconnectLiveTest extends TestCase
         self::assertStringContainsStringIgnoringCase('pgsql', (string) $data['default']['driver'], 'default must use the PostgreSQL driver');
         self::assertTrue($data['default']['connected'], 'PostgreSQL connection must be preconnected at worker boot, before the first request');
 
-        self::assertStringContainsStringIgnoringCase('sqlite', (string) $data['secondary']['driver'], 'secondary must use the sqlite driver');
-        self::assertFalse($data['secondary']['connected'], 'non-PostgreSQL connection must NOT be preconnected');
+        self::assertStringContainsStringIgnoringCase('pgsql', (string) $data['secondary']['driver'], 'secondary must use the PostgreSQL driver');
+        self::assertFalse($data['secondary']['connected'], 'connection left out of doctrine.preconnect must NOT be preconnected');
+
+        self::assertArrayHasKey('tertiary', $data);
+        self::assertStringContainsStringIgnoringCase('sqlite', (string) $data['tertiary']['driver'], 'tertiary must use the sqlite driver');
+        self::assertFalse($data['tertiary']['connected'], 'non-PostgreSQL connection must NOT be preconnected, even when named');
     }
 }

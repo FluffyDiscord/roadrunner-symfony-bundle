@@ -68,7 +68,15 @@ class Kernel extends BaseKernel
 
 #### Database connections
 
-- **PostgreSQL** — connections opened at worker boot (`doctrine.preconnect`). Native `pgsql` driver: every worker opens its own socket (no persistent-connection support). PDO driver: a `persistent` connection is additionally reused across worker spawns.
+- **PostgreSQL** — connections open at worker boot (`doctrine.preconnect`). **Name the ones workers use** — the rest open on first use instead of sitting idle in every worker:
+
+  ```yaml
+  fluffy_discord_road_runner:
+    doctrine:
+      preconnect: default    # or [default, audit]
+  ```
+
+  Native `pgsql` driver: every worker opens its own socket (no persistent-connection support). PDO driver: a `persistent` connection is additionally reused across worker spawns.
 - **MySQL / MariaDB** — preconnect skips them; listen to `WorkerRequestReceivedEvent` and reset your connections.
 
 > The ORM identity map is cleared for you (`doctrine` registry implements `ResetInterface`). The above concerns the DBAL **connection**.
@@ -118,7 +126,7 @@ fluffy_discord_road_runner:
 | `warmup.learn` | `true` | Record which classes and cache files real responses load, replay them at every later worker boot. Covers only routes visited while learning. |
 | `warmup.learn_requests` | `30` | Stop recording after this many responses per worker process. |
 | `warmup.manifest_path` | `null` | `null` = `<kernel.cache_dir>/roadrunner/warmup.manifest.json`. Point outside the cache dir to persist learning across deploys; self-invalidates when the container build id changes. |
-| `doctrine.preconnect` | `true` | Opens PostgreSQL connections at worker boot; other drivers ignored; runs on every boot regardless of `lazy_boot`. Needs `doctrine/dbal`. |
+| `doctrine.preconnect` | `true` | Opens PostgreSQL connections at worker boot. `true` = all, a name or list of names = only those, `false` = off. Other drivers ignored; runs on every boot regardless of `lazy_boot`. Needs `doctrine/dbal`. |
 | `kv.auto_register` | `true` | Registers every `kv` adapter from `.rr.yaml` as `cache.adapter.rr_kv.NAME`. |
 | `kv.serializer` | `null` | `IgbinarySerializer` when the `igbinary` extension is present, else `DefaultSerializer`. Custom: implement `Spiral\RoadRunner\KeyValue\Serializer\SerializerInterface`. |
 | `kv.keypair_path` | — | Relative path to a keypair for [end-to-end encryption](https://docs.roadrunner.dev/key-value/overview-kv#end-to-end-value-encryption). Needs `sodium`. |

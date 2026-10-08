@@ -7,6 +7,8 @@ use FluffyDiscord\RoadRunnerBundle\DependencyInjection\FluffyDiscordRoadRunnerEx
 use FluffyDiscord\RoadRunnerBundle\Doctrine\DoctrinePreconnectListener;
 use FluffyDiscord\RoadRunnerBundle\Event\Worker\WorkerBootingEvent;
 use FluffyDiscord\RoadRunnerBundle\Tests\BaseTestCase;
+use PHPUnit\Framework\Attributes\DataProvider;
+use Symfony\Component\Config\Definition\Exception\InvalidConfigurationException;
 use Symfony\Component\Config\Definition\Processor;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\ContainerInterface;
@@ -75,5 +77,44 @@ class DoctrinePreconnectWiringTest extends BaseTestCase
         $config = (new Processor())->processConfiguration(new Configuration(), []);
 
         self::assertTrue($config['doctrine']['preconnect']);
+    }
+
+    public function testTruePassesNoConnectionNamesSoEveryConnectionIsPreconnected(): void
+    {
+        $container = $this->load(['preconnect' => true]);
+
+        self::assertNull($container->getDefinition(DoctrinePreconnectListener::class)->getArgument(2));
+    }
+
+    public function testSingleConnectionNameBecomesAOneItemList(): void
+    {
+        $container = $this->load(['preconnect' => 'default']);
+
+        self::assertSame(['default'], $container->getDefinition(DoctrinePreconnectListener::class)->getArgument(2));
+    }
+
+    public function testListOfConnectionNamesIsPassedThrough(): void
+    {
+        $container = $this->load(['preconnect' => ['default', 'audit']]);
+
+        self::assertSame(['default', 'audit'], $container->getDefinition(DoctrinePreconnectListener::class)->getArgument(2));
+    }
+
+    /** @return iterable<string, array{mixed}> */
+    public static function invalidPreconnectValues(): iterable
+    {
+        yield 'empty string' => [''];
+        yield 'empty list' => [[]];
+        yield 'integer' => [1];
+        yield 'list with a non-string' => [['default', 1]];
+        yield 'map' => [['name' => 'default']];
+    }
+
+    #[DataProvider('invalidPreconnectValues')]
+    public function testInvalidPreconnectValueIsRejected(mixed $preconnect): void
+    {
+        $this->expectException(InvalidConfigurationException::class);
+
+        (new Processor())->processConfiguration(new Configuration(), [['doctrine' => ['preconnect' => $preconnect]]]);
     }
 }
