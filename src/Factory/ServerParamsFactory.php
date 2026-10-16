@@ -27,7 +27,7 @@ class ServerParamsFactory
         }
 
         foreach ($rrRequest->headers as $name => $values) {
-            $key = strtoupper(str_replace('-', '_', $name));
+            $key = strtoupper(str_replace('-', '_', (string) $name));
             $value = implode(', ', $values);
 
             $isContentHeader = $key === 'CONTENT_TYPE' || $key === 'CONTENT_LENGTH';

@@ -17,6 +17,7 @@ use Spiral\RoadRunner\Http\HttpWorker;
 use Spiral\RoadRunner\Http\HttpWorkerInterface;
 use Spiral\RoadRunner\Worker as RoadRunnerWorker;
 use Spiral\RoadRunner\WorkerInterface as RoadRunnerWorkerInterface;
+use Spiral\RoadRunner\WorkerPool;
 use Symfony\Bridge\PsrHttpMessage\HttpFoundationFactoryInterface;
 use Symfony\Component\EventDispatcher\EventDispatcherInterface;
 use Symfony\Component\HttpKernel\KernelInterface;
@@ -51,6 +52,13 @@ return static function (ContainerConfigurator $container) {
         ->factory([RPCFactory::class, "fromEnvironment"])
         ->args([
             service(EnvironmentInterface::class),
+        ])
+    ;
+
+    $services
+        ->set(WorkerPool::class)
+        ->args([
+            service(RPCInterface::class),
         ])
     ;
 

@@ -10,9 +10,6 @@ use FluffyDiscord\RoadRunnerBundle\Tests\BaseTestCase;
 use FluffyDiscord\RoadRunnerBundle\Worker\TemporalWorker;
 use FluffyDiscord\RoadRunnerBundle\Worker\WorkerRegistry;
 use Spiral\RoadRunner\Environment\Mode;
-use Symfony\Component\Config\FileLocator;
-use Symfony\Component\DependencyInjection\ContainerBuilder;
-use Symfony\Component\DependencyInjection\Loader\PhpFileLoader;
 use Temporal\Client\ScheduleClientInterface;
 use Temporal\Client\WorkflowClient;
 use Temporal\Client\WorkflowClientInterface;
@@ -27,19 +24,9 @@ use Temporal\Worker\Transport\HostConnectionInterface;
  */
 class TemporalServiceWiringTest extends BaseTestCase
 {
-    private function loadServices(): ContainerBuilder
-    {
-        $container = new ContainerBuilder();
-        $container->setParameter('kernel.debug', false);
-        $loader = new PhpFileLoader($container, new FileLocator(__DIR__ . '/../../config'));
-        $loader->load('services.php');
-
-        return $container;
-    }
-
     public function testTemporalWorkerIsRegisteredUnderTemporalMode(): void
     {
-        $container = $this->loadServices();
+        $container = $this->loadBundleServices();
 
         self::assertTrue($container->hasDefinition(TemporalWorker::class));
 
@@ -56,7 +43,7 @@ class TemporalServiceWiringTest extends BaseTestCase
 
     public function testInboundInterceptorAliasPointsToInboundImplementation(): void
     {
-        $container = $this->loadServices();
+        $container = $this->loadBundleServices();
 
         $alias = $container->getAlias(\Temporal\Interceptor\WorkflowInboundCallsInterceptor::class);
 
@@ -65,7 +52,7 @@ class TemporalServiceWiringTest extends BaseTestCase
 
     public function testOutboundInterceptorAliasPointsToOutboundImplementation(): void
     {
-        $container = $this->loadServices();
+        $container = $this->loadBundleServices();
 
         $alias = $container->getAlias(\Temporal\Interceptor\WorkflowOutboundCallsInterceptor::class);
 
@@ -74,7 +61,7 @@ class TemporalServiceWiringTest extends BaseTestCase
 
     public function testLogProcessorJoinsEveryMonologChannel(): void
     {
-        $container = $this->loadServices();
+        $container = $this->loadBundleServices();
 
         $processorTags = $container->getDefinition(TemporalLogProcessor::class)->getTag('monolog.processor');
 
@@ -83,7 +70,7 @@ class TemporalServiceWiringTest extends BaseTestCase
 
     public function testHostConnectionIsolatesEachBatch(): void
     {
-        $container = $this->loadServices();
+        $container = $this->loadBundleServices();
 
         $decoratedService = $container->getDefinition(BatchIsolatingHostConnection::class)->getDecoratedService();
 
@@ -92,7 +79,7 @@ class TemporalServiceWiringTest extends BaseTestCase
 
     public function testWorkerRegistryIsRegisteredAndPublic(): void
     {
-        $container = $this->loadServices();
+        $container = $this->loadBundleServices();
 
         self::assertTrue($container->hasDefinition(\FluffyDiscord\RoadRunnerBundle\Temporal\TemporalWorkerRegistry::class));
         self::assertTrue($container->getDefinition(\FluffyDiscord\RoadRunnerBundle\Temporal\TemporalWorkerRegistry::class)->isPublic());
@@ -100,7 +87,7 @@ class TemporalServiceWiringTest extends BaseTestCase
 
     public function testClientInterfacesAreAutowirableAndPublic(): void
     {
-        $container = $this->loadServices();
+        $container = $this->loadBundleServices();
 
         self::assertTrue($container->hasAlias(WorkflowClientInterface::class));
         self::assertTrue($container->getAlias(WorkflowClientInterface::class)->isPublic());
@@ -110,7 +97,7 @@ class TemporalServiceWiringTest extends BaseTestCase
 
     public function testWorkflowClientReusesBundleConverterAndInterceptorPipeline(): void
     {
-        $container = $this->loadServices();
+        $container = $this->loadBundleServices();
 
         // arg 2 = DataConverter, arg 3 = interceptor PipelineProvider — this is what makes
         // the client-side interceptor (and its events) fire and keeps payloads aligned with

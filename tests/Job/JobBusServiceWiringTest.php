@@ -8,9 +8,7 @@ use FluffyDiscord\RoadRunnerBundle\Job\EventListener\JobRoutingListener;
 use FluffyDiscord\RoadRunnerBundle\Job\JobDispatcher;
 use FluffyDiscord\RoadRunnerBundle\Tests\BaseTestCase;
 use Spiral\RoadRunner\Jobs\JobsInterface;
-use Symfony\Component\Config\FileLocator;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
-use Symfony\Component\DependencyInjection\Loader\PhpFileLoader;
 use Symfony\Component\DependencyInjection\Reference;
 use Symfony\Component\Messenger\MessageBusInterface;
 
@@ -21,19 +19,9 @@ use Symfony\Component\Messenger\MessageBusInterface;
  */
 class JobBusServiceWiringTest extends BaseTestCase
 {
-    private function loadServices(): ContainerBuilder
-    {
-        $container = new ContainerBuilder();
-        $container->setParameter('kernel.debug', false);
-        $loader = new PhpFileLoader($container, new FileLocator(__DIR__ . '/../../config'));
-        $loader->load('services.php');
-
-        return $container;
-    }
-
     public function testBusServicesAreRegistered(): void
     {
-        $container = $this->loadServices();
+        $container = $this->loadBundleServices();
 
         self::assertTrue($container->hasDefinition(JobsInterface::class), 'JobsInterface must stay ungated');
         self::assertTrue($container->hasDefinition(JobDispatcher::class));
@@ -43,7 +31,7 @@ class JobBusServiceWiringTest extends BaseTestCase
 
     public function testRoutingListenerDispatchesIntoDefaultBus(): void
     {
-        $container = $this->loadServices();
+        $container = $this->loadBundleServices();
 
         $arg0 = $container->getDefinition(JobRoutingListener::class)->getArgument(0);
 
@@ -53,7 +41,7 @@ class JobBusServiceWiringTest extends BaseTestCase
 
     public function testRoutingListenerIsTaggedOnJobsRunEvent(): void
     {
-        $container = $this->loadServices();
+        $container = $this->loadBundleServices();
 
         $tags = $container->getDefinition(JobRoutingListener::class)->getTag('kernel.event_listener');
 

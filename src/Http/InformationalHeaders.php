@@ -4,6 +4,8 @@ namespace FluffyDiscord\RoadRunnerBundle\Http;
 
 class InformationalHeaders
 {
+    private const int FIRST_CALENDAR_VERSION_MAJOR = 2023;
+
     /** @var array<string, array<string>> */
     private static array $sentHeaders = [];
 
@@ -43,6 +45,12 @@ class InformationalHeaders
      */
     public static function rememberSentHeaders(array $headers): void
     {
+        $roadRunnerKeepsInformationalHeaders = self::doesRoadRunnerKeepInformationalHeaders();
+
+        if (!$roadRunnerKeepsInformationalHeaders) {
+            return;
+        }
+
         foreach ($headers as $name => $values) {
             $normalizedName = strtolower((string)$name);
             $alreadySentValues = self::$sentHeaders[$normalizedName] ?? [];
@@ -75,5 +83,18 @@ class InformationalHeaders
     public static function getSentHeaderNames(): array
     {
         return array_keys(self::$sentHeaders);
+    }
+
+    private static function doesRoadRunnerKeepInformationalHeaders(): bool
+    {
+        $roadRunnerVersion = (string) getenv('RR_VERSION');
+        $majorVersion = (int) $roadRunnerVersion;
+        $isVersionUnknown = $majorVersion === 0;
+
+        if ($isVersionUnknown) {
+            return true;
+        }
+
+        return $majorVersion >= self::FIRST_CALENDAR_VERSION_MAJOR;
     }
 }

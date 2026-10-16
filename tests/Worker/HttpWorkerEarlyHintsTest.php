@@ -4,6 +4,7 @@ namespace FluffyDiscord\RoadRunnerBundle\Tests\Worker;
 
 use FluffyDiscord\RoadRunnerBundle\Worker\HttpWorker;
 use PHPUnit\Framework\Attributes\AllowMockObjectsWithoutExpectations;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Component\HttpFoundation\Response;
 
 #[AllowMockObjectsWithoutExpectations]
@@ -204,8 +205,20 @@ class HttpWorkerEarlyHintsTest extends AbstractHttpWorkerTestCase
         $this->assertSame(500, $respondCalls[1][0]); // rescue final response after the fatal
     }
 
-    public function testHeadersAlreadySentAsEarlyHintsAreNotRepeatedInFinalResponse(): void
+    /**
+     * @return iterable<string, array{string, bool}>
+     */
+    public static function roadRunnerVersionProvider(): iterable
     {
+        yield 'v2025 carries 103 headers into the final response' => ['2025.1.15', false];
+        yield 'v3 drops 103 headers from the final response' => ['3.0.0', true];
+        yield 'unknown version keeps the v2025 behavior' => ['local', false];
+    }
+
+    #[DataProvider('roadRunnerVersionProvider')]
+    public function testFinalResponseRepeatsEarlyHintHeadersOnlyWhenRoadRunnerDropsThem(string $roadRunnerVersion, bool $expectRepeated): void
+    {
+        putenv('RR_VERSION=' . $roadRunnerVersion);
         $respondCalls = [];
         $this->spiralHttpWorker->method('respond')
             ->willReturnCallback(function () use (&$respondCalls): void {
@@ -228,9 +241,9 @@ class HttpWorkerEarlyHintsTest extends AbstractHttpWorkerTestCase
         $finalHeaders = $respondCalls[1][2];
 
         $this->assertArrayHasKey('Link', $informationalHeaders);
-        $this->assertArrayNotHasKey('link', $finalHeaders);
-        $this->assertArrayNotHasKey('date', $finalHeaders);
-        $this->assertArrayNotHasKey('cache-control', $finalHeaders);
+        $this->assertSame($expectRepeated, isset($finalHeaders['link']));
+        $this->assertSame($expectRepeated, isset($finalHeaders['date']));
+        $this->assertSame($expectRepeated, isset($finalHeaders['cache-control']));
     }
 
     public function testHeaderChangedAfterEarlyHintsIsStillSentInFinalResponse(): void

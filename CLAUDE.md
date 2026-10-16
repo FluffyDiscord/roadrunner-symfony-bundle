@@ -58,9 +58,11 @@ php vendor/bin/phpunit tests
   env var posing as a request header) cannot reach the request. The `$_SERVER` superglobal itself is
   left at its boot-time state — read request data off the `Request`.
 - `src/Http/InformationalHeaders.php` — tracks the header values already emitted in `1xx` (Early
-  Hints) frames so they are not repeated in the final response. RoadRunner's Go handler `Add`s
+  Hints) frames so they are not repeated in the final response. RoadRunner v2025's Go handler `Add`s
   worker headers and keeps `1xx` headers per RFC 8297, so re-sending the bag duplicates them on the
-  wire. Statics are forced here: the `headers_send()` polyfill is a global function with no DI
+  wire. RoadRunner v3 restores the header map after a `1xx`, so on v3 (`RR_VERSION` major below 2023)
+  nothing is remembered and the final response carries every header. Statics are forced here: the
+  `headers_send()` polyfill is a global function with no DI
   access (same constraint as `HttpWorker::$currentHttpWorker`). Live-tested by
   `tests/docker-validate-early-hints.sh`.
 - `src/ErrorHandler/MinimalErrorPage.php` — dependency-free fallback error page.

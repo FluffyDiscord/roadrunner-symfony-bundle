@@ -22,7 +22,7 @@
         "symfony/expression-language" : "^7.4 || ^8",
         "spiral/roadrunner-worker" : "^v3",
         "spiral/roadrunner-http" : "^v4",
-        "spiral/roadrunner-cli" : "^v2"
+        "spiral/roadrunner-cli" : "^v2 || ^3"
     },
     "minimum-stability" : "dev",
     "prefer-stable" : true,

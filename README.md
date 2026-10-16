@@ -2,12 +2,13 @@
 
 Yet another runtime for Symfony and [RoadRunner](https://roadrunner.dev/).
 
-DDEV users: see [DDEV add-on](#ddev-add-on).
+DDEV users: see [DDEV add-on](#ddev-add-on). RoadRunner v3 users: see [RoadRunner v3](#roadrunner-v3).
 
 ## Features
 
 - [HTTP worker](#usage) — service reset runs *after* the response, off the request path
 - [Worker warmup](#worker-warmup) — zero-config; first request at steady-state speed
+- [Worker scaling](#worker-scaling) — add and remove workers from PHP
 - [Streaming](#responsefile-streaming) — `StreamedResponse`, `StreamedJsonResponse`, `BinaryFileResponse`
 - [Early Hints (103)](#early-hints-103)
 - [Graceful error handling](#error-handling) — real HTTP responses for `die()`/`exit()`/fatals
@@ -24,6 +25,35 @@ DDEV users: see [DDEV add-on](#ddev-add-on).
 ```shell
 composer require fluffydiscord/roadrunner-symfony-bundle
 ```
+
+## RoadRunner v3
+
+**Composer installs v2025 unless you ask for v3** — it ranks `2025.1.x` above `3.0.0`.
+
+1. `composer.json` — Composer blocks `3.0.0` over a false-positive advisory: its range `<2025.1.0` also matches 3.x ([upstream issue](https://github.com/roadrunner-server/roadrunner/issues/2422)). Ignore it:
+
+```diff
+ "config": {
++    "audit": {
++        "ignore": {
++            "GHSA-g9pc-8g42-g6vq": "False positive: the range < 2025.1.0 also matches RoadRunner 3.x"
++        }
++    },
+     "allow-plugins": {
+```
+
+2. Switch the RoadRunner packages to v3:
+
+```shell
+composer require --no-update spiral/roadrunner:^3
+composer update "spiral/*" "roadrunner-php/*" -W
+```
+
+3. `.rr.yaml` — follow the [v3 upgrade guide](https://github.com/roadrunner-server/docs/blob/release/v3/intro/v3-migration.md) (e.g. `http.middleware` now runs left to right).
+
+Not covered:
+
+- Temporal — `temporal/sdk` doesn't support v3 yet. Stay on v2025.
 
 ## Usage
 
@@ -163,8 +193,13 @@ Use `private_ranges` instead of `REMOTE_ADDR` as [trusted proxy](https://symfony
 
 `sendEarlyHints()` works out of the box via a `headers_send()` polyfill. See [Symfony docs](https://symfony.com/doc/current/web_link.html#early-hints).
 
-- Headers already emitted in a `103` frame are not repeated in the final response.
-- The RR protocol can only *add* headers — no `header_remove()` equivalent. A header whose **value changes** after the `103` reaches the client with both values. Send hints on the response you return: `sendEarlyHints($links, $response)`.
+| | RR v2025 | RR v3 |
+|---|---|---|
+| Header value changed after the `103` | client gets both values | client gets the new value |
+
+On v2025:
+
+- The RR protocol can only *add* headers — no `header_remove()` equivalent. Send hints on the response you return: `sendEarlyHints($links, $response)`.
 - With `kernel.debug` on, the worker writes a STDERR line naming any affected header.
 
 ## Error handling
@@ -495,6 +530,30 @@ Suggested, not required. Sidesteps upstream Symfony bug: [symfony/symfony#65447]
 
 - Dev only (`APP_DEBUG=1`); prod and any warm cache are unaffected.
 - Concurrent cold-cache boots corrupt `<Container>Deprecations.log` → workers die at boot and respawn, requests hang instead of erroring.
+
+## Worker scaling
+
+**Autoscaling is `.rr.yaml` only** — set `pool.dynamic_allocator`, see [auto scaling](https://docs.roadrunner.dev/docs/php-worker/auto-scaling).
+
+To scale from PHP, autowire `WorkerPool`. Pass the plugin name:
+
+```php
+use Spiral\RoadRunner\WorkerPool;
+
+public function __construct(private WorkerPool $workerPool) {}
+
+public function scaleUp(): void
+{
+    $this->workerPool->addWorker('http');
+}
+
+public function scaleDown(): void
+{
+    $this->workerPool->removeWorker('http');
+}
+```
+
+`countWorkers('http')` and `getWorkers('http')` report the pool.
 
 ## Distributed locks
 
