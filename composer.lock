@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "4c4cc11128937efd8a7b350baa1bca7a",
+    "content-hash": "6780a7a0034134e2764a4bcc869fc657",
     "packages": [
         {
             "name": "composer/semver",
@@ -968,16 +968,16 @@
         },
         {
             "name": "spiral/roadrunner",
-            "version": "v2025.1.14",
+            "version": "v2025.1.15",
             "source": {
                 "type": "git",
                 "url": "https://github.com/roadrunner-server/roadrunner.git",
-                "reference": "3853ad693522e82d53d62950e5f1315402c910f2"
+                "reference": "321b817fab1056e404533ca1ddd200e77d1525fd"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/roadrunner-server/roadrunner/zipball/3853ad693522e82d53d62950e5f1315402c910f2",
-                "reference": "3853ad693522e82d53d62950e5f1315402c910f2",
+                "url": "https://api.github.com/repos/roadrunner-server/roadrunner/zipball/321b817fab1056e404533ca1ddd200e77d1525fd",
+                "reference": "321b817fab1056e404533ca1ddd200e77d1525fd",
                 "shasum": ""
             },
             "type": "metapackage",
@@ -1005,7 +1005,7 @@
                 "chat": "https://discord.gg/V6EK4he",
                 "docs": "https://docs.roadrunner.dev/",
                 "issues": "https://github.com/roadrunner-server/roadrunner/issues",
-                "source": "https://github.com/roadrunner-server/roadrunner/tree/v2025.1.14"
+                "source": "https://github.com/roadrunner-server/roadrunner/tree/v2025.1.15"
             },
             "funding": [
                 {
@@ -1013,7 +1013,7 @@
                     "type": "github"
                 }
             ],
-            "time": "2026-05-15T13:20:01+00:00"
+            "time": "2026-06-17T14:49:38+00:00"
         },
         {
             "name": "spiral/roadrunner-cli",
